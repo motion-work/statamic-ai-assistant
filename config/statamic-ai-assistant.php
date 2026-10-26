@@ -316,7 +316,7 @@ return [
     |
     */
 
-    'agent_settings_nav' => env('STATAMIC_AI_ASSISTANT_AGENT_SETTINGS_NAV', env('STATAMIC_AI_ASSISTANT_BOLD_AGENT_SETTINGS_NAV', true)),
+    'agent_settings_nav' => env('STATAMIC_AI_ASSISTANT_AGENT_SETTINGS_NAV', true),
 
     /*
     | AI agent — queued batch generation (after planner)
@@ -370,7 +370,7 @@ return [
     | batches (capped at 500 to avoid runaway API use).
     |
     */
-    'agent_max_plan_entries' => max(1, min(500, (int) env('STATAMIC_AI_ASSISTANT_AGENT_MAX_PLAN_ENTRIES', env('STATAMIC_AI_ASSISTANT_BOLD_AGENT_MAX_PLAN_ENTRIES', 100)))),
+    'agent_max_plan_entries' => max(1, min(500, (int) env('STATAMIC_AI_ASSISTANT_AGENT_MAX_PLAN_ENTRIES', 100))),
 
     /*
     |--------------------------------------------------------------------------

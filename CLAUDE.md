@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`motion-work/statamic-ai-assistant` — a Statamic **6.5+** Control Panel addon (`3.x` line; Statamic 5 is only supported by upstream `bold-web` `1.x`). It provides AI text fieldtypes, Bard AI buttons, DeepL translations (field, entry, bulk, navigation), a DeepL glossary/style-rules editor, and the **AI agent** (queued multi-entry content generation). See `CHANGELOG.md` for 2.x → 3.0 breaking changes.
+`motion-work/statamic-ai-assistant` — a Statamic **6.5+** Control Panel addon (`3.x` line; Statamic 5 is not supported). It provides AI text fieldtypes, Bard AI buttons, DeepL translations (field, entry, bulk, navigation), a DeepL glossary/style-rules editor, and the **AI agent** (queued multi-entry content generation). See `CHANGELOG.md` for 2.x → 3.0 breaking changes.
 
 ## Commands
 

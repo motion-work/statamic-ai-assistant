@@ -2,23 +2,6 @@
 
 All notable changes to **motion-work/statamic-ai-assistant** are documented here.
 
-## Unreleased — Motion Work rebrand
-
-Rebranded from [`bold-web/statamic-ai-assistant`](https://github.com/boldwebdev/statamic-ai-assistant) (3.0.0). There are no functional changes.
-
-### Breaking / migration
-
-- **Composer package:** `bold-web/statamic-ai-assistant` → `motion-work/statamic-ai-assistant`.
-- **PHP namespace:** `BoldWeb\StatamicAiAssistant\` → `MotionWork\StatamicAiAssistant\`.
-- **Feature name:** "BOLD agent" → "AI agent" (CP UI and translations; DE "KI-Agent", FR "Agent IA").
-- **Config keys:** `bold_agent_settings_nav`, `bold_agent_max_plan_entries`, `bold_agent_asset_listing_cap`, `bold_agent_catalog_entries_shortlist` → `agent_*`. Republish config with `--force`.
-- **Env vars:** `STATAMIC_AI_ASSISTANT_BOLD_AGENT_*` → `STATAMIC_AI_ASSISTANT_AGENT_*` (the old names are still read as fallbacks).
-- **Fetched images folder default:** `bold-agent-fetched` → `ai-agent-fetched` (set `STATAMIC_AI_ASSISTANT_IMAGE_FETCH_FOLDER=bold-agent-fetched` to keep the old one).
-- **CSS hooks:** `.bold-ai-statamic-assistant` → `.ai-statamic-assistant` and `.ai-bold-wrapper` → `.ai-assistant-wrapper`, which matters if you override styles.
-- Republish assets with `php artisan vendor:publish --tag=statamic-ai-assistant --force`.
-
----
-
 ## 3.0.0 — 2026-07-06
 
 Major release with CP, DeepL, and AI agent changes. **Review the upgrade steps below before updating from 2.x.**
@@ -43,7 +26,7 @@ Major release with CP, DeepL, and AI agent changes. **Review the upgrade steps b
 
 ### Breaking / upgrade required
 
-1. **Composer constraint:** require `bold-web/statamic-ai-assistant:^3.0`.
+1. **Composer constraint:** require `motion-work/statamic-ai-assistant:^3.0`.
 2. **Republish config** (existing files are not overwritten by default):
 
    ```bash
@@ -54,7 +37,7 @@ Major release with CP, DeepL, and AI agent changes. **Review the upgrade steps b
 
    - `enable_agent_for_editors` ← `ENABLE_AGENT_FOR_EDITORS` (default `true`)
    - `translation_glossary_path`, `translation_style_rules_path`
-   - `prefer_glossary_over_style`, `editor_limit_entries`, `bold_agent_settings_nav`
+   - `prefer_glossary_over_style`, `editor_limit_entries`, `agent_settings_nav`
 
 3. **Republish assets:**
 

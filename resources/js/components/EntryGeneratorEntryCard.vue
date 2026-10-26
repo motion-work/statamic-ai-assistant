@@ -187,7 +187,7 @@
 <script>
 import EntryGeneratorContentPreview from './EntryGeneratorContentPreview.vue';
 import { state as entryGenState, STATUS } from '../store/entryGeneratorStore.js';
-import { formatChatTextWithBoldUrls } from '../formatChatUrls.js';
+import { formatChatTextWithStrongUrls } from '../formatChatUrls.js';
 
 export default {
   name: 'EntryGeneratorEntryCard',
@@ -293,7 +293,7 @@ export default {
 
   methods: {
     chatHtml(text) {
-      return formatChatTextWithBoldUrls(text);
+      return formatChatTextWithStrongUrls(text);
     },
 
     toggleExpand() {

@@ -421,7 +421,7 @@ import {
   setI18n,
   setToaster,
 } from '../store/entryGeneratorStore.js';
-import { formatChatTextWithBoldUrls } from '../formatChatUrls.js';
+import { formatChatTextWithStrongUrls } from '../formatChatUrls.js';
 
 export default {
   name: 'EntryGeneratorPage',
@@ -627,7 +627,7 @@ export default {
 
   methods: {
     chatHtml(text) {
-      return formatChatTextWithBoldUrls(text);
+      return formatChatTextWithStrongUrls(text);
     },
 
     async initializePage() {

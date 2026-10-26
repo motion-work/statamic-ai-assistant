@@ -21,7 +21,7 @@ function trimUrlTrailingPunct(raw) {
  * @param {string|null|undefined} text
  * @returns {string}
  */
-export function formatChatTextWithBoldUrls(text) {
+export function formatChatTextWithStrongUrls(text) {
   if (text == null) return '';
   const s = String(text);
   if (!s) return '';

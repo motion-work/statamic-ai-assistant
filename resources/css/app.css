@@ -3176,7 +3176,7 @@ html.dark .translation-progress__entry-error {
     word-break: break-word;
 }
 
-/* http(s):// spans rendered via formatChatTextWithBoldUrls */
+/* http(s):// spans rendered via formatChatTextWithStrongUrls */
 .eg-chat__url {
     font-weight: 700;
     word-break: break-all;

@@ -2,13 +2,12 @@
 
 > Control Panel addon for **Statamic 6.5+**: AI text generation and refactoring via custom fieldtypes and Bard, plus optional DeepL translation tools.
 
-Maintained by [Motion Work](https://github.com/motion-work). Originally created by [BoldWeb](https://github.com/boldwebdev/statamic-ai-assistant) and rebranded with their permission.
+Maintained by [Motion Work](https://github.com/motion-work).
 
 ## Requirements
 
 - **Statamic `^6.5`** (`statamic/cms` is declared in Composer; installs on Statamic 5 will not resolve).
 - A compatible **Laravel** version for your Statamic release (follow [Statamic’s requirements](https://statamic.dev/installation#requirements)).
-- **Statamic 5:** not supported by this package. Use the original [`bold-web/statamic-ai-assistant`](https://github.com/boldwebdev/statamic-ai-assistant) `1.x` line.
 - **Current release line:** **`3.x`** (see [CHANGELOG.md](./CHANGELOG.md) for breaking changes from 2.x).
 
 ## Supported API
@@ -32,16 +31,6 @@ Install with Composer. Current releases target **Statamic 6.5+** on the **`3.x`*
 ```bash
 composer require motion-work/statamic-ai-assistant:^3.0
 ```
-
-### Migrating from `bold-web/statamic-ai-assistant`
-
-1. `composer remove bold-web/statamic-ai-assistant && composer require motion-work/statamic-ai-assistant:^3.0`
-2. Replace any `BoldWeb\StatamicAiAssistant\` references in your app code with `MotionWork\StatamicAiAssistant\`.
-3. `php artisan vendor:publish --tag=statamic-ai-assistant-config --force` (config keys `bold_agent_*` are now `agent_*`).
-4. `php artisan vendor:publish --tag=statamic-ai-assistant --force`
-5. Optionally rename `STATAMIC_AI_ASSISTANT_BOLD_AGENT_*` env vars to `STATAMIC_AI_ASSISTANT_AGENT_*` (the old names still work as fallbacks).
-
-Coming from upstream 2.x? Also review [CHANGELOG.md](./CHANGELOG.md): migration mode is removed, there is new DeepL glossary/style YAML, and `ENABLE_AGENT_FOR_EDITORS` gates editors only (super admins always keep the AI agent).
 
 ## How to Use
 The plugin use per default Infomaniak API, a  Swiss solution🇨🇭 respecting the data of your users and the planet. However if you want to switch to a faster generation with a US based company this plugin also comes with Groq API support.
