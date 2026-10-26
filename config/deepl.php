@@ -66,12 +66,32 @@ return [
     | Statamic blueprints sometimes mark hero titles as non-localizable (shared),
     | but localized entries still store their own copy — and DeepL must translate
     | it. Add handles here so bulk / entry translation never skips them.
+    | Wildcards are supported ("key_facts_*"), matching handles produced by
+    | prefixed fieldset imports.
     |
     */
 
     'force_translate_handles' => [
         'hero_title',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Translate ALL text fields regardless of localizable
+    |--------------------------------------------------------------------------
+    |
+    | Shared fieldsets are frequently imported with localizable: false on
+    | fields that clearly carry language (titles, descriptions, grids of
+    | labelled numbers) — those inherit the source language into every
+    | localization. Enable this to translate every TEXT-BEARING field (plain
+    | text, Bard, replicator/grid content) even when it is not localizable.
+    | Non-text fields (assets, toggles, dates, entry references) are always
+    | inherited from the origin. When disabled, skipped text fields are
+    | reported per entry as `untranslated_fields` so they are never a mystery.
+    |
+    */
+
+    'translate_non_localizable_text' => (bool) env('DEEPL_TRANSLATE_NON_LOCALIZABLE_TEXT', false),
 
     'language_mapping' => [
         // ISO / Statamic locale primary subtags (regional codes like de-CH are normalized to these)

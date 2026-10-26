@@ -58,6 +58,55 @@ class InfomaniakService extends AbstractAiService
         );
     }
 
+    public function supportsVision(): bool
+    {
+        return trim((string) config('statamic-ai-assistant.infomaniak_vision_model', '')) !== '';
+    }
+
+    /**
+     * One-shot image description via the configured vision model, using the
+     * OpenAI multimodal content-part format (text + image_url data URL).
+     */
+    public function describeImage(string $imageDataUrl, string $prompt): string
+    {
+        if (! $this->supportsVision()) {
+            throw new \RuntimeException(__('This AI provider does not support image analysis.'));
+        }
+
+        $payload = [
+            'messages' => [[
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'text', 'text' => $prompt],
+                    ['type' => 'image_url', 'image_url' => ['url' => $imageDataUrl]],
+                ],
+            ]],
+            'model' => config('statamic-ai-assistant.infomaniak_vision_model'),
+            'temperature' => config('statamic-ai-assistant.temperature'),
+            'max_tokens' => 800,
+            'stream' => false,
+        ];
+
+        $response = Http::timeout($this->timeout())
+            ->retry($this->aiRetryTimes(), $this->aiRetrySleepMs(), $this->aiRetryWhen(), throw: false)
+            ->withToken(config('statamic-ai-assistant.infomaniak_api_token'))
+            ->post($this->endpointUrl(), $payload);
+
+        if (! $response->successful()) {
+            Log::error('Infomaniak vision request failed', ['status' => $response->status(), 'body' => mb_substr($response->body(), 0, 500)]);
+
+            throw new \RuntimeException(__('Image analysis failed.'));
+        }
+
+        $text = $response->json('choices.0.message.content');
+
+        if (! is_string($text) || trim($text) === '') {
+            throw new \RuntimeException(__('Image analysis returned no result.'));
+        }
+
+        return trim($text);
+    }
+
     /**
      * {@inheritdoc}
      *

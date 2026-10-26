@@ -51,6 +51,27 @@ class PromptUrlFetcher
     }
 
     /**
+     * Extract readable markdown from raw HTML, or null when nothing usable was
+     * found (so the caller can try the next source).
+     *
+     * @return array{ok: bool, body: string, error: ?string, headline: ?string}|null
+     */
+    private function extractOrNull(string $html, string $extractScope): ?array
+    {
+        $readable = $this->htmlExtractor()->extractReadable($html, $extractScope);
+        if ($readable['markdown'] === '') {
+            return null;
+        }
+
+        return [
+            'ok' => true,
+            'body' => $readable['markdown'],
+            'error' => null,
+            'headline' => $readable['headline'],
+        ];
+    }
+
+    /**
      * Reader chrome-stripping header, shared by every fetch path so the inline
      * prompt augmentation and the entry-generator tool remove the same site
      * furniture. Returns [] when stripping is disabled.
@@ -175,6 +196,27 @@ class PromptUrlFetcher
         }
 
         return $out;
+    }
+
+    /**
+     * Hosts (lowercased, deduplicated) of the public http(s) URLs a user typed
+     * into a prompt/conversation. Used to build the fetch allowlist so the agent
+     * can only open links the user actually gave it — never URLs it invented.
+     *
+     * @return array<int, string>
+     */
+    public function allowedHostsIn(string $text): array
+    {
+        $hosts = [];
+
+        foreach ($this->extractPublicHttpUrls($text) as $url) {
+            $host = parse_url($url, PHP_URL_HOST);
+            if (is_string($host) && $host !== '') {
+                $hosts[strtolower($host)] = true;
+            }
+        }
+
+        return array_keys($hosts);
     }
 
     private function normalizeUrlCandidate(string $raw): ?string
@@ -409,30 +451,35 @@ class PromptUrlFetcher
         $format = strtolower((string) config('statamic-ai-assistant.prompt_url_fetch.reader_format', 'html'));
 
         if ($format === 'html') {
-            $raw = $this->fetchRaw(
-                $targetUrl,
-                $readerBase,
-                $timeout,
-                $apiKey,
-                array_merge($extraHeaders, ['X-Return-Format' => 'html']),
-            );
+            // We extract readable content locally from HTML. There are two HTML
+            // sources: the Jina reader (better at bypassing bot blocks / rendering
+            // JS) and a plain direct fetch (works when Jina returns junk — e.g. it
+            // handed back an empty <body> for some TYPO3 sites). Try them in the
+            // configured order; the first that yields usable content wins.
+            $jinaHtml = function () use ($targetUrl, $readerBase, $timeout, $apiKey, $extraHeaders, $extractScope) {
+                $raw = $this->fetchRaw($targetUrl, $readerBase, $timeout, $apiKey, array_merge($extraHeaders, ['X-Return-Format' => 'html']));
 
-            // Transport/HTTP failure: surface it verbatim, don't mask with a retry.
-            if (! $raw['ok']) {
-                return $raw;
+                return $raw['ok'] ? $this->extractOrNull($raw['body'], $extractScope) : null;
+            };
+            $directHtml = function () use ($targetUrl, $timeout, $extractScope) {
+                $direct = $this->fetchRawDirect($targetUrl, $timeout);
+
+                return $direct['ok'] ? $this->extractOrNull($direct['body'], $extractScope) : null;
+            };
+
+            // Default: Jina first (harder to block), direct fetch as the fallback.
+            $attempts = (bool) config('statamic-ai-assistant.prompt_url_fetch.direct_first', false)
+                ? [$directHtml, $jinaHtml]
+                : [$jinaHtml, $directHtml];
+
+            foreach ($attempts as $attempt) {
+                $result = $attempt();
+                if ($result !== null) {
+                    return $result;
+                }
             }
 
-            $readable = $this->htmlExtractor()->extractReadable($raw['body'], $extractScope);
-            if ($readable['markdown'] !== '') {
-                return [
-                    'ok' => true,
-                    'body' => $readable['markdown'],
-                    'error' => null,
-                    'headline' => $readable['headline'],
-                ];
-            }
-
-            Log::notice('HTML extraction empty, falling back to markdown reader', ['url' => $targetUrl]);
+            Log::notice('HTML extraction empty from Jina and direct fetch, falling back to markdown reader', ['url' => $targetUrl]);
         }
 
         $raw = $this->fetchRaw($targetUrl, $readerBase, $timeout, $apiKey, $extraHeaders);
@@ -461,6 +508,60 @@ class PromptUrlFetcher
         }
 
         return null;
+    }
+
+    /**
+     * Direct HTTP fetch of the target page (no Jina proxy), with caching. Returns
+     * the raw HTML for local extraction. Only HTML responses are treated as
+     * usable; anything else (non-2xx, empty, or a non-HTML content type) returns
+     * ok=false so the caller falls back to the Jina reader.
+     *
+     * @return array{ok: bool, body: string, error: ?string}
+     */
+    private function fetchRawDirect(string $targetUrl, int $timeout): array
+    {
+        $cacheKey = 'direct|'.$targetUrl;
+        if (isset(self::$fetchCache[$cacheKey])) {
+            return self::$fetchCache[$cacheKey];
+        }
+
+        $userAgent = trim((string) config('statamic-ai-assistant.prompt_url_fetch.user_agent'))
+            ?: 'Mozilla/5.0 (compatible; StatamicAiAssistant/1.0; +https://statamic.com)';
+
+        try {
+            $response = Http::timeout($timeout)
+                ->withHeaders([
+                    'User-Agent' => $userAgent,
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language' => 'de,en-US;q=0.8,en;q=0.6',
+                ])
+                ->get($targetUrl);
+        } catch (\Throwable $e) {
+            Log::notice('Direct page fetch failed', ['url' => $targetUrl, 'message' => $e->getMessage()]);
+
+            return self::$fetchCache[$cacheKey] = ['ok' => false, 'body' => '', 'error' => $e->getMessage()];
+        }
+
+        if (! $response->successful()) {
+            return self::$fetchCache[$cacheKey] = [
+                'ok' => false,
+                'body' => '',
+                'error' => (string) __('HTTP :code', ['code' => $response->status()]),
+            ];
+        }
+
+        $contentType = strtolower((string) $response->header('Content-Type'));
+        $body = trim((string) $response->body());
+
+        if ($body === '' || ($contentType !== '' && ! str_contains($contentType, 'html') && ! str_contains($contentType, 'xml'))) {
+            return self::$fetchCache[$cacheKey] = [
+                'ok' => false,
+                'body' => '',
+                'error' => (string) __('Non-HTML or empty response'),
+            ];
+        }
+
+        return self::$fetchCache[$cacheKey] = ['ok' => true, 'body' => $body, 'error' => null];
     }
 
     /**

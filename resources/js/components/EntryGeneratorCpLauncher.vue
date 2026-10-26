@@ -1,5 +1,5 @@
 <template>
-  <div v-if="showLauncher" class="eg-cp-launcher" aria-live="polite">
+  <div class="eg-cp-launcher" aria-live="polite">
     <button
       v-if="!open"
       type="button"
@@ -88,7 +88,7 @@
 
 <script>
 import EntryGeneratorPage from './EntryGeneratorPage.vue';
-import { state as storeState, setI18n, setToaster, getActivity } from '../store/entryGeneratorStore.js';
+import { setI18n, setToaster, getActivity } from '../store/entryGeneratorStore.js';
 
 export default {
   name: 'EntryGeneratorCpLauncher',
@@ -100,34 +100,12 @@ export default {
       hasOpenedOnce: false,
       scrollLockPrev: null,
       escHandler: null,
-      /** CP pathname; updated on navigation (Inertia does not always fire popstate). */
-      currentPath: typeof window !== 'undefined' ? window.location.pathname : '',
-      pathPollId: null,
-      // Subscribe to the store so our computeds re-render when it changes.
-      store: storeState,
     };
   },
 
   computed: {
-    /** Collections area only (list + entries, etc.), not other CP sections. */
-    showOnCollections() {
-      return this.cpPathIsCollectionsArea(this.currentPath);
-    },
-
     activity() {
       return getActivity();
-    },
-
-    /**
-     * The launcher is rendered when the user is in the collections area, OR
-     * whenever there is background activity / unsaved entries — so the user
-     * can return to in-progress work from anywhere in the CP.
-     */
-    showLauncher() {
-      return this.showOnCollections
-        || this.activity.busy
-        || this.activity.ready > 0
-        || !!this.store.generationError;
     },
 
     bubbleTitle() {
@@ -140,11 +118,6 @@ export default {
   },
 
   watch: {
-    showLauncher(visible) {
-      if (!visible && this.open) {
-        this.closeDrawer();
-      }
-    },
     open(val) {
       if (val) {
         this.scrollLockPrev = document.body.style.overflow;
@@ -166,10 +139,6 @@ export default {
   },
 
   mounted() {
-    this.syncCpPath();
-    this.pathPollId = setInterval(this.syncCpPath, 400);
-    window.addEventListener('popstate', this.syncCpPath);
-
     // Wire the store to Vue's translator and the global toast singleton so the
     // store can show localized completion toasts even when no page component is
     // currently mounted (e.g. user navigated away to /cp/dashboard).
@@ -181,11 +150,6 @@ export default {
   },
 
   beforeUnmount() {
-    if (this.pathPollId) {
-      clearInterval(this.pathPollId);
-      this.pathPollId = null;
-    }
-    window.removeEventListener('popstate', this.syncCpPath);
     document.body.style.overflow = this.scrollLockPrev || '';
     if (this.escHandler) {
       document.removeEventListener('keydown', this.escHandler);
@@ -193,21 +157,6 @@ export default {
   },
 
   methods: {
-    cpPathIsCollectionsArea(pathname) {
-      if (!pathname || typeof pathname !== 'string') {
-        return false;
-      }
-      return /\/cp\/collections(\/|$)/.test(pathname);
-    },
-
-    syncCpPath() {
-      if (typeof window === 'undefined') return;
-      const next = window.location.pathname || '';
-      if (next !== this.currentPath) {
-        this.currentPath = next;
-      }
-    },
-
     openDrawer() {
       this.hasOpenedOnce = true;
       this.open = true;

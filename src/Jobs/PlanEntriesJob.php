@@ -54,13 +54,21 @@ class PlanEntriesJob implements ShouldQueue
             return;
         }
 
+        $cancelMessage = (string) __('Cancelled.');
+
         if ($batch->isCancelled($this->sessionId)) {
-            $batch->markPlanningFailed($this->sessionId, (string) __('Cancelled.'));
+            $batch->markPlanningFailed($this->sessionId, $cancelMessage);
 
             return;
         }
 
         $autoResolve = (bool) ($session['auto_resolve'] ?? true);
+
+        // Assets the user explicitly referenced ("use this image everywhere
+        // @asset:…") are queued as preferred imagery DETERMINISTICALLY, before
+        // any planning — never depending on the model calling use_assets. Runs
+        // for both the agentic and the preselected-collection path.
+        $this->seedPreferredAssetsFromMentions($session, $batch);
 
         try {
             if (! $autoResolve) {
@@ -82,6 +90,38 @@ class PlanEntriesJob implements ShouldQueue
                 : (string) __('AI agent planning failed. Please try again.');
 
             $batch->markPlanningFailed($this->sessionId, $message);
+
+            // Record the failure as an assistant turn so the chat history is
+            // coherent for follow-ups — except a plain cancellation, which is
+            // user-driven and not worth surfacing as an agent message.
+            if ($message !== $cancelMessage) {
+                $batch->appendAssistantTurn($this->sessionId, $message, [], 'error');
+            }
+        }
+    }
+
+    /**
+     * Auto-queue "@asset:"/"@folder:" mentions from the newest user message as
+     * preferred imagery (deduplicated on the session), so every asset field the
+     * generator fills draws from what the user referenced instead of random
+     * container assets.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function seedPreferredAssetsFromMentions(array $session, EntryGenerationBatchService $batch): void
+    {
+        $newest = (string) ($session['prompt'] ?? '');
+        foreach (is_array($session['transcript'] ?? null) ? $session['transcript'] : [] as $turn) {
+            if (($turn['role'] ?? '') === 'user' && is_string($turn['text'] ?? null)) {
+                $newest = $turn['text'];
+            }
+        }
+
+        $preferred = (new \MotionWork\StatamicAiAssistant\Services\PromptAssetMentionResolver)
+            ->resolve([$newest])['preferred'];
+
+        if ($preferred !== []) {
+            $batch->appendPreferredAssetPaths($this->sessionId, $preferred);
         }
     }
 

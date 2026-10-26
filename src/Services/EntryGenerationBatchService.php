@@ -53,6 +53,7 @@ class EntryGenerationBatchService
         ?string $collectionHandle = null,
         ?string $blueprintHandle = null,
         ?int $maxPlanEntries = null,
+        bool $advancedTools = false,
     ): string {
         $id = (string) Str::uuid();
         $preferred = $urlAugmentation['preferred'] ?? new PreferredAssetPaths;
@@ -67,6 +68,15 @@ class EntryGenerationBatchService
             'status' => 'running',
             'planning_status' => 'planning',
             'planner_error' => null,
+            // Set when the planner answered a read-only question (no create/update).
+            // A successful informational result, distinct from planner_error.
+            'planner_answer' => null,
+            // Conversation history for the multi-turn chat. One entry per visible
+            // turn: {role, text, entry_ids, kind}. Seeded with the first user turn
+            // so the planner has uniform input from turn 1.
+            'transcript' => [
+                ['role' => 'user', 'text' => $prompt, 'entry_ids' => [], 'kind' => null],
+            ],
             'auto_resolve' => $autoResolve,
             'prompt' => $prompt,
             'collection_handle' => $collectionHandle ?? '',
@@ -75,6 +85,10 @@ class EntryGenerationBatchService
             // at request time (see EntryCreationPolicy). Null → planner falls
             // back to the configured cap. Non-super users get 1 when limited.
             'max_plan_entries' => $maxPlanEntries !== null ? max(1, $maxPlanEntries) : null,
+            // Whether the requesting CP user holds the 'advanced_tools' access
+            // feature, resolved at request time like max_plan_entries — the
+            // queued planner has no authenticated user to check against.
+            'advanced_tools' => $advancedTools,
             'locale' => $locale,
             'attachment_content' => $attachmentContent,
             'plan_warnings' => [],
@@ -86,6 +100,80 @@ class EntryGenerationBatchService
             ],
             'entry_order' => [],
             'entries' => [],
+            // Non-entry operations (structural changes etc.) completed this turn.
+            'operations' => [],
+            'counts' => [
+                'pending' => 0,
+                'running' => 0,
+                'completed' => 0,
+                'failed' => 0,
+            ],
+        ];
+
+        $this->persist($session);
+
+        return $id;
+    }
+
+    /**
+     * Recreate a transient session from a client-provided conversation
+     * transcript, so a chat whose cached session expired can continue where it
+     * left off. Chat history is stored only in the user's browser — this
+     * reseeds the server's working copy from it, in the same terminal state
+     * reopenForFollowUp() expects ('completed'/'planned', no running turn).
+     *
+     * @param  array<int, array{role: string, text: string, kind: ?string}>  $transcript
+     */
+    public function restoreSessionFromTranscript(string $locale, array $transcript, bool $advancedTools = false): string
+    {
+        $turns = [];
+        foreach ($transcript as $turn) {
+            if (! is_array($turn)) {
+                continue;
+            }
+            $role = $turn['role'] ?? '';
+            $text = trim((string) ($turn['text'] ?? ''));
+            if (! in_array($role, ['user', 'assistant'], true) || $text === '') {
+                continue;
+            }
+            $turns[] = [
+                'role' => $role,
+                'text' => $text,
+                // Prior entry rows no longer exist in the reseeded session.
+                'entry_ids' => [],
+                'kind' => $role === 'assistant' ? (string) ($turn['kind'] ?? 'summary') : null,
+            ];
+        }
+
+        $id = (string) Str::uuid();
+
+        $session = [
+            'id' => $id,
+            'created_at' => now()->toIso8601String(),
+            'updated_at' => now()->toIso8601String(),
+            'status' => 'completed',
+            'planning_status' => 'planned',
+            'planner_error' => null,
+            'planner_answer' => null,
+            'transcript' => $turns,
+            'auto_resolve' => true,
+            'prompt' => '',
+            'collection_handle' => '',
+            'blueprint_handle' => '',
+            'max_plan_entries' => null,
+            'advanced_tools' => $advancedTools,
+            'locale' => $locale,
+            'attachment_content' => null,
+            'plan_warnings' => [],
+            'url_augmentation' => [
+                'appendix' => '',
+                'warnings' => [],
+                'preferred_paths' => [],
+                'appended_to_prompts' => false,
+            ],
+            'entry_order' => [],
+            'entries' => [],
+            'operations' => [],
             'counts' => [
                 'pending' => 0,
                 'running' => 0,
@@ -165,12 +253,104 @@ class EntryGenerationBatchService
         return $added;
     }
 
+    /**
+     * Append a visible user turn to the conversation transcript.
+     */
+    public function appendUserTurn(string $sessionId, string $text): void
+    {
+        $this->update($sessionId, function (array $session) use ($text): array {
+            $transcript = is_array($session['transcript'] ?? null) ? $session['transcript'] : [];
+            $transcript[] = ['role' => 'user', 'text' => $text, 'entry_ids' => [], 'kind' => null];
+            $session['transcript'] = array_values($transcript);
+
+            return $session;
+        });
+    }
+
+    /**
+     * Append a visible assistant turn (a summary of created/updated entries, a
+     * read-only answer, or an error) to the conversation transcript.
+     *
+     * @param  array<int, string>  $entryIds  Session plan-row ids acted on this turn.
+     */
+    public function appendAssistantTurn(string $sessionId, string $text, array $entryIds = [], string $kind = 'summary'): void
+    {
+        $this->update($sessionId, function (array $session) use ($text, $entryIds, $kind): array {
+            $transcript = is_array($session['transcript'] ?? null) ? $session['transcript'] : [];
+            $transcript[] = [
+                'role' => 'assistant',
+                'text' => $text,
+                'entry_ids' => array_values(array_filter($entryIds, 'is_string')),
+                'kind' => $kind,
+            ];
+            $session['transcript'] = array_values($transcript);
+
+            return $session;
+        });
+    }
+
+    /**
+     * Re-open a finished session for a follow-up chat turn: reset the per-turn
+     * planner scratch and re-run planning, while KEEPING the transcript history
+     * and all prior entries. Recovers a 'completed' or 'cancelled' session.
+     * Returns false if the session no longer exists (expired/unknown).
+     */
+    public function reopenForFollowUp(string $sessionId, string $prompt, ?int $maxPlanEntries, bool $advancedTools = false, ?string $attachmentContent = null): bool
+    {
+        $found = false;
+
+        $this->update($sessionId, function (array $session) use ($prompt, $maxPlanEntries, $advancedTools, $attachmentContent, &$found): array {
+            $found = true;
+
+            $session['status'] = 'running';
+            $session['planning_status'] = 'planning';
+            $session['planner_error'] = null;
+            $session['planner_answer'] = null;
+            $session['operations'] = [];
+            $session['prompt'] = $prompt;
+            $session['max_plan_entries'] = $maxPlanEntries !== null ? max(1, $maxPlanEntries) : null;
+            $session['advanced_tools'] = $advancedTools;
+            // The attachment is scoped to a single turn: a follow-up replaces
+            // (or clears) whatever was attached on the previous turn, so the
+            // planner injects it only into the newest user message.
+            $session['attachment_content'] = $attachmentContent;
+
+            $transcript = is_array($session['transcript'] ?? null) ? $session['transcript'] : [];
+            $transcript[] = ['role' => 'user', 'text' => $prompt, 'entry_ids' => [], 'kind' => null];
+            $session['transcript'] = array_values($transcript);
+
+            return $session;
+        });
+
+        return $found;
+    }
+
     public function markPlanningComplete(string $sessionId): void
     {
         $this->update($sessionId, function (array $session): array {
             if (($session['planning_status'] ?? '') === 'planning_failed') {
                 return $session;
             }
+            $session['planning_status'] = 'planned';
+
+            return $session;
+        });
+
+        $this->markCompletedIfDone($sessionId);
+    }
+
+    /**
+     * Record a read-only informational answer (e.g. "which entry contains X?") and
+     * complete planning successfully. Distinct from markPlanningFailed: this is a
+     * legitimate result, not an error, even though no entries were created.
+     */
+    public function recordPlannerAnswer(string $sessionId, string $answer): void
+    {
+        $this->update($sessionId, function (array $session) use ($answer): array {
+            if (($session['planning_status'] ?? '') === 'planning_failed') {
+                return $session;
+            }
+            $session['planner_answer'] = $answer;
             $session['planning_status'] = 'planned';
 
             return $session;
@@ -220,6 +400,66 @@ class EntryGenerationBatchService
             $buffer[] = $line;
             // Bound the buffer in case the frontend is not polling (e.g. drawer closed).
             $session['planner_activity_buffer'] = array_slice($buffer, -100);
+
+            return $session;
+        });
+    }
+
+    /**
+     * Merge preferred asset paths (existing assets the planner selected via
+     * use_assets) into the session, deduplicated — GeneratePlannedEntryJob
+     * seeds each entry's PreferredAssetPaths from this list.
+     *
+     * @param  array<int, array{container: string, path: string}>  $entries
+     */
+    public function appendPreferredAssetPaths(string $sessionId, array $entries): void
+    {
+        if ($entries === []) {
+            return;
+        }
+        $this->update($sessionId, function (array $session) use ($entries): array {
+            $existing = $session['url_augmentation']['preferred_paths'] ?? [];
+            $existing = is_array($existing) ? $existing : [];
+
+            $seen = [];
+            foreach ($existing as $row) {
+                $seen[($row['container'] ?? '').'::'.($row['path'] ?? '')] = true;
+            }
+
+            foreach ($entries as $row) {
+                $key = ($row['container'] ?? '').'::'.($row['path'] ?? '');
+                if (! isset($seen[$key]) && ($row['container'] ?? '') !== '' && ($row['path'] ?? '') !== '') {
+                    $existing[] = ['container' => $row['container'], 'path' => $row['path']];
+                    $seen[$key] = true;
+                }
+            }
+
+            $session['url_augmentation']['preferred_paths'] = $existing;
+
+            return $session;
+        });
+    }
+
+    /**
+     * Record one completed non-entry operation (structural changes like
+     * collections/blueprints/taxonomies today; any tool can report one). Unlike
+     * the drained activity feed, operations persist for the whole turn so the
+     * CP can render a stable "what has been done" checklist while the run
+     * continues. Reset on every new turn.
+     */
+    public function appendOperation(string $sessionId, string $kind, string $label): void
+    {
+        if (trim($label) === '') {
+            return;
+        }
+        $this->update($sessionId, function (array $session) use ($kind, $label): array {
+            $ops = is_array($session['operations'] ?? null) ? $session['operations'] : [];
+            $ops[] = [
+                'id' => 'op-'.(count($ops) + 1).'-'.substr(md5($kind.$label.count($ops)), 0, 8),
+                'kind' => $kind,
+                'label' => $label,
+            ];
+            $session['operations'] = array_slice($ops, -50);
 
             return $session;
         });
@@ -454,11 +694,14 @@ class EntryGenerationBatchService
                 'status' => (string) ($session['status'] ?? 'running'),
                 'planning_status' => (string) ($session['planning_status'] ?? 'planned'),
                 'planner_error' => $session['planner_error'] ?? null,
+                'planner_answer' => $session['planner_answer'] ?? null,
+                'transcript' => array_values($session['transcript'] ?? []),
                 'auto_resolve' => (bool) ($session['auto_resolve'] ?? true),
                 'prompt' => (string) ($session['prompt'] ?? ''),
                 'entries' => $entriesOut,
                 'warnings' => $session['plan_warnings'] ?? [],
                 'planner_activity' => array_values($activity),
+                'operations' => array_values(is_array($session['operations'] ?? null) ? $session['operations'] : []),
             ];
 
             return $session;

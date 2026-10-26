@@ -12,6 +12,13 @@
 
 import { reactive } from 'vue';
 import axios from 'axios';
+import {
+  newChatId,
+  listChats,
+  getChat,
+  upsertChat,
+  deleteChat,
+} from '../services/chatHistoryStorage.js';
 
 export const STATUS = {
   QUEUED: 'queued',
@@ -28,21 +35,33 @@ export const state = reactive({
 
   // Composer state — lives in the store so it survives close/reopen.
   pendingPrompt: '',
-  pendingAttachedFile: null,
+  // Files for the NEXT message: [{token, file}] — token is the "@file:<name>"
+  // chip reference (null for the wizard's chipless single attachment).
+  pendingAttachedFiles: [],
 
   // Generation lifecycle.
   generating: false,        // true from request start until done event
   planning: false,          // true between request start and plan event
   plan: null,               // { entries:[…], warnings:[…] } from server
   entries: [],              // list of card states
-  generationError: null,    // fatal pre-plan error
+  generationError: null,    // fatal pre-plan error (current turn only)
+  plannerAnswer: null,      // read-only answer to a question (current turn only)
+  operations: [],           // completed non-entry operations this turn: [{id,kind,label}]
+  transcript: [],           // full chat history from the server: [{role,text,entry_ids,kind}]
+  chatSessionId: null,      // durable session id across turns (NOT cleared at poll-terminal)
+  currentChatId: null,      // id of this conversation's local-history record
   bulkSaving: false,
+
+  // Titles referenced via the composer "@" picker this session. Used purely to
+  // render "@Title" tokens as chips in the chat transcript.
+  mentionedTitles: [],
 
   /**
    * Human-readable activity lines (planning = entryId null; drafting = entry uuid).
    * Each item: { id: number, text: string, entryId: string|null }.
    */
   activityLog: [],
+  hasServerActivity: false, // true once the planner reported a REAL step this turn (suppresses canned filler)
 
   // Field schema cache, keyed `${collection}/${blueprint}`.
   fieldPreviewCache: {},
@@ -141,6 +160,180 @@ export function setToaster(toast) {
   _toast = toast;
 }
 
+/** Remember a title picked via the "@" entry picker (for transcript chips). */
+export function registerMention(title) {
+  const t = typeof title === 'string' ? title.trim() : '';
+  if (t !== '' && !state.mentionedTitles.includes(t)) {
+    state.mentionedTitles.push(t);
+  }
+}
+
+/** Titles from the session picker that appear as "@Title" in this message. */
+function mentionTitlesForPrompt(text) {
+  const s = String(text || '');
+  if (!s || state.mentionedTitles.length === 0) return [];
+
+  const found = [];
+  for (const title of [...state.mentionedTitles].sort((a, b) => b.length - a.length)) {
+    if (s.includes(`@${title}`)) found.push(title);
+  }
+  return found;
+}
+
+// ─── Pending attachments (multi-file, chip-referenced) ──────────────────
+
+/**
+ * Register a file for the NEXT message. Returns the unique "@file:<token>"
+ * token name (slugged filename, deduped) the composer inserts as a chip, or
+ * null with `withToken: false` (full-page wizard — no chips there). The File
+ * objects live only until the message is sent.
+ */
+export function addPendingFile(file, { withToken = true } = {}) {
+  if (!file) return null;
+
+  let token = null;
+  if (withToken) {
+    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+    const slug = file.name
+      .replace(/\.[^.]+$/, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'file';
+    const taken = state.pendingAttachedFiles.map((f) => f.token);
+    token = ext ? `${slug}.${ext}` : slug;
+    for (let i = 2; taken.includes(token); i += 1) {
+      token = ext ? `${slug}-${i}.${ext}` : `${slug}-${i}`;
+    }
+  }
+
+  state.pendingAttachedFiles.push({ token, file });
+  return token;
+}
+
+export function removePendingFile(token) {
+  state.pendingAttachedFiles = state.pendingAttachedFiles.filter((f) => f.token !== token);
+}
+
+/**
+ * The files to send with a message: tokenless ones (wizard) always go; chip
+ * files only while their "@file:" token is still in the prompt — deleting a
+ * chip drops its file.
+ */
+function pendingFilesForPrompt(text) {
+  return state.pendingAttachedFiles.filter(
+    (f) => f.token === null || String(text).includes(`@file:${f.token}`),
+  );
+}
+
+/** Serializable per-turn metadata so chat chips can show name + size later. */
+function attachmentsMeta(files) {
+  return files.map(({ token, file }) => ({
+    token,
+    name: file.name || '',
+    size: Number(file.size) || 0,
+  }));
+}
+
+/** Append the given pending files to a FormData body (shared by all sends). */
+function appendAttachments(formData, files) {
+  for (const { token, file } of files) {
+    formData.append('attachments[]', file, token || file.name);
+  }
+}
+
+/** Preserve client-only turn metadata (mention_titles, attachments) when the
+ * server transcript overwrites the client copy. The server never sees these
+ * fields, so without this they'd vanish on the first poll. */
+function mergeTranscriptMentions(incoming, previous) {
+  if (!Array.isArray(incoming)) return incoming;
+
+  const prevByText = new Map();
+  for (const turn of previous || []) {
+    if (turn?.role !== 'user' || !turn.text) continue;
+    prevByText.set(turn.text, {
+      mention_titles: Array.isArray(turn.mention_titles) ? turn.mention_titles : [],
+      // `attachment` (single object) is the legacy shape from older saved chats.
+      attachments: Array.isArray(turn.attachments) ? turn.attachments : [],
+      attachment: turn.attachment || null,
+    });
+  }
+
+  return incoming.map((turn) => {
+    if (turn?.role !== 'user') return turn;
+    const preserved = prevByText.get(turn.text) || {};
+    const detected = mentionTitlesForPrompt(turn.text);
+    const merged = [...new Set([...(preserved.mention_titles || []), ...detected])];
+    const attachments = Array.isArray(turn.attachments) && turn.attachments.length
+      ? turn.attachments
+      : (preserved.attachments || []);
+    const attachment = turn.attachment || preserved.attachment || null;
+    const next = { ...turn };
+    if (merged.length) next.mention_titles = merged;
+    if (attachments.length) next.attachments = attachments;
+    if (attachment) next.attachment = attachment;
+    return next;
+  });
+}
+
+// ─── Local chat history (per-user, browser-only) ────────────────────────
+
+/**
+ * Snapshot the live conversation into localStorage. Called wherever the
+ * transcript changes (optimistic user turns + every server overwrite), so the
+ * saved record always mirrors what the user sees.
+ */
+function persistChatHistory() {
+  if (!state.currentChatId || state.transcript.length === 0) return;
+  upsertChat({
+    id: state.currentChatId,
+    sessionId: state.chatSessionId,
+    transcript: state.transcript,
+    mentionedTitles: state.mentionedTitles,
+  });
+}
+
+/** Saved conversations for the history panel, newest first. */
+export function listChatHistory() {
+  return listChats();
+}
+
+/**
+ * Load a saved conversation into the live state so the user can read it and
+ * continue from where it left off. Follow-ups reuse the recorded server
+ * session when it is still alive; continueGeneration falls back to the
+ * resume endpoint when it has expired. Refused while a turn is in flight.
+ */
+export function openChatFromHistory(id) {
+  if (state.generating || state.planning) {
+    if (_toast) _toast.error(_trans('Wait for the current generation to finish first.'));
+    return false;
+  }
+  const record = getChat(id);
+  if (!record) return false;
+
+  resetGenerationOnly();
+  state.pendingAttachedFiles = [];
+  state.currentChatId = record.id;
+  state.chatSessionId = record.sessionId || null;
+  state.mentionedTitles = [...(record.mentionedTitles || [])];
+  state.transcript = record.transcript.map((t) => ({ ...t }));
+  return true;
+}
+
+/** Remove a conversation from local history (and from view when it is open). */
+export function deleteChatFromHistory(id) {
+  // The open chat re-persists on every progress poll — deleting it mid-turn
+  // would just resurrect it, so refuse instead of pretending it worked.
+  if (state.currentChatId === id && (state.generating || state.planning)) {
+    if (_toast) _toast.error(_trans('Wait for the current generation to finish first.'));
+    return;
+  }
+  deleteChat(id);
+  if (state.currentChatId === id) {
+    reset();
+  }
+}
+
 // ─── Activity / visibility ───────────────────────────────────────────────
 
 /**
@@ -221,10 +414,35 @@ function applyBatchProgressSnapshot(data) {
     }
   }
 
+  // Full conversation history — server is the source of truth. Overwrite each poll.
+  if (Array.isArray(data.transcript)) {
+    state.transcript = mergeTranscriptMentions(data.transcript, state.transcript);
+    persistChatHistory();
+    // Errors are rendered from the transcript turn — don't also show the live banner.
+    const last = data.transcript[data.transcript.length - 1];
+    if (last?.role === 'assistant' && last?.kind === 'error') {
+      state.generationError = null;
+    }
+  }
+
+  // Read-only answer (e.g. "which entry contains X?"). A success, shown as a
+  // normal agent reply — never the "Something went wrong" error panel.
+  if (data.planner_answer && !state.plannerAnswer) {
+    state.plannerAnswer = data.planner_answer;
+    state.planning = false;
+  }
+
   // Live planner step feed (fetching URLs, reading layouts, deciding). The buffer
   // is drained server-side on each poll, so every line here is new — just append.
   for (const line of (data.planner_activity || [])) {
+    state.hasServerActivity = true;
     pushActivityLine(line, null);
+  }
+
+  // Completed non-entry operations (structural changes, …) — persistent per
+  // turn, server is the source of truth. Rendered as a checklist in the panel.
+  if (Array.isArray(data.operations)) {
+    state.operations = data.operations;
   }
 
   const rows = data.entries || [];
@@ -378,14 +596,22 @@ function scheduleGenerationBatchPoll() {
   pollGenerationBatchOnce();
 }
 
-export async function startGeneration({ prompt, attachedFile, useAutoTarget, collection, blueprint }) {
+export async function startGeneration({ prompt, useAutoTarget, collection, blueprint }) {
   if (state.generating) return;
   const text = (prompt || '').trim();
   if (text.length < 10) return;
 
+  const mentionTitles = mentionTitlesForPrompt(text);
+  const files = pendingFilesForPrompt(text);
+
   resetGenerationOnly();
   state.generating = true;
   state.planning = true;
+  state.pendingPrompt = '';
+  // Optimistic first user turn so the chat shows the message before the first poll.
+  state.transcript = [{ role: 'user', text, entry_ids: [], kind: null, mention_titles: mentionTitles, attachments: attachmentsMeta(files) }];
+  state.currentChatId = newChatId();
+  persistChatHistory();
 
   const formData = new FormData();
   if (useAutoTarget) {
@@ -396,7 +622,10 @@ export async function startGeneration({ prompt, attachedFile, useAutoTarget, col
     formData.append('auto_resolve_target', '0');
   }
   formData.append('prompt', text);
-  if (attachedFile) formData.append('attachment', attachedFile);
+  appendAttachments(formData, files);
+  // The file payloads are now captured by FormData; clear the scratch list so
+  // composer chips reference nothing stale after sending.
+  state.pendingAttachedFiles = [];
 
   state._abortController = new AbortController();
 
@@ -496,6 +725,8 @@ function handleStreamEvent(msg) {
     case 'batch':
       if (msg.session_id) {
         state.generationBatchSessionId = msg.session_id;
+        state.chatSessionId = msg.session_id; // durable across follow-up turns
+        persistChatHistory();
         // Reset card list — the agentic planner will push entries one at a time
         // through the polling snapshot as it discovers them.
         state.plan = { entries: [], warnings: [] };
@@ -566,6 +797,123 @@ export function stopGeneration({ keepReady = false } = {}) {
   state._backgroundedAt = null;
 }
 
+/**
+ * Send a follow-up message in the current chat. Reuses the live chatSessionId,
+ * keeps all prior turns + entry cards, and restarts the progress poll. The
+ * server appends the user turn and re-runs the planner with full context.
+ *
+ * When the server session has expired (or a chat was restored from local
+ * history without a live session), the conversation is reseeded from the
+ * locally saved transcript via generate-resume — the chat continues
+ * seamlessly instead of dying with "this chat has expired".
+ */
+export async function continueGeneration(prompt) {
+  const text = (prompt || '').trim();
+  if (state.generating || text.length < 10) return;
+  if (!state.chatSessionId && state.transcript.length === 0) return;
+
+  const files = pendingFilesForPrompt(text);
+
+  // Turns as the resume endpoint expects them — captured BEFORE the optimistic
+  // append so the new prompt isn't duplicated when the server re-appends it.
+  const priorTurns = state.transcript
+    .filter((t) => (t.text || '').trim() !== '')
+    .map((t) => ({ role: t.role, text: t.text, kind: t.kind || null }));
+
+  // Clear only the CURRENT-turn scratch — history + prior cards stay.
+  state.generationError = null;
+  state.plannerAnswer = null;
+  state.operations = [];
+  state.generating = true;
+  state.planning = true;
+  state.generationPlanningStatus = 'planning';
+  state.pendingPrompt = '';
+  state.activityLog = [];
+  state.hasServerActivity = false;
+  const mentionTitles = mentionTitlesForPrompt(text);
+
+  // Optimistically show the user's message; the next poll's server transcript
+  // (which also contains it) overwrites this idempotently.
+  state.transcript = [...state.transcript, { role: 'user', text, entry_ids: [], kind: null, mention_titles: mentionTitles, attachments: attachmentsMeta(files) }];
+  persistChatHistory();
+
+  const headers = { 'X-Requested-With': 'XMLHttpRequest' };
+  const xsrf = getCpXsrfToken();
+  if (xsrf) headers['X-XSRF-TOKEN'] = xsrf;
+
+  // Attachments are scoped to this turn — once the request bodies are built
+  // the file payloads are captured, so clear the scratch list immediately.
+  const continueBody = new FormData();
+  continueBody.append('prompt', text);
+  appendAttachments(continueBody, files);
+
+  const resumeBody = new FormData();
+  resumeBody.append('prompt', text);
+  resumeBody.append('transcript', JSON.stringify(priorTurns));
+  appendAttachments(resumeBody, files);
+
+  state.pendingAttachedFiles = [];
+
+  try {
+    let sessionId = null;
+
+    if (state.chatSessionId) {
+      try {
+        const { data } = await axios.post(
+          `/cp/ai-generate/generate-continue/${state.chatSessionId}`,
+          continueBody,
+          { headers, withCredentials: true },
+        );
+        sessionId = data.session_id || state.chatSessionId;
+      } catch (e) {
+        // 404 = session expired → fall through to resume; anything else is fatal.
+        if (e?.response?.status !== 404 || priorTurns.length === 0) throw e;
+      }
+    }
+
+    if (!sessionId) {
+      const { data } = await axios.post(
+        '/cp/ai-generate/generate-resume',
+        resumeBody,
+        { headers, withCredentials: true },
+      );
+      sessionId = data.session_id;
+      state.chatSessionId = sessionId;
+      persistChatHistory();
+    }
+
+    state.generationBatchSessionId = sessionId;
+    scheduleGenerationBatchPoll();
+  } catch (e) {
+    state.generating = false;
+    state.planning = false;
+    state.generationError = e?.response?.data?.error || _trans('Generation failed.');
+  }
+}
+
+/**
+ * Chat-aware stop: abort the in-flight turn but KEEP the conversation history
+ * and all prior entry cards (unlike stopGeneration, used by the full-page wizard).
+ */
+export function stopChatTurn() {
+  state._userStopped = true;
+  cancelGeneration();
+
+  const sid = state.chatSessionId || state.generationBatchSessionId;
+  if (sid) {
+    clearGenerationBatchPoll();
+    axios.post(`/cp/ai-generate/generate-cancel/${sid}`, {}, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    }).catch(() => {});
+    state.generationBatchSessionId = null;
+  }
+
+  state.generating = false;
+  state.planning = false;
+  state.generationError = null;
+  state._backgroundedAt = null;
+}
+
 // ─── Field schema cache ──────────────────────────────────────────────────
 
 export async function fetchFieldPreview(collection, blueprint) {
@@ -583,6 +931,56 @@ export async function fetchFieldPreview(collection, blueprint) {
 }
 
 // ─── Saving ──────────────────────────────────────────────────────────────
+
+/**
+ * True when any entry OTHER than `exceptId` still holds generated content that
+ * would be lost by a full-page navigation — i.e. a drafted-but-unsaved card
+ * (READY) or one still being produced/saved (QUEUED / DRAFTING / SAVING).
+ */
+export function hasOtherPendingEntries(exceptId = null) {
+  return state.entries.some(
+    (e) => e.id !== exceptId
+      && [STATUS.READY, STATUS.QUEUED, STATUS.DRAFTING, STATUS.SAVING].includes(e.status),
+  );
+}
+
+/**
+ * Open a saved entry's CP editor without destroying the rest of the batch.
+ *
+ * The batch lives in module-scoped memory, so navigating the current tab away
+ * (window.location) wipes every other generated-but-unsaved entry. When other
+ * entries are still pending we therefore open the editor in a NEW TAB and keep
+ * the panel intact; only when nothing else would be lost do we navigate in place.
+ */
+function openEntryEditor(editUrl, cardId, isUpdate) {
+  if (!editUrl) return;
+
+  if (hasOtherPendingEntries(cardId)) {
+    // NB: don't pass 'noopener' in the features string — that forces the return
+    // value to null and defeats the pop-up-blocked check. Sever opener manually.
+    const win = window.open(editUrl, '_blank');
+    if (win) {
+      try { win.opener = null; } catch { /* ignore */ }
+    }
+    if (_toast) {
+      if (win) {
+        _toast.success(isUpdate
+          ? _trans('Entry updated — opened in a new tab. Your other entries are kept here.')
+          : _trans('Entry created — opened in a new tab. Your other entries are kept here.'));
+      } else {
+        // Pop-up blocked: don't navigate (that would drop the batch). Point the
+        // user at the card's Edit link, which also opens in a new tab.
+        _toast.error(_trans('Pop-up blocked — use the “Edit” link on the card to open this entry.'));
+      }
+    }
+    return;
+  }
+
+  if (_toast) {
+    _toast.success(isUpdate ? _trans('Entry updated — opening editor.') : _trans('Entry created — opening editor.'));
+  }
+  setTimeout(() => { window.location.href = editUrl; }, 600);
+}
 
 export async function saveCard(id, mode) {
   const card = state.entries.find((e) => e.id === id);
@@ -616,8 +1014,7 @@ export async function saveCard(id, mode) {
       card.savedEntry = { entry_id: data.entry_id, edit_url: data.edit_url, title: data.title };
       if (_toast) {
         if (mode === 'edit') {
-          _toast.success(isUpdate ? _trans('Entry updated — opening editor.') : _trans('Entry created — opening editor.'));
-          setTimeout(() => { window.location.href = data.edit_url; }, 600);
+          openEntryEditor(data.edit_url, card.id, isUpdate);
         } else {
           _toast.success(isUpdate ? _trans('Entry updated.') : _trans('Entry saved as draft.'));
         }
@@ -747,15 +1144,23 @@ function resetGenerationOnly() {
   state.plan = null;
   state.entries = [];
   state.generationError = null;
+  state.plannerAnswer = null;
+  state.operations = [];
+  state.transcript = [];
+  state.chatSessionId = null;
+  state.currentChatId = null;
   state.planning = false;
   state.generating = false;
   state.bulkSaving = false;
   state.activityLog = [];
+  state.hasServerActivity = false;
 }
 
-/** Clear everything except `active`; used when user clicks "New request". */
+/** Clear everything except `active`; used when user clicks "New chat". */
 export function reset() {
   resetGenerationOnly();
+  state.mentionedTitles = [];
+  state.pendingAttachedFiles = [];
   state._backgroundedAt = null;
 }
 

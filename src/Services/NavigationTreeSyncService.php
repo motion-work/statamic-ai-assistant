@@ -158,82 +158,137 @@ class NavigationTreeSyncService
                 throw new \InvalidArgumentException(__('Source and destination languages cannot be the same.'));
             }
 
-            $destSite = Site::all()->firstWhere('locale', $destLocale);
-            if (! $destSite) {
-                $results[] = [
-                    'locale' => $destLocale,
-                    'success' => false,
-                    'error' => __('Destination site not found for locale: :locale', ['locale' => $destLocale]),
-                ];
-                continue;
-            }
-
-            $destSiteHandle = $destSite->handle();
-
-            $translated = [];
-
-            try {
-                $entryIds = $this->collectEntryIdsFromBranches($tree);
-                foreach ($entryIds as $entryId) {
-                    $entry = EntryFacade::find($entryId);
-                    if (! $entry) {
-                        continue;
-                    }
-                    $root = $entry->root();
-                    $sourceRoot = $this->resolveRootInSite($root, $sourceSiteHandle);
-                    if (! $sourceRoot) {
-                        continue;
-                    }
-
-                    if ($this->localizationForSite($root, $destSiteHandle) !== null) {
-                        continue;
-                    }
-
-                    $res = $this->translationService->translateEntry(
-                        $sourceRoot,
-                        $sourceLocale,
-                        $destLocale,
-                        $overwrite,
-                        $maxDepth,
-                    );
-
-                    if (! ($res['success'] ?? false)) {
-                        throw new \RuntimeException($res['error'] ?? __('Translation failed.'));
-                    }
-                    $translated[] = EntryLabel::for($sourceRoot);
-                }
-
-                $mapped = $this->mapTreeForSite($tree, $destSiteHandle, $sourceLocale, $destLocale);
-                $mapped = BranchIds::ensure($mapped);
-
-                $navTree = $nav->in($destSiteHandle) ?? $nav->makeTree($destSiteHandle);
-                $navTree->tree($mapped);
-                $navTree->save();
-
-                $warnings = [];
-                if ($urlOnlyNavigation) {
-                    $warnings[] = __('Navigation URL-only sync notice');
-                }
-
-                $results[] = [
-                    'locale' => $destLocale,
-                    'site_handle' => $destSiteHandle,
-                    'success' => true,
-                    'warnings' => $warnings,
-                    'warnings_translated_titles' => $translated,
-                    'message' => __('Navigation tree saved for :site.', ['site' => $destSite->name()]),
-                ];
-            } catch (\Throwable $e) {
-                $results[] = [
-                    'locale' => $destLocale,
-                    'site_handle' => $destSite->handle(),
-                    'success' => false,
-                    'error' => $e->getMessage(),
-                ];
-            }
+            $results[] = $this->syncLocale($navHandle, $destLocale, $overwrite, $maxDepth);
         }
 
         return ['results' => $results];
+    }
+
+    /**
+     * Sync ONE destination locale. This is the unit queued nav-sync jobs run;
+     * $onPage streams per-page progress ('processing' before translating a
+     * missing page, 'completed' with the full page payload after) so the CP
+     * can render live rows exactly like entry translations.
+     *
+     * @param  (callable(string $phase, array<string, mixed> $page): void)|null  $onPage
+     * @return array<string, mixed> Per-locale result row (same shape as sync()'s result items)
+     */
+    public function syncLocale(string $navHandle, string $destLocale, bool $overwrite, int $maxDepth, ?callable $onPage = null): array
+    {
+        $nav = Nav::findByHandle($navHandle);
+        if (! $nav) {
+            return ['locale' => $destLocale, 'success' => false, 'error' => __('Navigation not found.')];
+        }
+
+        $resolved = $this->resolveSourceNavigationTree($nav);
+        $sourceSite = $resolved['site'];
+        $tree = $resolved['tree'];
+        $sourceSiteHandle = $sourceSite->handle();
+        $sourceLocale = $sourceSite->locale();
+        $urlOnlyNavigation = $resolved['url_only'] ?? false;
+
+        if ($destLocale === $sourceLocale) {
+            return ['locale' => $destLocale, 'success' => false, 'error' => __('Source and destination languages cannot be the same.')];
+        }
+
+        $destSite = Site::all()->firstWhere('locale', $destLocale);
+        if (! $destSite) {
+            return [
+                'locale' => $destLocale,
+                'success' => false,
+                'error' => __('Destination site not found for locale: :locale', ['locale' => $destLocale]),
+            ];
+        }
+
+        $destSiteHandle = $destSite->handle();
+
+        $translated = [];
+        $pages = [];
+
+        try {
+            $entryIds = $this->collectEntryIdsFromBranches($tree);
+            foreach ($entryIds as $entryId) {
+                $entry = EntryFacade::find($entryId);
+                if (! $entry) {
+                    continue;
+                }
+                $root = $entry->root();
+                $sourceRoot = $this->resolveRootInSite($root, $sourceSiteHandle);
+                if (! $sourceRoot) {
+                    continue;
+                }
+
+                if ($this->localizationForSite($root, $destSiteHandle) !== null) {
+                    continue;
+                }
+
+                if ($onPage) {
+                    $onPage('processing', [
+                        'source_entry_id' => (string) $sourceRoot->id(),
+                        'origin_title' => EntryLabel::for($sourceRoot),
+                    ]);
+                }
+
+                $res = $this->translationService->translateEntry(
+                    $sourceRoot,
+                    $sourceLocale,
+                    $destLocale,
+                    $overwrite,
+                    $maxDepth,
+                );
+
+                if (! ($res['success'] ?? false)) {
+                    throw new \RuntimeException($res['error'] ?? __('Translation failed.'));
+                }
+                $translated[] = EntryLabel::for($sourceRoot);
+
+                // Keep the full per-page outcome (incl. linked entries the
+                // translator auto-created) so the CP can render one progress
+                // row per translated page, exactly like entry translations.
+                $page = [
+                    'source_entry_id' => (string) $sourceRoot->id(),
+                    'entry_id' => $res['entry_id'] ?? null,
+                    'origin_title' => $res['origin_title'] ?? EntryLabel::for($sourceRoot),
+                    'target_title' => $res['target_title'] ?? null,
+                    'edit_url' => $res['edit_url'] ?? null,
+                    'linked_entries' => $res['linked_entries'] ?? [],
+                ];
+                $pages[] = $page;
+
+                if ($onPage) {
+                    $onPage('completed', $page);
+                }
+            }
+
+            $mapped = $this->mapTreeForSite($tree, $destSiteHandle, $sourceLocale, $destLocale);
+            $mapped = BranchIds::ensure($mapped);
+
+            $navTree = $nav->in($destSiteHandle) ?? $nav->makeTree($destSiteHandle);
+            $navTree->tree($mapped);
+            $navTree->save();
+
+            $warnings = [];
+            if ($urlOnlyNavigation) {
+                $warnings[] = __('Navigation URL-only sync notice');
+            }
+
+            return [
+                'locale' => $destLocale,
+                'site_handle' => $destSiteHandle,
+                'success' => true,
+                'warnings' => $warnings,
+                'warnings_translated_titles' => $translated,
+                'pages' => $pages,
+                'message' => __('Navigation tree saved for :site.', ['site' => $destSite->name()]),
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'locale' => $destLocale,
+                'site_handle' => $destSite->handle(),
+                'success' => false,
+                'error' => $e->getMessage(),
+            ];
+        }
     }
 
     /**

@@ -13,9 +13,121 @@ class TranslationService
 {
     protected EntryTranslator $entryTranslator;
 
-    public function __construct(EntryTranslator $entryTranslator)
+    public function __construct(EntryTranslator $entryTranslator, ?TermTranslator $termTranslator = null)
     {
         $this->entryTranslator = $entryTranslator;
+        $this->termTranslator = $termTranslator ?? app(TermTranslator::class);
+    }
+
+    protected TermTranslator $termTranslator;
+
+    /**
+     * Translate a single taxonomy term into a destination locale. Terms
+     * localize in place (same term id, per-site data), so there is no
+     * origin-graph or linked-entry handling — but the result mirrors
+     * translateEntry()'s shape so the CP progress UI renders it identically.
+     *
+     * @return array<string, mixed>
+     */
+    public function translateTerm(string $termId, string $sourceLocale, string $destinationLocale, bool $overwrite = true): array
+    {
+        $sourceSite = Site::all()->firstWhere('locale', $sourceLocale);
+        $destinationSite = Site::all()->firstWhere('locale', $destinationLocale);
+
+        if (! $sourceSite || ! $destinationSite) {
+            return $this->termErrorResult($termId, __('Source or destination site not found.'), $destinationLocale);
+        }
+
+        $term = \Statamic\Facades\Term::find($termId);
+        if ($term && method_exists($term, 'term')) {
+            $term = $term->term();
+        }
+
+        if (! $term) {
+            return $this->termErrorResult($termId, __('Term not found: :id', ['id' => $termId]), $destinationLocale);
+        }
+
+        $originTitle = (string) ($term->in($sourceSite->handle())->title() ?? $term->slug());
+
+        $existingData = $term->dataForLocale($destinationSite->handle());
+        $exists = collect($existingData)->isNotEmpty();
+
+        if ($exists && ! $overwrite) {
+            return [
+                'success' => true,
+                'entry_id' => $termId,
+                'source_entry_id' => $termId,
+                'title' => $originTitle,
+                'origin_title' => $originTitle,
+                'target_title' => (string) ($term->in($destinationSite->handle())->title() ?? $originTitle),
+                'is_new' => false,
+                'skipped' => true,
+                'error' => null,
+                'edit_url' => $term->in($destinationSite->handle())->editUrl(),
+                'destination_locale' => $destinationLocale,
+                'linked_entries' => [],
+            ];
+        }
+
+        try {
+            $localized = $this->termTranslator->translateTerm($term, $sourceSite->handle(), $destinationSite->handle());
+            $untranslatedFields = $this->termTranslator->takeSkippedNonLocalizable();
+
+            Log::info('TranslationService: Term translated via DeepL', [
+                'term_id' => $termId,
+                'source' => $sourceLocale,
+                'destination' => $destinationLocale,
+                'is_new' => ! $exists,
+            ]);
+
+            return [
+                'success' => true,
+                'entry_id' => $termId,
+                'source_entry_id' => $termId,
+                'edit_url' => $localized->editUrl(),
+                'title' => $originTitle,
+                'origin_title' => $originTitle,
+                'target_title' => (string) ($localized->title() ?? $originTitle),
+                'is_new' => ! $exists,
+                'skipped' => false,
+                'error' => null,
+                'destination_locale' => $destinationLocale,
+                'linked_entries' => [],
+                'unresolved_references' => [],
+                'untranslated_fields' => $untranslatedFields,
+            ];
+        } catch (\Exception $e) {
+            Log::error('TranslationService: DeepL term translation failed', [
+                'term_id' => $termId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->termErrorResult($termId, __('Translation failed for term :title: :error', [
+                'title' => $originTitle,
+                'error' => $e->getMessage(),
+            ]), $destinationLocale);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function termErrorResult(string $termId, string $error, string $destinationLocale): array
+    {
+        return [
+            'success' => false,
+            'entry_id' => $termId,
+            'source_entry_id' => $termId,
+            'title' => $termId,
+            'origin_title' => $termId,
+            'target_title' => null,
+            'is_new' => false,
+            'skipped' => false,
+            'error' => $error,
+            'edit_url' => null,
+            'destination_locale' => $destinationLocale,
+            'linked_entries' => [],
+        ];
     }
 
     /**
@@ -84,6 +196,16 @@ class TranslationService
                 fn (array $e) => ($e['entry_id'] ?? '') !== $primaryId
             ));
 
+            // References left pointing at source-site entries (linked entry not
+            // translated yet / depth budget exhausted). The post-batch reconcile
+            // pass heals the ones translated later in the same batch; the rest
+            // stay visible as a warning so editors know to translate them.
+            $unresolved = $this->entryTranslator->takeUnresolvedReferences();
+
+            // Text-bearing fields skipped due to localizable: false — shown as a
+            // warning so "still in the source language" is never a mystery.
+            $untranslatedFields = $this->entryTranslator->takeSkippedNonLocalizable();
+
             Log::info('TranslationService: Entry translated via DeepL', [
                 'entry_id' => $targetEntry->id(),
                 'source' => $sourceLocale,
@@ -104,6 +226,8 @@ class TranslationService
                 'error' => null,
                 'destination_locale' => $destinationLocale,
                 'linked_entries' => $linkedEntries,
+                'unresolved_references' => $unresolved,
+                'untranslated_fields' => $untranslatedFields,
             ];
         } catch (\Exception $e) {
             $this->entryTranslator->resetLinkedEntriesBuffer();
@@ -239,6 +363,68 @@ class TranslationService
     /**
      * @return array<string, mixed>
      */
+    /**
+     * Post-batch reference reconcile: re-run the reference pass in remap-only
+     * mode over every localization the batch produced (plus linked entries it
+     * auto-created). Heals references that were left pointing at source-site
+     * entries because the linked entry had no translation yet when the
+     * referencing page was translated — after the batch, those translations
+     * exist, so the ids can be swapped. Never creates entries, never calls
+     * DeepL. Returns the number of entries whose references were healed.
+     *
+     * @param  array<int, array{0: string, 1: string}>  $entryLocalePairs  [entryId, destinationLocale]
+     * @param  array<int, string>  $extraTargetEntryIds  Localization ids to reconcile directly (e.g. auto-created linked entries)
+     */
+    public function reconcileBatchReferences(array $entryLocalePairs, array $extraTargetEntryIds = []): int
+    {
+        $targets = [];
+
+        foreach ($entryLocalePairs as $pair) {
+            if (! is_array($pair) || count($pair) !== 2) {
+                continue;
+            }
+            [$entryId, $locale] = $pair;
+
+            $site = Site::all()->firstWhere('locale', $locale);
+            $entry = \Statamic\Facades\Entry::find($entryId);
+
+            // in() walks the localization graph from whichever localization the
+            // caller selected, so this finds the batch's target entry directly.
+            $target = ($site && $entry) ? $entry->in($site->handle()) : null;
+
+            if ($target) {
+                $targets[(string) $target->id()] = $target;
+            }
+        }
+
+        foreach ($extraTargetEntryIds as $id) {
+            if (is_string($id) && $id !== '' && ! isset($targets[$id]) && ($entry = \Statamic\Facades\Entry::find($id))) {
+                $targets[$id] = $entry;
+            }
+        }
+
+        $healed = 0;
+
+        foreach ($targets as $target) {
+            try {
+                if ($this->entryTranslator->remapEntryReferences($target)) {
+                    $healed++;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('TranslationService: reference reconcile failed for entry', [
+                    'entry_id' => (string) $target->id(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Drain the remap-only pass's bookkeeping — still-unresolved ids were
+        // already reported per entry during translation.
+        $this->entryTranslator->takeUnresolvedReferences();
+
+        return $healed;
+    }
+
     protected function entryStatusPayload(array $result): array
     {
         return [
@@ -251,6 +437,8 @@ class TranslationService
             'is_new' => $result['is_new'] ?? null,
             'skipped' => (bool) ($result['skipped'] ?? false),
             'linked_entries' => $result['linked_entries'] ?? [],
+            'unresolved_references' => $result['unresolved_references'] ?? [],
+            'untranslated_fields' => $result['untranslated_fields'] ?? [],
         ];
     }
 

@@ -109,7 +109,7 @@ class RemoteImageFetcher
         $timeout = max(1, (int) config('statamic-ai-assistant.image_fetch.timeout', 20));
         $maxBytes = max(1024, (int) config('statamic-ai-assistant.image_fetch.max_bytes', 10 * 1024 * 1024));
 
-        $saved = $this->downloader->save($container, $folder, $url, $timeout, $maxBytes);
+        $saved = $this->downloader->save($container, $folder, $url, $timeout, $maxBytes, $reason);
 
         if ($saved === null) {
             Log::warning('[entry-gen-tool] save_remote_image failed', ['url' => $url, 'reason' => $reason]);

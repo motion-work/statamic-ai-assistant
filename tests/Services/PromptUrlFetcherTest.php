@@ -63,19 +63,26 @@ class PromptUrlFetcherTest extends TestCase
 
     public function test_html_extraction_empty_falls_back_to_markdown(): void
     {
-        config(['statamic-ai-assistant.prompt_url_fetch.reader_format' => 'html']);
+        config([
+            'statamic-ai-assistant.prompt_url_fetch.reader_format' => 'html',
+            'statamic-ai-assistant.prompt_url_fetch.direct_first' => false,
+        ]);
 
-        // First call (html, with X-Return-Format) yields an empty document;
-        // second call (markdown fallback, different headers) yields content.
-        Http::fakeSequence('r.jina.ai/*')
-            ->push('<html><body></body></html>', 200)
-            ->push("# Fallback markdown content", 200);
+        // Jina html (X-Return-Format) yields an empty document, the direct fetch
+        // is blocked, so it falls through to Jina's markdown mode.
+        Http::fake([
+            'r.jina.ai/*' => Http::sequence()
+                ->push('<html><body></body></html>', 200)
+                ->push('# Fallback markdown content', 200),
+            '*' => Http::response('', 403),
+        ]);
 
         $result = $this->fetcher->fetchSingle('https://example.com/page');
 
         $this->assertTrue($result['ok']);
         $this->assertStringContainsString('Fallback markdown content', $result['body']);
-        Http::assertSentCount(2);
+        // jina-html → direct (blocked) → jina-markdown.
+        Http::assertSentCount(3);
     }
 
     public function test_full_scope_keeps_links_outside_main(): void
@@ -93,5 +100,70 @@ class PromptUrlFetcherTest extends TestCase
 
         $this->assertTrue($result['ok']);
         $this->assertStringContainsString('Discover this teaser', $result['body']);
+    }
+
+    public function test_direct_fetch_is_used_first_and_skips_jina_for_server_rendered_pages(): void
+    {
+        config([
+            'statamic-ai-assistant.prompt_url_fetch.reader_format' => 'html',
+            'statamic-ai-assistant.prompt_url_fetch.direct_first' => true,
+        ]);
+
+        Http::fake([
+            'r.jina.ai/*' => Http::response('<html><body><main><p>SHOULD NOT BE USED</p></main></body></html>', 200),
+            '*' => Http::response(
+                '<html><body><main><h1>Direct Title</h1><p>Server-rendered content fetched directly.</p></main></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=utf-8'],
+            ),
+        ]);
+
+        $result = $this->fetcher->fetchSingle('https://direct-site.test/page');
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('# Direct Title', $result['body']);
+        $this->assertStringContainsString('fetched directly', $result['body']);
+        // Jina must not be touched when the direct fetch already yields content.
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'r.jina.ai'));
+    }
+
+    public function test_direct_fetch_failure_falls_back_to_jina(): void
+    {
+        config([
+            'statamic-ai-assistant.prompt_url_fetch.reader_format' => 'html',
+            'statamic-ai-assistant.prompt_url_fetch.direct_first' => true,
+        ]);
+
+        Http::fake([
+            'r.jina.ai/*' => Http::response('<html><body><main><h1>Via Jina</h1><p>Recovered through the reader.</p></main></body></html>', 200),
+            '*' => Http::response('', 403),
+        ]);
+
+        $result = $this->fetcher->fetchSingle('https://blocked.test/page');
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('Recovered through the reader.', $result['body']);
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'r.jina.ai'));
+    }
+
+    public function test_direct_fetch_with_empty_body_html_falls_back_to_jina(): void
+    {
+        // Reproduces the TYPO3/Jina case: a 200 HTML response whose <body> is
+        // empty (real markup dumped elsewhere) — local extraction yields nothing,
+        // so we must fall back to the reader instead of returning empty.
+        config([
+            'statamic-ai-assistant.prompt_url_fetch.reader_format' => 'html',
+            'statamic-ai-assistant.prompt_url_fetch.direct_first' => true,
+        ]);
+
+        Http::fake([
+            'r.jina.ai/*' => Http::response('<html><body><main><h1>Reader Save</h1><p>The reader recovered the content.</p></main></body></html>', 200),
+            '*' => Http::response('<html lang="de"><head></head><body></body></html>', 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        $result = $this->fetcher->fetchSingle('https://typo3-site.test/page');
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('The reader recovered the content.', $result['body']);
     }
 }

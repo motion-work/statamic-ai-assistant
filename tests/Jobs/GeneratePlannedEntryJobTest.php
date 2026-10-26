@@ -82,7 +82,12 @@ class GeneratePlannedEntryJobTest extends TestCase
         $session = $this->batch->getSession($sid);
         $this->assertSame('ready', $session['entries']['e1']['status']);
         $this->assertSame('completed', $session['status']);
-        $this->assertSame([], $session['url_augmentation']['preferred_paths']);
+        // Taken paths ROTATE rather than drain: user-chosen imagery stays
+        // available for every subsequent field and entry of the batch.
+        $this->assertSame(
+            [['container' => 'images', 'path' => 'a.jpg']],
+            $session['url_augmentation']['preferred_paths'],
+        );
     }
 
     public function test_handle_marks_failed_when_cancelled(): void

@@ -71,7 +71,7 @@ trait TranslatesFields
             $fieldType = $fieldDef['type'] ?? null;
             $isLocalizable = $fieldDef['localizable'] ?? true;
 
-            if (! $isLocalizable && ! $this->shouldForceTranslateHandle($handle)) {
+            if (! $isLocalizable && ! $this->shouldForceTranslateField($handle, $fieldDef)) {
                 continue;
             }
 
@@ -81,16 +81,68 @@ trait TranslatesFields
         return $result;
     }
 
-    /**
-     * Blueprint fields marked localizable: false are skipped unless listed in
-     * config('deepl.force_translate_handles') (e.g. hero_title on shared hero fieldsets).
-     */
-    private function shouldForceTranslateHandle(string $handle): bool
-    {
-        /** @var array<int, string> $handles */
-        $handles = config('deepl.force_translate_handles', ['hero_title']);
+    /** @var array<string, bool> Text-bearing fields skipped because localizable: false (drained per run) */
+    private array $skippedNonLocalizable = [];
 
-        return in_array($handle, $handles, true);
+    /**
+     * Whether a field marked localizable: false should be translated anyway.
+     *
+     * Two ways in:
+     *  - config('deepl.force_translate_handles') — exact handles or wildcard
+     *    patterns ("hero_title", "key_facts_*") for targeted overrides;
+     *  - config('deepl.translate_non_localizable_text') — site-wide switch that
+     *    covers every TEXT-BEARING type (plain text, Bard, and replicator/grid
+     *    containers). Shared fieldsets are frequently imported with
+     *    localizable: false on fields that clearly carry language ("1.5 Zimmer",
+     *    "Gäste") — inheriting them leaks source-language content into every
+     *    localization.
+     *
+     * Non-text types (assets, toggles, dates, references) are never forced —
+     * inheriting those from the origin is exactly what non-localizable means.
+     * Skipped text-bearing fields are recorded so runs can WARN about them
+     * instead of silently leaving source-language content behind.
+     */
+    private function shouldForceTranslateField(string $handle, ?array $fieldDef): bool
+    {
+        /** @var array<int, string> $patterns */
+        $patterns = config('deepl.force_translate_handles', ['hero_title']);
+
+        foreach ($patterns as $pattern) {
+            if (is_string($pattern) && fnmatch($pattern, $handle)) {
+                return true;
+            }
+        }
+
+        $type = $fieldDef['type'] ?? null;
+        $textBearing = in_array($type, self::TRANSLATABLE_TYPES)
+            || in_array($type, self::BARD_TYPES)
+            || in_array($type, self::RECURSIVE_TYPES);
+
+        if (! $textBearing) {
+            return false;
+        }
+
+        if ((bool) config('deepl.translate_non_localizable_text', false)) {
+            return true;
+        }
+
+        $this->skippedNonLocalizable[$handle] = true;
+
+        return false;
+    }
+
+    /**
+     * Text-bearing fields left untranslated because of localizable: false,
+     * drained by the caller to surface as warnings.
+     *
+     * @return array<int, string>
+     */
+    public function takeSkippedNonLocalizable(): array
+    {
+        $out = array_keys($this->skippedNonLocalizable);
+        $this->skippedNonLocalizable = [];
+
+        return $out;
     }
 
     /**

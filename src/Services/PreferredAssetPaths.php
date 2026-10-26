@@ -5,9 +5,9 @@ namespace MotionWork\StatamicAiAssistant\Services;
 /**
  * Mutable queue of {container, path} pairs the asset resolver should consume
  * before falling back to random container assets. Mutability is intentional:
- * the resolver pops paths as fields are filled, and each generation job has
- * its own instance, so there is no shared-state hazard between concurrent
- * queue workers.
+ * the resolver cycles paths as fields are filled (taken entries rotate to the
+ * back), and each generation job has its own instance, so there is no
+ * shared-state hazard between concurrent queue workers.
  */
 class PreferredAssetPaths
 {
@@ -64,15 +64,24 @@ class PreferredAssetPaths
     }
 
     /**
-     * Pop up to $count paths whose container matches the field's container.
+     * Take up to $count paths whose container matches the field's container.
      * Returns the relative paths (no container prefix) — the resolver assigns
      * them straight to the `assets` field value.
+     *
+     * Taken entries ROTATE to the back of the queue instead of being deleted:
+     * a single referenced image must be able to serve every asset field ("use
+     * this image everywhere" — hero AND seo_image), and when a batch has more
+     * fields/entries than preferred images, cycling through user-chosen imagery
+     * beats falling back to random container assets. Distribution still works:
+     * consecutive takes round-robin through the pool. Within ONE take each
+     * entry is used at most once (no duplicates inside a single gallery).
      *
      * @return array<int, string>
      */
     public function takeForContainer(string $containerHandle, int $count): array
     {
         $taken = [];
+        $rotated = [];
 
         foreach ($this->entries as $idx => $entry) {
             if (count($taken) >= $count) {
@@ -80,11 +89,12 @@ class PreferredAssetPaths
             }
             if (($entry['container'] ?? null) === $containerHandle) {
                 $taken[] = (string) $entry['path'];
+                $rotated[] = $entry;
                 unset($this->entries[$idx]);
             }
         }
 
-        $this->entries = array_values($this->entries);
+        $this->entries = array_values(array_merge($this->entries, $rotated));
 
         return $taken;
     }

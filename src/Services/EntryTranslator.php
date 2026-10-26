@@ -43,8 +43,47 @@ class EntryTranslator
         int $currentDepth = 0,
         int $maxDepth = 1,
     ): StatamicEntry {
+        // Bulk runs execute one job per (entry × locale) on PARALLEL workers,
+        // and a job may also create LINKED entries' localizations recursively.
+        // Without a lock, two workers can create two different localizations
+        // for the same (origin, site) pair — split-brain translations. The lock
+        // serializes creation per pair; on timeout we degrade to today's
+        // behavior rather than failing the job.
+        $lock = \Illuminate\Support\Facades\Cache::lock(
+            'ai-translate:'.$originEntry->id().':'.$targetSite,
+            600,
+        );
+
+        $locked = false;
+        try {
+            $locked = $lock->block(30);
+        } catch (\Throwable) {
+            $locked = false;
+        }
+
+        try {
+            return $this->translateEntryLocked($originEntry, $targetSite, $existingTarget, $currentDepth, $maxDepth);
+        } finally {
+            if ($locked) {
+                try {
+                    $lock->release();
+                } catch (\Throwable) {
+                    // Lock expired during a long translation — nothing to release.
+                }
+            }
+        }
+    }
+
+    private function translateEntryLocked(
+        mixed $originEntry,
+        string $targetSite,
+        mixed $existingTarget = null,
+        int $currentDepth = 0,
+        int $maxDepth = 1,
+    ): StatamicEntry {
         if ($currentDepth === 0) {
             $this->linkedEntriesBuffer = [];
+            $this->skippedNonLocalizable = [];
         }
 
         $this->sourceLang = $originEntry->locale();
@@ -85,6 +124,17 @@ class EntryTranslator
         $translatedData = $this->resolveReferences($translatedData, $fields, $targetSite, $currentDepth, $maxDepth);
 
         $targetEntry = $existingTarget;
+
+        // Re-check for a localization created while we were translating or
+        // waiting on the lock (another worker, or a recursive resolution in a
+        // parallel job) — update it instead of creating a duplicate.
+        if (! $targetEntry) {
+            $targetEntry = Entry::query()
+                ->where('origin', $originEntry->id())
+                ->where('site', $targetSite)
+                ->first();
+        }
+
         if (! $targetEntry) {
             $cachedTargetId = $this->referenceResolver->getCachedTargetId($originEntry->id(), $targetSite);
             if ($cachedTargetId) {
@@ -135,6 +185,37 @@ class EntryTranslator
     }
 
     /**
+     * Re-run ONLY the reference pass over an already-translated localization,
+     * in remap-only mode (maxDepth 0: swap ids whose target localization now
+     * exists, never create anything). Used by the post-batch reconcile step to
+     * heal references that pointed at source-site entries because the linked
+     * entry had not been translated yet when this one was. Returns true when
+     * the entry changed and was saved.
+     */
+    public function remapEntryReferences(mixed $localizedEntry): bool
+    {
+        $blueprint = $localizedEntry->blueprint();
+
+        if (! $blueprint) {
+            return false;
+        }
+
+        $fields = $this->getFieldDefinitions($blueprint);
+        $data = $localizedEntry->data()->toArray();
+
+        $remapped = $this->resolveReferences($data, $fields, (string) $localizedEntry->locale(), 0, 0);
+
+        if ($remapped === $data) {
+            return false;
+        }
+
+        $localizedEntry->data($remapped);
+        $localizedEntry->saveQuietly();
+
+        return true;
+    }
+
+    /**
      * @return array<int, array{entry_id: string, title: string, edit_url: string|null, collection_handle: string, collection_title: string}>
      */
     public function takeLinkedEntriesCreated(): array
@@ -148,6 +229,17 @@ class EntryTranslator
     public function resetLinkedEntriesBuffer(): void
     {
         $this->linkedEntriesBuffer = [];
+    }
+
+    /**
+     * Origin ids whose references stayed pointing at source-site entries this
+     * run (see EntryReferenceResolver::takeUnresolved()).
+     *
+     * @return array<int, string>
+     */
+    public function takeUnresolvedReferences(): array
+    {
+        return $this->referenceResolver->takeUnresolved();
     }
 
     // ── Entry-specific collect (handles REFERENCE_TYPES pass-through) ─
@@ -180,7 +272,7 @@ class EntryTranslator
             $fieldType = $fieldDef['type'] ?? null;
             $isLocalizable = $fieldDef['localizable'] ?? true;
 
-            if (! $isLocalizable && ! $this->shouldForceTranslateHandle($handle)) {
+            if (! $isLocalizable && ! $this->shouldForceTranslateField($handle, $fieldDef)) {
                 continue;
             }
 

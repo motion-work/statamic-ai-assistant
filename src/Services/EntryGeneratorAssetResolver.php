@@ -140,7 +140,7 @@ class EntryGeneratorAssetResolver
 
         // Drain matching downloaded paths first so migrated entries actually
         // reference the page's own images instead of random container assets.
-        $containerHandle = $config['container'] ?? null;
+        $containerHandle = $this->resolveContainerHandle($field);
         if ($preferred !== null && is_string($containerHandle) && $containerHandle !== '') {
             $picked = $preferred->takeForContainer($containerHandle, $count);
         }
@@ -186,7 +186,7 @@ class EntryGeneratorAssetResolver
         $type = $field->type();
 
         if ($type === 'assets') {
-            $handle = $field->config()['container'] ?? null;
+            $handle = $this->resolveContainerHandle($field);
 
             return is_string($handle) && $handle !== '' ? $handle : null;
         }
@@ -329,7 +329,7 @@ class EntryGeneratorAssetResolver
 
         $picked = [];
 
-        $containerHandle = $config['container'] ?? null;
+        $containerHandle = $this->resolveContainerHandle($field);
         if ($preferred !== null && is_string($containerHandle) && $containerHandle !== '') {
             $picked = $preferred->takeForContainer($containerHandle, $count);
         }
@@ -348,12 +348,41 @@ class EntryGeneratorAssetResolver
     }
 
     /**
+     * Resolve the asset container handle for a field the same way Statamic's own
+     * Assets fieldtype does: an explicit `container` config wins; otherwise, when
+     * the site has exactly one asset container, that sole container is used.
+     * Returns null only when nothing resolves (no config and 0 or >1 containers).
+     *
+     * Statamic lets an assets field OMIT `container` whenever a single container
+     * exists — a common single-container setup, and the usual shape of fields
+     * imported into replicator/components sets. Reading `config('container')`
+     * directly (as the fill + random-fallback paths used to) then resolves to
+     * null and the field silently stays empty. Routing every container lookup
+     * through here fixes that for EVERY assets field in the blueprint tree
+     * (top-level, groups, replicator/components sets, grids) — not one section.
+     */
+    private function resolveContainerHandle(Field $field): ?string
+    {
+        $handle = $field->config()['container'] ?? null;
+
+        if (is_string($handle) && $handle !== '') {
+            return $handle;
+        }
+
+        $containers = AssetContainer::all();
+
+        return $containers->count() === 1
+            ? (string) $containers->first()->handle()
+            : null;
+    }
+
+    /**
      * @return Collection<int, StatamicAsset|AssetContract>
      */
     private function getCandidateAssets(Field $field): Collection
     {
         $config = $field->config();
-        $handle = $config['container'] ?? null;
+        $handle = $this->resolveContainerHandle($field);
 
         if (! $handle) {
             return collect();

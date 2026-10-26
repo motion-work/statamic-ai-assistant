@@ -77,15 +77,12 @@
       </span>
       <span class="eg-entry-card__saved-text">{{ isUpdate ? __('Update applied.') : __('Saved as draft.') }}</span>
       <a
-        v-if="!navigateAwayWouldAbortBatch"
         :href="entry.savedEntry.edit_url"
+        :target="otherPendingEntries ? '_blank' : null"
+        :rel="otherPendingEntries ? 'noopener' : null"
         class="eg-entry-card__saved-link"
-      >{{ __('Edit') }} →</a>
-      <span
-        v-else
-        class="eg-entry-card__saved-link eg-entry-card__saved-link--blocked"
-        :title="__('Edit becomes available after every entry has finished generating.')"
-      >{{ __('Edit') }} →</span>
+        :title="otherPendingEntries ? __('Opens in a new tab so your other entries stay here.') : null"
+      >{{ __('Edit') }} {{ otherPendingEntries ? '↗' : '→' }}</a>
     </div>
 
     <!-- Warnings (collapsed unless preview is expanded or there are no other actions) -->
@@ -160,9 +157,10 @@
           type="button"
           class="eg-entry-card__btn eg-entry-card__btn--primary"
           :disabled="busy"
+          :title="otherPendingEntries ? __('Opens in a new tab so your other entries stay here.') : null"
           @click="$emit('save', 'edit')"
         >
-          {{ savingEdit ? __('Saving…') : (isUpdate ? __('Apply & edit') : __('Save & edit')) }}
+          {{ savingEdit ? __('Saving…') : editButtonLabel }}
         </button>
       </template>
       <template v-else-if="entry.status === 'failed'">
@@ -186,8 +184,8 @@
 
 <script>
 import EntryGeneratorContentPreview from './EntryGeneratorContentPreview.vue';
-import { state as entryGenState, STATUS } from '../store/entryGeneratorStore.js';
-import { formatChatTextWithStrongUrls } from '../formatChatUrls.js';
+import { state as entryGenState, STATUS, hasOtherPendingEntries } from '../store/entryGeneratorStore.js';
+import { formatChatTextWithBoldUrls } from '../formatChatUrls.js';
 
 export default {
   name: 'EntryGeneratorEntryCard',
@@ -235,6 +233,20 @@ export default {
 
     isUpdate() {
       return this.entry.operation === 'update';
+    },
+
+    /**
+     * Other entries in the batch still hold unsaved/in-flight content. When true,
+     * opening this entry's editor must happen in a NEW TAB so the batch panel —
+     * and those other entries — are not wiped by a full-page navigation.
+     */
+    otherPendingEntries() {
+      return hasOtherPendingEntries(this.entry.id);
+    },
+
+    editButtonLabel() {
+      const base = this.isUpdate ? this.__('Apply & edit') : this.__('Save & edit');
+      return this.otherPendingEntries ? `${base} ↗` : base;
     },
 
     hasNoChanges() {
@@ -293,7 +305,7 @@ export default {
 
   methods: {
     chatHtml(text) {
-      return formatChatTextWithStrongUrls(text);
+      return formatChatTextWithBoldUrls(text);
     },
 
     toggleExpand() {

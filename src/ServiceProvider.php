@@ -11,6 +11,7 @@ use MotionWork\StatamicAiAssistant\Fieldtypes\TranslationActionPreflight;
 use MotionWork\StatamicAiAssistant\Fieldtypes\TranslationTargetLanguages;
 use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
+use MotionWork\StatamicAiAssistant\Services\EditorialGuidanceService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorAssetResolver;
@@ -31,9 +32,10 @@ use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
+use MotionWork\StatamicAiAssistant\Support\AgentAccess;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Statamic\Facades\CP\Nav;
-use Statamic\Facades\User;
 use Statamic\Providers\AddonServiceProvider;
 use Statamic\Statamic;
 
@@ -90,7 +92,10 @@ class ServiceProvider extends AddonServiceProvider
         });
 
         $this->app->singleton(TranslationService::class, function ($app) {
-            return new TranslationService($app->make(EntryTranslator::class));
+            return new TranslationService(
+                $app->make(EntryTranslator::class),
+                $app->make(\MotionWork\StatamicAiAssistant\Services\TermTranslator::class),
+            );
         });
 
         $this->app->singleton(TranslationGlossaryService::class, function ($app) {
@@ -113,8 +118,16 @@ class ServiceProvider extends AddonServiceProvider
             return new PromptUrlFetcher;
         });
 
-        $this->app->singleton(AssetImageDownloader::class, function () {
-            return new AssetImageDownloader;
+        $this->app->singleton(\MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator::class, function ($app) {
+            return new \MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator(
+                $app->make(AbstractAiService::class),
+            );
+        });
+
+        $this->app->singleton(AssetImageDownloader::class, function ($app) {
+            return new AssetImageDownloader(
+                $app->make(\MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator::class),
+            );
         });
 
         $this->app->singleton(RemoteImageFetcher::class, function ($app) {
@@ -142,6 +155,14 @@ class ServiceProvider extends AddonServiceProvider
             return new SetHintsService;
         });
 
+        $this->app->singleton(EditorialGuidanceService::class, function ($app) {
+            return new EditorialGuidanceService(
+                $app->make(TranslationGlossaryService::class),
+                $app->make(TranslationStyleRulesService::class),
+                $app->make(DeeplService::class),
+            );
+        });
+
         $this->app->singleton(EntryGeneratorService::class, function ($app) {
             return new EntryGeneratorService(
                 $app->make(AbstractAiService::class),
@@ -151,6 +172,7 @@ class ServiceProvider extends AddonServiceProvider
                 $app->make(SetHintsService::class),
                 $app->make(FigmaContentFetcher::class),
                 $app->make(RemoteImageFetcher::class),
+                editorialGuidance: $app->make(EditorialGuidanceService::class),
             );
         });
 
@@ -194,6 +216,15 @@ class ServiceProvider extends AddonServiceProvider
             __DIR__.'/../config/deepl.php' => config_path('deepl.php'),
         ], 'statamic-ai-assistant-config');
 
+        // Native Gate abilities backing the dashboard-managed access config, so
+        // nav ->can(...) and route can: middleware enforce it. Super users pass
+        // via AgentAccess::allows() itself.
+        foreach (AgentAccess::FEATURES as $feature) {
+            Gate::define(AgentAccess::gateAbility($feature), fn () => AgentAccess::allows($feature));
+        }
+        // Managing the access config itself is always super-only.
+        Gate::define(AgentAccess::manageGateAbility(), fn () => AgentAccess::canManage());
+
         // Legacy prompt routes
         $this->registerCpRoutes(function () {
             Route::post('/prompt', [PromptController::class, 'handle']);
@@ -214,13 +245,10 @@ class ServiceProvider extends AddonServiceProvider
         if (config('statamic-ai-assistant.translations', true)
             && config('statamic-ai-assistant.bulk_translations', true)) {
             Nav::extend(function ($nav) {
-                if (! User::current()?->isSuper()) {
-                    return;
-                }
-
                 $nav->tools(__('Bulk translations'))
                     ->route('statamic-ai-assistant.translations')
-                    ->icon('globe-world-wide-web');
+                    ->icon('globe-world-wide-web')
+                    ->can(AgentAccess::gateAbility('bulk_translations'));
             });
         }
 
@@ -237,17 +265,20 @@ class ServiceProvider extends AddonServiceProvider
         if (config('statamic-ai-assistant.entry_generator', true)
             && config('statamic-ai-assistant.agent_settings_nav', true)) {
             Nav::extend(function ($nav) {
-                if (! User::current()?->isSuper()) {
-                    return;
-                }
-
-                if (! $this->agentEnabledForCurrentUser()) {
-                    return;
-                }
-
                 $nav->settings(__('AI agent settings'))
                     ->route('statamic-ai-assistant.block-hints.page')
-                    ->icon('layers-stacks');
+                    ->icon('layers-stacks')
+                    ->can(AgentAccess::gateAbility('agent_settings'));
+            });
+        }
+
+        // "AI agent access" — a separate settings screen, super-admins only.
+        if (config('statamic-ai-assistant.entry_generator', true)) {
+            Nav::extend(function ($nav) {
+                $nav->settings(__('AI agent access'))
+                    ->route('statamic-ai-assistant.access.page')
+                    ->icon('permissions')
+                    ->can(AgentAccess::manageGateAbility());
             });
         }
 
@@ -262,8 +293,8 @@ class ServiceProvider extends AddonServiceProvider
 
     /**
      * Whether the AI agent (floating button + generator) is available to the
-     * current CP user. Super admins always have access when the master switch
-     * is on; non-super editors additionally require enable_agent_for_editors.
+     * current CP user. Gated globally by the `entry_generator` master switch,
+     * then by the dashboard-managed access config (super admins always pass).
      */
     protected function agentEnabledForCurrentUser(): bool
     {
@@ -271,10 +302,6 @@ class ServiceProvider extends AddonServiceProvider
             return false;
         }
 
-        if (User::current()?->isSuper()) {
-            return true;
-        }
-
-        return (bool) config('statamic-ai-assistant.enable_agent_for_editors', true);
+        return AgentAccess::allows('agent');
     }
 }

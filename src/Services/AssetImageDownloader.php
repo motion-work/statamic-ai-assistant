@@ -21,6 +21,8 @@ use Statamic\Facades\AssetContainer;
  */
 class AssetImageDownloader
 {
+    public function __construct(private ImageAltTextGenerator $altText) {}
+
     /**
      * Resolve a usable container: the given handle first, then the configured
      * `image_fetch.asset_container`, then the first available container.
@@ -53,9 +55,14 @@ class AssetImageDownloader
      * Returns null on any failure (transport error, non-image content type,
      * oversize body) so callers can simply skip the image.
      *
+     * New uploads get an AI-generated alt text set BEFORE upload() saves the
+     * asset, so the first AssetSaved event already carries alt — listeners
+     * reacting to alt-less assets (accessibility addons) are never triggered.
+     * $altContext is the tool's human-readable reason for saving the image.
+     *
      * @return array{path: string, public_url: ?string}|null
      */
-    public function save($container, string $folder, string $url, int $timeout, int $maxBytes): ?array
+    public function save($container, string $folder, string $url, int $timeout, int $maxBytes, string $altContext = ''): ?array
     {
         $folder = trim($folder, '/');
         if ($folder === '') {
@@ -68,7 +75,8 @@ class AssetImageDownloader
             $filename = $this->slugFilename($url, 'application/octet-stream');
             $tentativePath = $folder.'/'.$filename;
             if ($container->disk()->exists($tentativePath)) {
-                $existing = $container->makeAsset($tentativePath);
+                $existing = $container->asset($tentativePath) ?? $container->makeAsset($tentativePath);
+                $this->backfillAlt($existing, $altContext);
 
                 return ['path' => $tentativePath, 'public_url' => $this->safeUrl($existing)];
             }
@@ -107,6 +115,14 @@ class AssetImageDownloader
 
             $upload = new UploadedFile($tmp, basename($filename), $contentType, null, true);
             $asset = $container->makeAsset($path);
+
+            // Alt BEFORE upload(): upload saves this same instance, so the first
+            // AssetSaved event already carries the alt text.
+            $alt = $this->altText->forImageBytes($body, $contentType, $altContext);
+            if ($alt !== null) {
+                $asset->set('alt', $alt);
+            }
+
             $asset->upload($upload);
 
             @unlink($tmp);
@@ -119,6 +135,31 @@ class AssetImageDownloader
             ]);
 
             return null;
+        }
+    }
+
+    /**
+     * Reused file (idempotent retry) that never got an alt text: generate one
+     * from the stored bytes. This save fires AssetSaved WITH alt present.
+     */
+    private function backfillAlt($asset, string $altContext): void
+    {
+        try {
+            if (trim((string) $asset->get('alt')) !== '') {
+                return;
+            }
+
+            $contents = $asset->contents();
+            if (! is_string($contents) || $contents === '') {
+                return;
+            }
+
+            $alt = $this->altText->forImageBytes($contents, (string) ($asset->mimeType() ?? 'image/jpeg'), $altContext);
+            if ($alt !== null) {
+                $asset->set('alt', $alt)->save();
+            }
+        } catch (\Throwable $e) {
+            Log::notice('Alt backfill on reused asset failed', ['message' => $e->getMessage()]);
         }
     }
 

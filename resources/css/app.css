@@ -2798,7 +2798,9 @@ html.dark .translation-progress__entry-error {
     position: fixed;
     bottom: 1.25rem;
     right: 1.25rem;
-    z-index: 10040;
+    /* CP z-scale: sit above page content but BELOW the portal layer (2) so
+       native Stacks, dropdowns and toasts always render on top. */
+    z-index: var(--z-index-above, 1);
     width: 3.25rem;
     height: 3.25rem;
     display: flex;
@@ -2876,7 +2878,7 @@ html.dark .translation-progress__entry-error {
 .eg-cp-launcher__backdrop {
     position: fixed;
     inset: 0;
-    z-index: 10045;
+    z-index: var(--z-index-above, 1);
     background: color-mix(in srgb, var(--theme-color-gray-900, #18181b) 25%, transparent);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
@@ -2900,7 +2902,7 @@ html.dark .translation-progress__entry-error {
 .eg-cp-launcher__dock {
     position: fixed;
     inset: 0;
-    z-index: 10050;
+    z-index: var(--z-index-above, 1);
     display: flex;
     align-items: flex-end;
     justify-content: center;
@@ -3090,10 +3092,18 @@ html.dark .translation-progress__entry-error {
     --c-muted: var(--theme-color-gray-500, #71717a);
     --c-faint: var(--theme-color-gray-400, #a1a1aa);
 
+    /* Reference-kind colors, shared by transcript chips, composer chips and links. */
+    --chip-entry: var(--c-accent);
+    --chip-asset: var(--theme-color-success, #059669);
+    --chip-folder: var(--theme-color-warning, #d97706);
+    --chip-url: #0284c7;
+    --chip-file: #dc2626;
+
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
+    position: relative;
     background: var(--c-bg);
     font-size: 0.8125rem;
     color: var(--c-text);
@@ -3144,6 +3154,7 @@ html.dark .translation-progress__entry-error {
 
 .eg-chat__user-wrap {
     max-width: min(92%, 26rem);
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -3173,13 +3184,88 @@ html.dark .translation-progress__entry-error {
 }
 
 .eg-chat__bubble--user p {
+    overflow-wrap: anywhere;
     word-break: break-word;
 }
 
-/* http(s):// spans rendered via formatChatTextWithStrongUrls */
-.eg-chat__url {
+.eg-chat__bubble-attach {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.45rem;
+    padding-top: 0.45rem;
+    border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+    font-size: 0.75rem;
+    line-height: 1.2;
+    color: inherit;
+    opacity: 0.9;
+}
+
+.eg-chat__bubble--user p + .eg-chat__bubble-attach {
+    margin-top: 0.45rem;
+}
+
+.eg-chat__bubble-attach-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.eg-chat__bubble-attach-meta {
+    flex-shrink: 0;
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+}
+
+/* http(s):// spans rendered via formatChatTextWithBoldUrls */
+
+.eg-chat__bold {
     font-weight: 700;
-    word-break: break-all;
+}
+
+/* Reference chips ("@Title", "@asset:", "@folder:"). Each kind recolors via
+   --chip-color; every visual variant below derives from that one variable. */
+.eg-chat__chip {
+    --chip-color: var(--chip-entry, #2563eb);
+
+    display: inline;
+    padding: 0.05em 0.45em;
+    margin: 0 0.05em;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    color: var(--chip-color);
+    background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--chip-color) 32%, transparent);
+}
+
+.dark .eg-chat__chip {
+    color: color-mix(in srgb, var(--chip-color) 70%, #fff);
+    background: color-mix(in srgb, var(--chip-color) 26%, transparent);
+    border-color: color-mix(in srgb, var(--chip-color) 50%, transparent);
+}
+
+.eg-chat__bubble--user .eg-chat__chip {
+    color: var(--chip-color);
+    background: color-mix(in srgb, var(--chip-color) 22%, #fff);
+    border-color: color-mix(in srgb, var(--chip-color) 45%, transparent);
+}
+
+.dark .eg-chat__bubble--user .eg-chat__chip {
+    color: #fff;
+    background: color-mix(in srgb, var(--chip-color) 55%, transparent);
+    border-color: color-mix(in srgb, var(--chip-color) 70%, transparent);
+}
+
+.eg-chat__chip-at {
+    opacity: 0.55;
+    font-weight: 700;
 }
 
 /* ── Card (tool UI, preview) ── */
@@ -3522,6 +3608,435 @@ html.dark .translation-progress__entry-error {
     text-underline-offset: 2px;
 }
 
+/* Proposed plan turn: framed like a notice, with the approve action beneath. */
+.eg-chat__plan {
+    margin-top: 0.55rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    background: color-mix(in srgb, var(--theme-color-ui-accent, #2563eb) 6%, var(--c-surface));
+    border: 1px solid color-mix(in srgb, var(--theme-color-ui-accent, #2563eb) 22%, var(--c-border));
+}
+
+.eg-chat__plan p {
+    margin: 0 0 0.5rem;
+    white-space: pre-line;
+}
+
+.eg-chat__plan-actions {
+    margin-top: 0.35rem;
+}
+
+.eg-chat__plan-hint {
+    margin-top: 0.45rem;
+    font-size: 0.75rem;
+    opacity: 0.75;
+}
+
+/* Read-only informational answer (e.g. "which entry contains X?"). */
+.eg-chat__answer {
+    margin-top: 0.55rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+}
+
+.dark .eg-chat__answer {
+    background: color-mix(in srgb, var(--theme-color-gray-800, #27272a) 35%, var(--c-surface));
+    border-color: color-mix(in srgb, var(--theme-color-gray-500, #71717a) 45%, var(--c-border));
+}
+
+.eg-chat__answer p {
+    margin: 0;
+    white-space: pre-line;
+}
+
+/* Asset / folder mentions: amber accents to distinguish from entry mentions. */
+/* Picker rows use the same kind colors as the chips. */
+.eg-chat__mention-item--asset .eg-chat__mention-title {
+    color: var(--chip-asset, #059669);
+}
+
+.eg-chat__mention-item--folder .eg-chat__mention-title {
+    color: var(--chip-folder, #d97706);
+}
+
+.eg-chat__chip--asset {
+    --chip-color: var(--chip-asset, #059669);
+}
+
+.eg-chat__chip--folder {
+    --chip-color: var(--chip-folder, #d97706);
+}
+
+/* URL chips are real links — keep the pill look, not the underline. */
+.eg-chat__chip--url {
+    --chip-color: var(--chip-url, #0284c7);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+/* "@file:" attachment chips (icon + name + size); nothing to open, no cursor. */
+.eg-chat__chip--file {
+    --chip-color: var(--chip-file, #dc2626);
+}
+
+/* Shared paperclip glyph, colored by the chip via currentColor. */
+.eg-chip-icon {
+    display: inline-block;
+    width: 0.8em;
+    height: 0.8em;
+    margin-right: 0.3em;
+    vertical-align: -0.08em;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48'/%3E%3C/svg%3E") no-repeat center / contain;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+/* Muted size suffix inside file chips ("· 245.3 KB"). */
+.eg-chat__chip-meta,
+.eg-composer-chip__meta {
+    margin-left: 0.3em;
+    font-weight: 500;
+    font-size: 0.88em;
+    opacity: 0.65;
+}
+
+.eg-chat__chip--entry,
+.eg-chat__chip--asset,
+.eg-chat__chip--folder,
+.eg-chat__chip--url {
+    cursor: pointer;
+}
+
+.eg-chat__chip--entry:hover,
+.eg-chat__chip--asset:hover,
+.eg-chat__chip--folder:hover,
+.eg-chat__chip--url:hover {
+    background: color-mix(in srgb, var(--chip-color) 24%, transparent);
+}
+
+/* ── Asset / folder preview modal (click on a chip) ── */
+
+.eg-asset-modal__backdrop {
+    position: fixed;
+    inset: 0;
+    /* Inside the drawer dock's stacking context — just needs to beat siblings. */
+    z-index: var(--z-index-modal, 4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(2px);
+}
+
+html.dark .eg-asset-modal__backdrop {
+    background: rgba(0, 0, 0, 0.65);
+}
+
+.eg-asset-modal {
+    width: 100%;
+    max-width: 22rem;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: var(--c-surface, #fff);
+    border: 1px solid var(--c-border, #e2e8f0);
+    box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.35), 0 4px 12px -4px rgba(0, 0, 0, 0.2);
+}
+
+.eg-asset-modal__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem 0.85rem;
+    border-bottom: 1px solid var(--c-border, #e2e8f0);
+}
+
+.eg-asset-modal__heading {
+    flex: 1;
+    min-width: 0;
+}
+
+.eg-asset-modal__title {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.3;
+    word-break: break-word;
+    color: var(--c-text, inherit);
+}
+
+.eg-asset-modal__subtitle {
+    display: block;
+    margin-top: 0.1rem;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    opacity: 0.6;
+    word-break: break-word;
+}
+
+.eg-asset-modal__close {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    margin: -0.15rem -0.25rem 0 0;
+    border: none;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    opacity: 0.55;
+    cursor: pointer;
+}
+
+.eg-asset-modal__close:hover {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.eg-asset-modal__loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 7rem;
+}
+
+.eg-asset-modal__media {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--theme-color-warning, #d97706) 6%, var(--c-surface));
+}
+
+.eg-asset-modal__media img {
+    display: block;
+    width: 100%;
+    max-height: 16rem;
+    object-fit: contain;
+}
+
+.eg-asset-modal__media--file {
+    min-height: 6rem;
+}
+
+.eg-asset-modal__ext {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--theme-color-warning, #d97706);
+}
+
+.eg-asset-modal__grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    max-height: 16rem;
+    overflow-y: auto;
+    background: var(--c-border, #e2e8f0);
+}
+
+.eg-asset-modal__grid img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    background: var(--c-surface);
+}
+
+.eg-asset-modal__body {
+    padding: 0.6rem 0.85rem;
+}
+
+.eg-asset-modal__meta {
+    font-size: 0.72rem;
+    line-height: 1.4;
+    opacity: 0.65;
+    word-break: break-word;
+}
+
+.eg-asset-modal__alt {
+    margin-top: 0.3rem;
+    font-size: 0.75rem;
+    font-style: italic;
+    line-height: 1.4;
+    opacity: 0.8;
+    word-break: break-word;
+}
+
+.eg-asset-modal__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 0.85rem;
+    border-top: 1px solid var(--c-border, #e2e8f0);
+}
+
+.eg-asset-modal__link {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--c-accent, #2563eb);
+}
+
+.eg-asset-modal__link:hover {
+    text-decoration: underline;
+}
+
+/* ── Drawer top bar: advanced-tools opt-in ── */
+
+.eg-chat__topbar {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--c-border);
+    background: var(--c-surface);
+}
+
+.eg-chat__topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-right: auto;
+}
+
+.eg-topbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: none;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.eg-topbar-btn:hover:not(:disabled),
+.eg-topbar-btn--active {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.eg-topbar-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.eg-topbar-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.eg-topbar-toggle--disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.eg-topbar-toggle__switch {
+    position: relative;
+    flex-shrink: 0;
+    width: 2.25rem;
+    height: 1.25rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--theme-color-gray-400, #a1a1aa) 55%, var(--c-surface));
+    border: 1px solid var(--c-border);
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.eg-topbar-toggle--on .eg-topbar-toggle__switch {
+    background: var(--theme-color-warning, #d97706);
+    border-color: color-mix(in srgb, var(--theme-color-warning, #d97706) 70%, var(--c-border));
+}
+
+.eg-topbar-toggle__thumb {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: calc(1.25rem - 4px);
+    height: calc(1.25rem - 4px);
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+    transition: transform 150ms ease;
+}
+
+.eg-topbar-toggle--on .eg-topbar-toggle__thumb {
+    transform: translateX(1rem);
+}
+
+.eg-topbar-toggle__input:focus-visible + .eg-topbar-toggle__switch {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-color-warning, #d97706) 35%, transparent);
+}
+
+.eg-topbar-toggle__label {
+    font-weight: 500;
+    color: var(--theme-color-gray-500, #71717a);
+    transition: color 150ms ease;
+}
+
+.eg-topbar-toggle--on .eg-topbar-toggle__label {
+    color: var(--theme-color-gray-800, #27272a);
+}
+
+.dark .eg-topbar-toggle--on .eg-topbar-toggle__label {
+    color: var(--theme-color-gray-100, #f4f4f5);
+}
+
+.eg-topbar-toggle__badge {
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--theme-color-warning, #d97706);
+    background: color-mix(in srgb, var(--theme-color-warning, #d97706) 12%, var(--c-surface));
+    border: 1px solid color-mix(in srgb, var(--theme-color-warning, #d97706) 30%, var(--c-border));
+}
+
+/* Completed non-entry operations (structural changes) during a live turn. */
+.eg-chat__ops {
+    margin: 0.5rem 0 0;
+    padding: 0.4rem 0.6rem;
+    list-style: none;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--theme-color-success, #16a34a) 6%, var(--c-surface));
+    border: 1px solid color-mix(in srgb, var(--theme-color-success, #16a34a) 20%, var(--c-border));
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.eg-chat__ops-line {
+    display: flex;
+    gap: 0.4rem;
+    align-items: baseline;
+}
+
+.eg-chat__ops-check {
+    color: var(--theme-color-success, #16a34a);
+    font-weight: 700;
+}
+
 /* ── Bottom bar ── */
 
 .eg-chat__bar {
@@ -3535,8 +4050,119 @@ html.dark .translation-progress__entry-error {
 
 /* ── Composer (Claude-style input pill) ── */
 
+.eg-chat__composer-wrap {
+    position: relative;
+}
+
+/* ── @-mention entry picker ── */
+
+.eg-chat__mention {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 0.4rem);
+    z-index: 20;
+    border-radius: 0.85rem;
+    border: 1px solid var(--c-border);
+    background: var(--c-surface);
+    box-shadow: var(--shadow-ui-lg, 0px 8px 24px -6px rgba(0, 0, 0, 0.28));
+    overflow: hidden;
+    animation: eg-mention-in 0.12s ease-out;
+}
+
+.dark .eg-chat__mention {
+    background: var(--theme-color-gray-900, #18181b);
+}
+
+@keyframes eg-mention-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.eg-chat__mention-head {
+    padding: 0.5rem 0.85rem 0.35rem;
+    font-size: 0.625rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--c-faint);
+}
+
+.eg-chat__mention-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0.3rem 0.3rem;
+    max-height: 15rem;
+    overflow-y: auto;
+}
+
+.eg-chat__mention-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 0.55rem;
+    cursor: pointer;
+    color: var(--c-text);
+}
+
+.eg-chat__mention-item.is-active {
+    background: var(--c-accent, #2563eb);
+    color: #fff;
+}
+
+.eg-chat__mention-title {
+    font-size: 0.8125rem;
+    font-weight: 550;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.eg-chat__mention-meta {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    color: var(--c-faint);
+}
+
+.eg-chat__mention-item.is-active .eg-chat__mention-meta {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.eg-chat__mention-state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 0.85rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--c-muted);
+}
+
+.eg-chat__mention-spinner {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 50%;
+    border: 2px solid var(--c-border);
+    border-top-color: var(--c-accent, #2563eb);
+    animation: eg-mention-spin 0.6s linear infinite;
+}
+
+@keyframes eg-mention-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .eg-chat__composer {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-end;
     gap: 0;
     border-radius: 1.25rem;
@@ -3545,6 +4171,12 @@ html.dark .translation-progress__entry-error {
     box-shadow: var(--shadow-ui-md, 0px 2px 4px -2px rgba(0, 0, 0, 0.37));
     overflow: hidden;
     padding: 0.15rem 0.15rem 0.15rem 0;
+    transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.eg-chat__composer--drag {
+    border-color: var(--c-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--c-accent) 35%, transparent);
 }
 
 .dark .eg-chat__composer {
@@ -3552,23 +4184,207 @@ html.dark .translation-progress__entry-error {
     margin-top: 0.5rem;
 }
 
+.eg-chat__attach-pill {
+    flex: 0 0 100%;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.4rem 0.4rem 0 0.5rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.6rem;
+    background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+    color: var(--c-text);
+    font-size: 0.75rem;
+    line-height: 1.2;
+}
+
+.eg-chat__attach-pill-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.eg-chat__attach-pill-meta {
+    flex-shrink: 0;
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+}
+
+.eg-chat__attach-pill-x {
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 1.1rem;
+    height: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.6;
+    line-height: 1;
+}
+
+.eg-chat__attach-pill-x:hover {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
 .eg-chat__composer-input {
     flex: 1;
-    min-height: 2.25rem;
+    min-width: 0;
     max-height: 10rem;
+    overflow-y: auto;
+}
+
+/* The TipTap editable inside AgentComposerInput — mirrors the old textarea. */
+.eg-chat__composer-input .ProseMirror {
+    position: relative;
+    min-height: 2.25rem;
     padding: 0.5rem 0 0.5rem 0.85rem;
-    border: none;
-    background: transparent;
     color: var(--c-text);
     font-size: 0.8125rem;
     line-height: 1.45;
-    resize: none;
     font-family: inherit;
     outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
-.eg-chat__composer-input::placeholder {
+/* Placeholder: absolutely positioned single ellipsis line, so a long
+   placeholder can never wrap or add scroll overflow — the composer height
+   stays identical whether the placeholder is shown or not. */
+.eg-chat__composer-input .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    position: absolute;
+    top: 0.5rem;
+    left: 0.85rem;
+    right: 0.25rem;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    pointer-events: none;
     color: var(--c-faint);
+}
+
+/* ── Composer chips (same family as the transcript's eg-chat__chip) ── */
+
+/* display:inline + box-decoration-break, exactly like the transcript chips:
+   inline boxes never grow the line box, so inserting a chip cannot change
+   the composer height. All chips are clickable (entry/asset/folder/URL). */
+.eg-composer-chip {
+    --chip-color: var(--chip-entry, #2563eb);
+
+    display: inline;
+    padding: 0.05em 0.45em;
+    margin: 0 0.05em;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--chip-color) 28%, transparent);
+    color: color-mix(in srgb, var(--chip-color) 82%, var(--c-text));
+    font-weight: 600;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    cursor: pointer;
+}
+
+.eg-composer-chip:hover {
+    background: color-mix(in srgb, var(--chip-color) 22%, transparent);
+}
+
+.dark .eg-composer-chip {
+    color: color-mix(in srgb, var(--chip-color) 65%, #fff);
+}
+
+.eg-composer-chip.ProseMirror-selectednode {
+    outline: 2px solid color-mix(in srgb, var(--chip-color) 55%, transparent);
+    outline-offset: 1px;
+}
+
+.eg-composer-chip--asset {
+    --chip-color: var(--chip-asset, #059669);
+}
+
+.eg-composer-chip--folder {
+    --chip-color: var(--chip-folder, #d97706);
+}
+
+.eg-composer-chip--url {
+    --chip-color: var(--chip-url, #0284c7);
+}
+
+/* Attachment chips: informational only — no click affordance. */
+.eg-composer-chip--file {
+    --chip-color: var(--chip-file, #dc2626);
+    cursor: default;
+}
+
+.eg-composer-chip--file:hover {
+    background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+}
+
+.eg-chat__composer-attach {
+    flex-shrink: 0;
+    width: 2.1rem;
+    height: 2.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    background: transparent;
+    opacity: 0.55;
+    transition: opacity 0.1s, background 0.1s;
+}
+
+.eg-chat__composer-attach:not(:disabled):hover {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.eg-chat__composer-attach:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+.eg-chat__composer-attach--on {
+    opacity: 1;
+    color: var(--c-accent);
+}
+
+.eg-chat__composer-assets {
+    flex-shrink: 0;
+    width: 2.1rem;
+    height: 2.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    background: transparent;
+    opacity: 0.55;
+    transition: opacity 0.1s;
+}
+
+.eg-chat__composer-assets:not(:disabled):hover {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.eg-chat__composer-assets:disabled {
+    opacity: 0.25;
+    cursor: default;
 }
 
 .eg-chat__composer-send {
@@ -4436,3 +5252,542 @@ html.dark .translation-progress__entry-error {
 .entry-generator__panel-footer--center {
     justify-content: center;
 }
+
+/* ── Chat history slide-over (drawer) ── */
+
+.eg-history {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    background: var(--c-surface);
+    color: var(--c-text);
+}
+
+.eg-history__head {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid var(--c-border);
+}
+
+.eg-history__title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.eg-history__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: none;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.eg-history__close:hover {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.eg-history__search {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.65rem 1rem 0.25rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--c-border);
+    border-radius: 0.5rem;
+    background: var(--c-bg);
+    color: var(--c-muted);
+}
+
+.eg-history__search:focus-within {
+    border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-border));
+}
+
+.eg-history__search-input {
+    flex: 1;
+    padding: 0.4rem 0;
+    border: none;
+    background: transparent;
+    font-size: 0.8125rem;
+    color: var(--c-text);
+}
+
+.eg-history__search-input:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.eg-history__list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.5rem 0.6rem 0.9rem;
+}
+
+.eg-history__empty {
+    padding: 1.25rem 0.5rem;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--c-muted);
+}
+
+.eg-history__group {
+    padding: 0.7rem 0.4rem 0.3rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--c-faint);
+}
+
+.eg-history__item {
+    display: flex;
+    align-items: stretch;
+    border-radius: 0.5rem;
+}
+
+.eg-history__item:hover,
+.eg-history__item--active {
+    background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.eg-history__item--active {
+    box-shadow: inset 2px 0 0 var(--c-accent);
+}
+
+.eg-history__item-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.45rem 0.5rem;
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.eg-history__item-title {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.eg-history__item-meta {
+    font-size: 0.7rem;
+    color: var(--c-muted);
+}
+
+.eg-history__item-delete {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.9rem;
+    margin: 0.35rem 0.3rem;
+    border: none;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.eg-history__item:hover .eg-history__item-delete,
+.eg-history__item-delete--armed {
+    opacity: 0.55;
+}
+
+.eg-history__item-delete:hover {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.eg-history__item-delete--armed {
+    opacity: 1;
+    color: var(--theme-color-danger, #dc2626);
+}
+
+.eg-history__item-delete-confirm {
+    padding: 0 0.25rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* Slide-in from the left, like a sidebar taking over the panel. */
+.eg-history-enter-active,
+.eg-history-leave-active {
+    transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.eg-history-enter-from,
+.eg-history-leave-to {
+    transform: translateX(-14px);
+    opacity: 0;
+}
+
+/* ── Prompt templates slide-over (shares the history panel's shell) ── */
+
+.eg-templates {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    background: var(--c-surface);
+    color: var(--c-text);
+}
+
+.eg-templates__head {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid var(--c-border);
+}
+
+.eg-templates__back,
+.eg-templates__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: none;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.eg-templates__back:hover,
+.eg-templates__close:hover {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.eg-templates__title {
+    flex: 1;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.eg-templates__intro {
+    flex-shrink: 0;
+    padding: 0.7rem 1rem 0.2rem;
+    font-size: 0.75rem;
+    color: var(--c-muted);
+    line-height: 1.45;
+}
+
+/* ── Inline template cards (initial chat content) ── */
+
+.eg-chat__templates-lead {
+    margin: 0 0 0.5rem;
+}
+
+.eg-chat__templates {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.eg-chat__templates-more {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    align-self: flex-start;
+    margin: 0.35rem 0 0;
+    padding: 0.35rem 0.7rem;
+    border: 1px dashed var(--c-border);
+    border-radius: 0.6rem;
+    background: transparent;
+    color: var(--c-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.eg-chat__templates-more:hover {
+    border-color: color-mix(in srgb, var(--c-accent, #2563eb) 45%, var(--c-border));
+    color: var(--c-text);
+    background: color-mix(in srgb, var(--c-accent, #2563eb) 6%, transparent);
+}
+
+.eg-templates__list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.4rem 0.6rem 0.9rem;
+}
+
+.eg-templates__group {
+    padding: 0.7rem 0.4rem 0.3rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--c-faint);
+}
+
+.eg-templates__card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    width: 100%;
+    margin: 0.25rem 0;
+    padding: 0.7rem 0.7rem;
+    border: 1px solid var(--c-border);
+    border-radius: 0.6rem;
+    background: var(--c-bg);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.eg-templates__card:hover {
+    border-color: color-mix(in srgb, var(--c-accent, #2563eb) 45%, var(--c-border));
+    background: color-mix(in srgb, var(--c-accent, #2563eb) 6%, var(--c-bg));
+    transform: translateY(-1px);
+}
+
+.eg-templates__card-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--c-accent, #2563eb) 12%, transparent);
+    color: var(--c-accent, #2563eb);
+}
+
+.eg-templates__card-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+}
+
+.eg-templates__card-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.eg-templates__card-summary {
+    font-size: 0.75rem;
+    color: var(--c-text);
+    line-height: 1.4;
+}
+
+.eg-templates__card-when {
+    font-size: 0.7rem;
+    color: var(--c-muted);
+    line-height: 1.4;
+}
+
+.eg-templates__card-chevron {
+    flex-shrink: 0;
+    color: var(--c-faint);
+    margin-top: 0.1rem;
+}
+
+/* ── Template clarifying-questions form ── */
+
+.eg-tform__list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.5rem 1rem 0.9rem;
+}
+
+.eg-tform__field {
+    margin-bottom: 1rem;
+}
+
+.eg-tform__label {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.eg-tform__req {
+    color: var(--theme-color-danger, #dc2626);
+    margin-left: 0.15rem;
+}
+
+.eg-tform__input {
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--c-border);
+    border-radius: 0.45rem;
+    background: var(--c-bg);
+    color: var(--c-text);
+    font-size: 0.8125rem;
+}
+
+.eg-tform__input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--c-accent, #2563eb) 55%, var(--c-border));
+}
+
+.eg-tform__choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.eg-tform__choice {
+    padding: 0.4rem 0.7rem;
+    border: 1px solid var(--c-border);
+    border-radius: 999px;
+    background: var(--c-bg);
+    color: var(--c-text);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+}
+
+.eg-tform__choice--on {
+    border-color: color-mix(in srgb, var(--c-accent, #2563eb) 55%, transparent);
+    background: color-mix(in srgb, var(--c-accent, #2563eb) 14%, transparent);
+    color: var(--c-accent, #2563eb);
+}
+
+.eg-tform__entry {
+    position: relative;
+}
+
+.eg-tform__entry-list {
+    margin-top: 0.3rem;
+    border: 1px solid var(--c-border);
+    border-radius: 0.45rem;
+    background: var(--c-surface);
+    box-shadow: 0 8px 22px -10px rgba(0, 0, 0, 0.35);
+    max-height: 16rem;
+    overflow-y: auto;
+}
+
+.eg-tform__entry-state {
+    padding: 0.55rem 0.65rem;
+    font-size: 0.75rem;
+    color: var(--c-muted);
+}
+
+.eg-tform__entry-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.45rem 0.6rem;
+    cursor: pointer;
+}
+
+.eg-tform__entry-item.is-active {
+    background: color-mix(in srgb, var(--c-accent, #2563eb) 12%, transparent);
+}
+
+.eg-tform__entry-title {
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.eg-tform__entry-meta {
+    font-size: 0.7rem;
+    color: var(--c-muted);
+}
+
+.eg-tform__entry-picked {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid color-mix(in srgb, var(--c-accent, #2563eb) 40%, var(--c-border));
+    border-radius: 0.45rem;
+    background: color-mix(in srgb, var(--c-accent, #2563eb) 8%, transparent);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.eg-tform__entry-clear {
+    border: none;
+    background: transparent;
+    color: var(--c-muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.eg-tform__entry-clear:hover {
+    color: var(--theme-color-danger, #dc2626);
+}
+
+.eg-tform__help {
+    margin-top: 0.3rem;
+    font-size: 0.7rem;
+    color: var(--c-muted);
+    line-height: 1.4;
+}
+
+.eg-tform__foot {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.65rem 1rem;
+    border-top: 1px solid var(--c-border);
+}
+
+.eg-tform__btn {
+    padding: 0.45rem 0.9rem;
+    border-radius: 0.45rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.eg-tform__btn--ghost {
+    border: 1px solid var(--c-border);
+    background: transparent;
+    color: var(--c-text);
+}
+
+.eg-tform__btn--ghost:hover {
+    background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.eg-tform__btn--primary {
+    border: none;
+    background: var(--c-accent, #2563eb);
+    color: #fff;
+}
+
+.eg-tform__btn--primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+

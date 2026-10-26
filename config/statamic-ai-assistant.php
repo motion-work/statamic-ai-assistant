@@ -242,6 +242,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | AI agent access configuration storage
+    |--------------------------------------------------------------------------
+    |
+    | YAML file storing which roles / users may use each gated capability
+    | (AI agent, bulk translations, agent settings) plus the per-role /
+    | per-user entry-generation limits. Managed by super admins from the
+    | "Who has access" tab in the AI agent settings. Default under content/
+    | so it can be versioned in git.
+    |
+    */
+
+    'access_path' => env('STATAMIC_AI_ASSISTANT_ACCESS_PATH', base_path('content/statamic-ai-assistant/access.yaml')),
+
+    /*
+    |--------------------------------------------------------------------------
     | Glossary terminology takes precedence over style tone
     |--------------------------------------------------------------------------
     |
@@ -295,18 +310,6 @@ return [
     'entry_generator' => (bool) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR', true),
 
     /*
-    | Show the AI agent to non-super editors
-    |--------------------------------------------------------------------------
-    |
-    | ENABLE_AGENT_FOR_EDITORS=false hides the agent (floating button + settings)
-    | from non-super users only. Super admins ALWAYS have access, regardless of
-    | this flag or the environment. Requires `entry_generator` to be on.
-    |
-    */
-
-    'enable_agent_for_editors' => (bool) env('ENABLE_AGENT_FOR_EDITORS', true),
-
-    /*
     | Show the "AI agent settings" entry in the CP Settings sidebar
     |--------------------------------------------------------------------------
     |
@@ -354,11 +357,67 @@ return [
     |
     */
     'entry_generator_fetch_url_tool' => (bool) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_FETCH_URL_TOOL', true),
-    'entry_generator_tool_max_rounds' => max(1, min(24, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_ROUNDS', 120))),
+
+    // When true (default), the agent may only fetch URLs the user actually
+    // provided in their request (plus same-site links within those pages) — it
+    // will never open URLs it invents. This stops it from spidering the open web
+    // and, in particular, from wasting the fetch budget / time on guessed URLs
+    // that don't exist. Set to false to let the model fetch any public URL.
+    'entry_generator_restrict_fetch_to_prompt_urls' => (bool) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_RESTRICT_FETCH_TO_PROMPT_URLS', true),
+
+    // Max agentic tool-loop rounds per request. Rounds are consumed on demand
+    // (a two-entry create finishes in a handful), so this only bounds long bulk
+    // jobs — e.g. "add alt text to every image in a folder", where each item
+    // costs ~2 rounds (analyze_image + update_asset). Keep it high enough that
+    // such per-item work finishes instead of the model wrapping up early once
+    // the round budget looks tight.
+    'entry_generator_tool_max_rounds' => max(1, min(60, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_ROUNDS', 120))),
     'entry_generator_tool_max_fetches' => max(1, min(40, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_FETCHES', 100))),
     // Max read_entry_structure calls per request (the agent reads existing entries
     // to mirror their layout/components when creating or updating an entry).
     'entry_generator_tool_max_read_entries' => max(1, min(40, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_READ_ENTRIES', 20))),
+
+    // Max calls PER read tool for the generic CMS-context tools (read_globals,
+    // read_nav_tree, list_taxonomies) that let the agent inspect globals, the
+    // navigation hierarchy, and taxonomy terms while planning/writing.
+    'entry_generator_tool_max_cms_reads' => max(1, min(40, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_CMS_READS', 12))),
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI agent — advanced structure tools
+    |--------------------------------------------------------------------------
+    |
+    | Structural tools (create/configure collections, blueprints, taxonomies)
+    | for the agent. Per-user access is managed in the CP under AI agent
+    | access ('advanced_tools' feature, default-deny, supers always pass);
+    | this switch lets a site disable the whole pack regardless of grants.
+    | Structural writes apply immediately (no draft/review step), so each
+    | WRITE tool also gets a small per-request call budget.
+    |
+    */
+    'advanced_tools' => (bool) env('STATAMIC_AI_ASSISTANT_ADVANCED_TOOLS', true),
+    'entry_generator_tool_max_structural_writes' => max(1, min(20, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_STRUCTURAL_WRITES', 6))),
+
+    // Max update_asset calls per request (asset metadata writes: alt texts, captions).
+    'entry_generator_tool_max_asset_writes' => max(1, min(100, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_ASSET_WRITES', 40))),
+
+    // Max analyze_image (vision) calls per request. This is the throughput ceiling
+    // for content-based alt text over a folder of images, so it tracks the asset
+    // write budget rather than the smaller generic CMS-read cap.
+    'entry_generator_tool_max_image_analyses' => max(1, min(100, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_IMAGE_ANALYSES', 40))),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Vision model (image understanding)
+    |--------------------------------------------------------------------------
+    |
+    | Optional multimodal model for the analyze_image tool (e.g. generating
+    | alt texts from what an image actually shows). Set to a vision-capable
+    | model id from your Infomaniak AI product (GET /1/ai/models lists them);
+    | leave empty to disable image analysis entirely.
+    |
+    */
+    'infomaniak_vision_model' => (string) env('STATAMIC_AI_ASSISTANT_INFOMANIAK_VISION_MODEL', ''),
 
     /*
     |--------------------------------------------------------------------------
@@ -431,7 +490,7 @@ return [
         // built-in markdown mode, which drops the real article on listing-heavy
         // pages. Set to 'markdown' to use Jina's own extraction as a kill-switch.
         'reader_format' => env('STATAMIC_AI_ASSISTANT_JINA_READER_FORMAT', 'html'),
-        'timeout' => max(5, (int) env('STATAMIC_AI_ASSISTANT_JINA_TIMEOUT', 120)),
+        'timeout' => max(5, (int) env('STATAMIC_AI_ASSISTANT_JINA_TIMEOUT', 25)),
         'max_urls' => max(1, (int) env('STATAMIC_AI_ASSISTANT_JINA_MAX_URLS', 5)),
         'max_chars_per_url' => max(1000, (int) env('STATAMIC_AI_ASSISTANT_JINA_MAX_CHARS', 12000)),
         'max_total_chars' => max(5000, (int) env('STATAMIC_AI_ASSISTANT_JINA_MAX_TOTAL_CHARS', 40000)),
@@ -450,6 +509,22 @@ return [
         'remove_selector' => env(
             'STATAMIC_AI_ASSISTANT_REMOVE_SELECTOR',
             \MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher::DEFAULT_REMOVE_SELECTOR,
+        ),
+
+        // Fetch order for reading a page. By default the Jina reader is tried
+        // first (it is harder to block and can render JS), and a plain direct
+        // HTTP fetch is the fallback for when Jina returns junk (e.g. it handed
+        // back an empty <body> for some TYPO3 sites). Set to true to try the
+        // direct fetch first instead (faster, no third-party dependency), with
+        // Jina as the fallback. Either way, whichever source yields usable
+        // content first wins, and Jina's markdown mode is the final fallback.
+        'direct_first' => (bool) env('STATAMIC_AI_ASSISTANT_URL_FETCH_DIRECT_FIRST', false),
+
+        // User-Agent used for the direct fetch. A browser-like UA avoids naive
+        // bot blocking on many sites. Override if a source site needs a specific one.
+        'user_agent' => env(
+            'STATAMIC_AI_ASSISTANT_URL_FETCH_USER_AGENT',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         ),
     ],
 
@@ -480,6 +555,11 @@ return [
         // Set to the handle (e.g. "images") of the container your blueprints'
         // assets fields point at.
         'asset_container' => env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH_ASSET_CONTAINER', null),
+
+        // Generate an alt text (one quick LLM call, vision when available) for
+        // every downloaded image BEFORE it is saved, so assets never enter the
+        // site without alt. Disable to skip the extra call per image.
+        'generate_alt' => (bool) env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH_GENERATE_ALT', true),
 
         // Per-entry caps so a runaway generation can't flood the disk.
         'max_images' => max(0, (int) env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH_MAX', 30)),

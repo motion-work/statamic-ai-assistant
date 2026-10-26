@@ -18,6 +18,9 @@ class EntryReferenceResolver
     /** @var array<string, string> Cache of already-resolved origin->target ID mappings */
     private array $resolvedCache = [];
 
+    /** @var array<string, bool> Origin ids left UNRESOLVED (kept as source-site ids) this run */
+    private array $unresolved = [];
+
     private ?EntryTranslator $entryTranslator = null;
 
     private bool $force;
@@ -101,6 +104,8 @@ class EntryReferenceResolver
         }
 
         if ($currentDepth >= $maxDepth) {
+            $this->unresolved[$originId] = true;
+
             return $originId;
         }
 
@@ -115,6 +120,8 @@ class EntryReferenceResolver
         }
 
         if (! $this->entryTranslator) {
+            $this->unresolved[$originId] = true;
+
             return $originId;
         }
 
@@ -168,9 +175,25 @@ class EntryReferenceResolver
             ->first();
     }
 
+    /**
+     * Origin ids that stayed pointing at source-site entries (depth budget
+     * exhausted or no translator wired), drained by the caller so it can warn
+     * the editor and so the post-batch reconcile step knows work remains.
+     *
+     * @return array<int, string>
+     */
+    public function takeUnresolved(): array
+    {
+        $out = array_keys($this->unresolved);
+        $this->unresolved = [];
+
+        return $out;
+    }
+
     public function resetState(): void
     {
         $this->inProgress = [];
         $this->resolvedCache = [];
+        $this->unresolved = [];
     }
 }

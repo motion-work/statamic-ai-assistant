@@ -4,8 +4,13 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use MotionWork\StatamicAiAssistant\Services\Concerns\TranslatesFields;
 use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
+use MotionWork\StatamicAiAssistant\Support\JsonRepair;
 use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
+use MotionWork\StatamicAiAssistant\Tools\ListTaxonomiesTool;
 use MotionWork\StatamicAiAssistant\Tools\ReadEntryStructureTool;
+use MotionWork\StatamicAiAssistant\Tools\ReadEntryTool;
+use MotionWork\StatamicAiAssistant\Tools\ReadGlobalsTool;
+use MotionWork\StatamicAiAssistant\Tools\ReadNavTreeTool;
 use MotionWork\StatamicAiAssistant\Tools\SaveImageTool;
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use MotionWork\StatamicAiAssistant\Tools\UrlFetchTool;
@@ -16,6 +21,7 @@ use Illuminate\Support\Str;
 use Statamic\Entries\Entry as StatamicEntry;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
+use Statamic\Facades\Form;
 use Statamic\Facades\Site;
 use Statamic\Facades\Taxonomy;
 use Statamic\Facades\Term;
@@ -31,13 +37,25 @@ class EntryGeneratorService
 
     private const GEN_HTML_TYPES = ['bard'];
 
-    private const GEN_CHOICE_TYPES = ['select', 'button_group'];
+    private const GEN_CHOICE_TYPES = ['select', 'button_group', 'radio', 'checkboxes'];
 
     private const GEN_BOOLEAN_TYPES = ['toggle'];
 
     private const GEN_DATE_TYPES = ['date'];
 
     private const GEN_SKIP_TYPES = ['assets', 'section', 'color'];
+
+    /** Max candidate rows pulled from the store before in-PHP ranking in findEntriesShortlist(). */
+    private const SEARCH_SCAN_LIMIT = 200;
+
+    /** Max entries whose body content is flattened + scanned per searchEntryContent() call. */
+    private const SEARCH_CONTENT_SCAN_LIMIT = 800;
+
+    /** Per-entry cap on flattened content length (chars) before matching, to bound work. */
+    private const SEARCH_CONTENT_FLATTEN_CHARS = 20000;
+
+    /** Structural array keys skipped when flattening entry content (Bard/replicator plumbing). */
+    private const CONTENT_SKIP_KEYS = ['type', 'id', '_id', 'enabled', 'collapsed'];
 
     /**
      * @var array<string, array{by_lower_slug: array<string, string>, by_lower_title: array<string, string>}>
@@ -60,6 +78,8 @@ class EntryGeneratorService
 
     private SetHintsService $setHints;
 
+    private EditorialGuidanceService $editorialGuidance;
+
     private ?FigmaContentFetcher $figma;
 
     private ?RemoteImageFetcher $imageFetcher;
@@ -75,12 +95,14 @@ class EntryGeneratorService
         ?FigmaContentFetcher $figma = null,
         ?RemoteImageFetcher $imageFetcher = null,
         ?EntryStructureSerializer $structureSerializer = null,
+        ?EditorialGuidanceService $editorialGuidance = null,
     ) {
         $this->aiService = $aiService;
         $this->assetResolver = $assetResolver ?? new EntryGeneratorAssetResolver;
         $this->linkFallback = $linkFallback ?? new EntryGeneratorLinkFallback;
         $this->promptUrlFetcher = $promptUrlFetcher ?? new PromptUrlFetcher;
         $this->setHints = $setHints ?? new SetHintsService;
+        $this->editorialGuidance = $editorialGuidance ?? app(EditorialGuidanceService::class);
         $this->figma = $figma;
         $this->imageFetcher = $imageFetcher;
         $this->structureSerializer = $structureSerializer ?? new EntryStructureSerializer;
@@ -172,6 +194,10 @@ class EntryGeneratorService
         $maxTokens = (int) config('statamic-ai-assistant.generator_max_tokens', 4000);
         $toolWarnings = [];
 
+        // An attached document is the source — suppress URL fetching so the
+        // model can't go online instead of using the file.
+        $hasAttachment = (string) $attachmentContent !== '';
+
         // Images the LLM copies from the source via save_remote_image land here;
         // merged into the preferred-asset queue below so the resolver assigns
         // them to this entry's image fields (matched by container).
@@ -189,6 +215,7 @@ class EntryGeneratorService
                     $imageContainerHint,
                     true,
                     $streamHeartbeat,
+                    $hasAttachment,
                 );
             } catch (\Throwable $e) {
                 Log::warning('[entry-gen-tool] tool loop failed; falling back to single-shot completion', [
@@ -205,7 +232,7 @@ class EntryGeneratorService
             throw new \RuntimeException(__('The AI returned no content. Check your provider settings and try again.'));
         }
 
-        $parsedData = $this->parseResponse($rawResponse);
+        $parsedData = $this->parseResponseOrRetry($rawResponse, $messages, $maxTokens, $onStreamToken);
 
         // Merge any preferred assets surfaced by the URL augmentation step
         // (single-prompt path) with the explicit ones passed in by the caller.
@@ -251,6 +278,7 @@ class EntryGeneratorService
         ?string $imageContainerHint,
         bool $allowImageTool,
         ?callable $streamHeartbeat = null,
+        bool $disableUrlFetch = false,
     ): string {
         // The image tool only makes sense on the create path, where empty asset
         // fields are auto-filled from the preferred-asset queue afterwards. On
@@ -268,14 +296,20 @@ class EntryGeneratorService
             : '';
 
         $toolHint = "URL HANDLING RULES — these take priority over any later JSON output rule:\n"
-            ."1. If the user message references one or more http(s) URLs, you MUST call the **fetch_page_content** tool to retrieve them BEFORE producing any output. Never invent or guess content from a URL alone.\n"
-            ."2. After fetching, inspect the returned content. If it is a listing or index page (multiple teasers, news cards, 'read more' links, item summaries with detail URLs), identify the specific item the user asked for and call **fetch_page_content** AGAIN on that item's detail page URL. Write the entry from the detail page body, not from the listing teaser.\n"
+            ."0. Only ever fetch URLs the user explicitly provided in their message (or same-site links found INSIDE those fetched pages). NEVER invent, guess, shorten, or try alternative/variant URLs — a fetch of a guessed URL is a mistake and will be refused. If the user provided NO URL, do not fetch anything: write the entry from the CMS context and your own knowledge.\n"
+            .($disableUrlFetch
+                ? "ATTACHMENT RULE (overrides the URL rules above): the user attached a document and its full content is already in your user message under \"--- ATTACHED DOCUMENT CONTENT ---\". That content IS the source — do NOT call fetch_page_content at all, and do NOT use URLs found inside the attachment to go online. Write the entry entirely from the attached document's facts, structure, names, numbers and wording.\n"
+                : '')
+            ."1. When the user DID provide one or more http(s) URLs, you MUST call the **fetch_page_content** tool to retrieve them BEFORE producing any output. Never invent or guess content from a URL alone.\n"
+            ."2. After fetching, inspect the returned content. If it is a listing or index page (multiple teasers, news cards, 'read more' links, item summaries with detail URLs) on the SAME site, identify the specific item the user asked for and call **fetch_page_content** AGAIN on that item's detail page URL. Write the entry from the detail page body, not from the listing teaser.\n"
             ."3. If the user asked for 'the first', 'the latest', 'the next', 'the second', or a specific item from a listing, pick the URL that matches that intent and fetch it.\n"
             ."4. You may call the tool multiple times. Pass **url** (full link, https preferred) and **reason** (short: which item or which blueprint field this supports).\n"
             ."5. ONLY after you have the full source text you need, respond with the JSON object for the entry fields — no markdown fences, no commentary — exactly as required by the rules below.\n"
             .$imageRule
             ."- TITLE FROM SOURCE: when you copy a page's content, set the entry's title field to that page's main heading VERBATIM. Use the fetched result's **h1** value (or the \"Page title (H1)\" line / the first top-level \"# \" heading in the fetched content). Do NOT paraphrase, translate, shorten, or invent a new title. Only deviate when the user's prompt explicitly dictates a different title, or when the source page genuinely has no H1 (then derive a concise, faithful title from the content).\n"
+            ."- CONTENT FROM SOURCE: when the user asks to copy a page or base the entry on it, reproduce the fetched content FAITHFULLY and COMPLETELY — keep the same sections, headings, wording, facts, numbers and order. Do NOT summarize, shorten, omit, reorder, translate, or invent content. Map ALL of the source content across the entry's fields; when a piece of content has no dedicated field, put it in the main rich-text/body field rather than dropping it. Prefer the source's own wording over a rephrasing. Only condense if the user explicitly asked for a summary or shorter version.\n"
             ."- If the user asks to base this entry on the layout/components of an existing entry, call **read_entry_structure** (pass its **entry_id**, or a title/slug **query**) to read that entry's sections in order, then reproduce the same structure. The reference entry may use a different blueprint: map each section onto a set/field that exists in THIS entry's schema below — never copy set handles that are not in this schema.\n"
+            ."- You may also read CMS context to fill fields with real data: **read_globals** for site-wide contact details / CTA links, **read_nav_tree** for internal link targets and site structure, and **list_taxonomies** to get valid term slugs before setting any `terms` field (never invent term slugs).\n"
             ."---\n";
 
         $working = $messages;
@@ -298,28 +332,58 @@ class EntryGeneratorService
             imageContainerHint: $imageContainerHint,
         );
 
-        $toolset = [new UrlFetchTool($this->promptUrlFetcher)];
+        // Only let the model open URLs the user actually provided (host allowlist
+        // from the prompt) — never URLs it invents. Empty allowlist = no fetching.
+        $restrictFetch = (bool) config('statamic-ai-assistant.entry_generator_restrict_fetch_to_prompt_urls', true);
+        $allowedFetchHosts = UrlFetchTool::hostsFromMessages($this->promptUrlFetcher, $messages);
+
+        // When the user attached a document, its content is already in the user
+        // message — don't offer fetch_page_content at all, so the model can't go
+        // online instead of using the file (and URLs inside the file can't get
+        // allowlisted). Read/structure/taxonomy tools remain available.
+        $toolset = [];
+        if (! $disableUrlFetch) {
+            $toolset[] = new UrlFetchTool($this->promptUrlFetcher, $allowedFetchHosts, $restrictFetch);
+        }
         if ($useImageTool && $this->imageFetcher !== null) {
-            $toolset[] = new SaveImageTool($this->imageFetcher);
+            // Same provenance gate as fetch: only save images from hosts the user
+            // referenced or URLs seen in fetched pages — never invented ones.
+            $toolset[] = new SaveImageTool($this->imageFetcher, $allowedFetchHosts, $restrictFetch);
         }
         $toolset[] = new ReadEntryStructureTool(
             $this->structureSerializer,
             fn (?string $collection, string $query, int $limit) => $this->findEntriesShortlist($collection, $query, $limit),
         );
+        $toolset[] = new ReadEntryTool(
+            fn (?string $collection, string $query, int $limit) => $this->findEntriesShortlist($collection, $query, $limit),
+        );
+        $toolset[] = new ReadGlobalsTool;
+        $toolset[] = new ReadNavTreeTool;
+        $toolset[] = new ListTaxonomiesTool;
+        $toolset[] = new \MotionWork\StatamicAiAssistant\Tools\ListAssetsTool;
+        $toolset[] = new \MotionWork\StatamicAiAssistant\Tools\UseAssetsTool;
+        $toolset[] = new \MotionWork\StatamicAiAssistant\Tools\ReadDocumentTool;
+        if ($this->aiService->supportsVision()) {
+            $toolset[] = new \MotionWork\StatamicAiAssistant\Tools\AnalyzeImageTool($this->aiService);
+        }
         $runner = new ChatToolRunner($toolset, $toolContext);
 
         $maxRounds = (int) config('statamic-ai-assistant.entry_generator_tool_max_rounds', 120);
 
         // Detect URLs in the user message(s). If any are present, the model MUST
         // call the fetch tool on the first round, otherwise it tends to fabricate
-        // content from the URL slug instead of fetching.
+        // content from the URL slug instead of fetching. Skip this when URL
+        // fetching is disabled (attachment flow): the attachment may contain URLs
+        // but we must NOT fetch them.
         $promptHasUrl = false;
-        foreach ($messages as $m) {
-            $content = $m['content'] ?? '';
-            if (($m['role'] ?? '') === 'user' && is_string($content)
-                && preg_match('~\bhttps?://[^\s<>\]\}\)\"\'`]+~iu', $content)) {
-                $promptHasUrl = true;
-                break;
+        if (! $disableUrlFetch) {
+            foreach ($messages as $m) {
+                $content = $m['content'] ?? '';
+                if (($m['role'] ?? '') === 'user' && is_string($content)
+                    && preg_match('~\bhttps?://[^\s<>\]\}\)\"\'`]+~iu', $content)) {
+                    $promptHasUrl = true;
+                    break;
+                }
             }
         }
 
@@ -334,6 +398,10 @@ class EntryGeneratorService
             $toolChoice = $forceTool
                 ? ['type' => 'function', 'function' => ['name' => 'fetch_page_content']]
                 : 'auto';
+
+            // Drop stale bulky tool results from the conversation before paying
+            // for them again (see ChatToolRunner::compactToolMessages).
+            ChatToolRunner::compactToolMessages($working);
 
             $data = $this->aiService->createChatCompletion($working, $maxTokens, $runner->definitions(), $toolChoice, $streamHeartbeat);
             $choice = $data['choices'][0] ?? null;
@@ -497,41 +565,372 @@ class EntryGeneratorService
     }
 
     /**
-     * Search entries by title/slug for the agentic planner's `find_entries` tool.
-     * Kept in this service so it can reuse the same query path as the catalog shortlist.
+     * Search entries by title/slug — rows only, no pagination info. Convenience
+     * wrapper for callers that just need a shortlist (entry finder closures).
      *
-     * @return array<int, array{id: string, title: string, slug: string, collection: string}>
+     * @return array<int, array{id: string, title: string, slug: string, collection: string, published: bool}>
      */
     public function findEntriesShortlist(?string $collectionHandle, string $query, int $limit): array
     {
+        return $this->findEntries($collectionHandle, $query, $limit)['results'];
+    }
+
+    /**
+     * Search entries by title/slug for the agentic planner's `find_entries` tool.
+     * Kept in this service so it can reuse the same query path as the catalog shortlist.
+     *
+     * The `pagination` block ({total, limit, offset, has_more} — same contract as
+     * cboxdk/statamic-mcp list responses) tells the model when it has NOT seen
+     * every match, so it pages or narrows instead of assuming completeness. When
+     * ranking had to stop at the scan cap, a `note` says so explicitly — a capped
+     * result must never silently read as exhaustive.
+     *
+     * @return array{results: array<int, array{id: string, title: string, slug: string, collection: string, published: bool}>, pagination: array{total: int, limit: int, offset: int, has_more: bool}, note?: string}
+     */
+    public function findEntries(?string $collectionHandle, string $query, int $limit, int $offset = 0): array
+    {
         $limit = max(1, min(50, $limit));
+        $offset = max(0, $offset);
         $siteHandle = Site::selected()?->handle() ?? Site::default()->handle();
 
-        $q = Entry::query()->where('site', $siteHandle);
+        // A fresh base query per attempt — Statamic's query builder is stateful,
+        // so we rebuild rather than clone.
+        $makeBase = function () use ($siteHandle, $collectionHandle) {
+            $q = Entry::query()->where('site', $siteHandle);
+            if (is_string($collectionHandle) && $collectionHandle !== '') {
+                $q->where('collection', $collectionHandle);
+            }
 
-        if (is_string($collectionHandle) && $collectionHandle !== '') {
-            $q->where('collection', $collectionHandle);
+            return $q;
+        };
+
+        $tokens = $this->searchTokens($query);
+
+        // No meaningful search terms: preserve the old "most recent" behaviour.
+        if ($tokens === []) {
+            $total = (int) $makeBase()->count();
+            $rows = $this->mapEntryRows(
+                $makeBase()->orderBy('updated_at', 'desc')->offset($offset)->limit($limit)->get()
+            );
+
+            return [
+                'results' => $rows,
+                'pagination' => [
+                    'total' => $total,
+                    'limit' => $limit,
+                    'offset' => $offset,
+                    'has_more' => $offset + count($rows) < $total,
+                ],
+            ];
         }
 
-        $needle = trim($query);
-        if ($needle !== '') {
-            $q->where(function ($qq) use ($needle) {
-                $qq->where('title', 'like', '%'.$needle.'%')
-                    ->orWhere('slug', 'like', '%'.$needle.'%');
+        // Primary narrowing: every token must appear in the title OR slug. This is
+        // word-order agnostic and — because tokenising strips connectors like "&",
+        // "+", "and", "und", "et" — a query for "Salt Stone" or "Salt and Stone" still
+        // finds the entry titled "Salt & Stone". `like` is case-insensitive here.
+        $andQuery = $makeBase();
+        foreach ($tokens as $token) {
+            $andQuery->where(function ($qq) use ($token) {
+                $qq->where('title', 'like', '%'.$token.'%')
+                    ->orWhere('slug', 'like', '%'.$token.'%');
             });
         }
+        $candidates = $andQuery->orderBy('updated_at', 'desc')->limit(self::SEARCH_SCAN_LIMIT)->get();
 
-        return $q->orderBy('updated_at', 'desc')
-            ->limit($limit)
-            ->get()
+        // Fallback: if requiring all tokens found nothing (a stray or misspelled
+        // token), relax to "any token" so we still surface near matches instead of
+        // returning zero rows and forcing the agent to give up.
+        if ($candidates->isEmpty()) {
+            $orQuery = $makeBase();
+            $orQuery->where(function ($outer) use ($tokens) {
+                foreach ($tokens as $token) {
+                    $outer->orWhere(function ($qq) use ($token) {
+                        $qq->where('title', 'like', '%'.$token.'%')
+                            ->orWhere('slug', 'like', '%'.$token.'%');
+                    });
+                }
+            });
+            $candidates = $orQuery->orderBy('updated_at', 'desc')->limit(self::SEARCH_SCAN_LIMIT)->get();
+        }
+
+        $total = $candidates->count();
+        $rows = $this->rankAndMapEntries($candidates, $query, $tokens, $limit, $offset);
+
+        $out = [
+            'results' => $rows,
+            'pagination' => [
+                'total' => $total,
+                'limit' => $limit,
+                'offset' => $offset,
+                'has_more' => $offset + count($rows) < $total,
+            ],
+        ];
+
+        if ($total >= self::SEARCH_SCAN_LIMIT) {
+            $out['note'] = 'Only the '.self::SEARCH_SCAN_LIMIT.' most recently updated matches were ranked; older entries may exist. Narrow the query or pass a collection handle.';
+        }
+
+        return $out;
+    }
+
+    /**
+     * Break a search query into normalised, comparable tokens.
+     *
+     * Lower-cased and split on any non-alphanumeric run (so punctuation and
+     * symbols never have to match literally). Diacritics are preserved so the
+     * tokens still match accented titles via the DB `like`. Connective words and
+     * symbols ("&", "+", "and", "und", "et", …) are dropped, which is what makes
+     * "Salt & Stone", "Salt and Stone" and "Salt Stone" all resolve to the same entry.
+     *
+     * @return array<int, string>
+     */
+    private function searchTokens(string $query): array
+    {
+        $normalized = mb_strtolower(trim($query));
+        $normalized = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $normalized) ?? '';
+        $parts = preg_split('/\s+/', trim($normalized), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        $connectors = ['and', 'und', 'et', 'y', 'e', 'or', 'oder', 'ou', 'plus'];
+
+        $tokens = [];
+        foreach ($parts as $part) {
+            if (in_array($part, $connectors, true)) {
+                continue;
+            }
+            // Drop single-character noise, but keep short numbers (e.g. years).
+            if (mb_strlen($part) < 2 && ! ctype_digit($part)) {
+                continue;
+            }
+            $tokens[$part] = $part;
+        }
+
+        return array_values($tokens);
+    }
+
+    /**
+     * Rank candidate entries by how well they match the query, then map the
+     * requested page ($offset/$limit over the ranked order) to the tool's row
+     * shape. Exact title beats full-phrase-in-title beats per-token coverage;
+     * ties keep the incoming (recency) order.
+     *
+     * @param  \Illuminate\Support\Collection<int, StatamicEntry>  $candidates
+     * @param  array<int, string>  $tokens
+     * @return array<int, array{id: string, title: string, slug: string, collection: string, published: bool}>
+     */
+    private function rankAndMapEntries($candidates, string $query, array $tokens, int $limit, int $offset = 0): array
+    {
+        $queryFold = $this->foldForCompare($query);
+        $tokensFold = array_values(array_filter(array_map(fn ($t) => $this->foldForCompare($t), $tokens)));
+
+        $ranked = $candidates
+            ->map(function ($entry) use ($queryFold, $tokensFold) {
+                $titleFold = $this->foldForCompare((string) ($entry->value('title') ?? ''));
+                $slugFold = $this->foldForCompare((string) ($entry->slug() ?? ''));
+                $haystack = trim($titleFold.' '.$slugFold);
+
+                $score = 0;
+                if ($queryFold !== '' && $titleFold === $queryFold) {
+                    $score += 1000;
+                }
+                if ($queryFold !== '' && str_contains($titleFold, $queryFold)) {
+                    $score += 200;
+                }
+
+                $covered = 0;
+                foreach ($tokensFold as $token) {
+                    if (str_contains($haystack, $token)) {
+                        $covered++;
+                    }
+                }
+                $score += $covered * 10;
+                if ($tokensFold !== [] && $covered === count($tokensFold)) {
+                    $score += 50;
+                }
+
+                return ['entry' => $entry, 'score' => $score];
+            })
+            ->sortByDesc('score') // stable in PHP 8: equal scores keep recency order
+            ->slice($offset, $limit)
+            ->pluck('entry');
+
+        return $this->mapEntryRows($ranked);
+    }
+
+    /**
+     * Fold a value for tolerant comparison: transliterate to ASCII (é→e, ä→a),
+     * lower-case, and collapse any non-alphanumeric run to a single space.
+     */
+    private function foldForCompare(string $value): string
+    {
+        $value = mb_strtolower(Str::ascii(trim($value)));
+        $value = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $value) ?? '';
+
+        return trim(preg_replace('/\s+/', ' ', $value) ?? '');
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, StatamicEntry>|iterable<StatamicEntry>  $entries
+     * @return array<int, array{id: string, title: string, slug: string, collection: string, published: bool}>
+     */
+    private function mapEntryRows($entries): array
+    {
+        return collect($entries)
             ->map(fn ($e) => [
                 'id' => (string) $e->id(),
                 'title' => (string) ($e->value('title') ?? ''),
                 'slug' => (string) ($e->slug() ?? ''),
                 'collection' => (string) ($e->collectionHandle() ?? ''),
+                'published' => (bool) $e->published(),
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Deep search: find entries whose *body content* (not just title/slug) matches
+     * the query. Each entry's field values are flattened to plain text server-side
+     * and matched with the same tolerant tokenising as findEntriesShortlist(), so a
+     * phrase split across rich-text nodes (e.g. "Kursleitung:" + "Claudia Eva Reinig")
+     * still resolves. The full content never leaves the server — callers receive only
+     * id/title/slug/collection plus a short snippet around the first match.
+     *
+     * @return array<int, array{id: string, title: string, slug: string, collection: string, snippet: string}>
+     */
+    public function searchEntryContent(?string $collectionHandle, string $query, int $limit): array
+    {
+        $limit = max(1, min(50, $limit));
+        $tokens = $this->searchTokens($query);
+        if ($tokens === []) {
+            return [];
+        }
+
+        $siteHandle = Site::selected()?->handle() ?? Site::default()->handle();
+
+        $q = Entry::query()->where('site', $siteHandle);
+        if (is_string($collectionHandle) && $collectionHandle !== '') {
+            $q->where('collection', $collectionHandle);
+        }
+
+        $candidates = $q->orderBy('updated_at', 'desc')->limit(self::SEARCH_CONTENT_SCAN_LIMIT + 1)->get();
+        if ($candidates->count() > self::SEARCH_CONTENT_SCAN_LIMIT) {
+            Log::warning('[entry-gen-tool] search_entry_content hit scan cap; some entries were not scanned', [
+                'collection' => $collectionHandle,
+                'scan_limit' => self::SEARCH_CONTENT_SCAN_LIMIT,
+            ]);
+            $candidates = $candidates->take(self::SEARCH_CONTENT_SCAN_LIMIT);
+        }
+
+        $tokensFold = array_values(array_filter(array_map(fn ($t) => $this->foldForCompare($t), $tokens)));
+
+        $matches = [];
+        foreach ($candidates as $entry) {
+            $flat = $this->flattenEntryText($entry);
+            if ($flat === '') {
+                continue;
+            }
+            $haystack = $this->foldForCompare($flat);
+
+            $hits = 0;
+            foreach ($tokensFold as $token) {
+                if (str_contains($haystack, $token)) {
+                    $hits++;
+                }
+            }
+
+            // Require every token to appear somewhere in the content (precision).
+            if ($tokensFold === [] || $hits < count($tokensFold)) {
+                continue;
+            }
+
+            $matches[] = [
+                'entry' => $entry,
+                'score' => $hits,
+                'snippet' => $this->buildContentSnippet($flat, $tokens),
+            ];
+        }
+
+        // Most token hits first; PHP 8 sort is stable so ties keep recency order.
+        usort($matches, fn ($a, $b) => $b['score'] <=> $a['score']);
+
+        return array_map(fn ($m) => [
+            'id' => (string) $m['entry']->id(),
+            'title' => (string) ($m['entry']->value('title') ?? ''),
+            'slug' => (string) ($m['entry']->slug() ?? ''),
+            'collection' => (string) ($m['entry']->collectionHandle() ?? ''),
+            'snippet' => $m['snippet'],
+        ], array_slice($matches, 0, $limit));
+    }
+
+    /**
+     * Flatten all string leaves of an entry's raw data into one plain-text blob,
+     * skipping structural keys (Bard/replicator plumbing) and capping total length.
+     */
+    private function flattenEntryText(StatamicEntry $entry): string
+    {
+        $parts = [];
+        $this->collectStringLeaves($entry->data()->all(), $parts, 0);
+        $text = trim(preg_replace('/\s+/', ' ', implode(' ', $parts)) ?? '');
+
+        return mb_strlen($text) > self::SEARCH_CONTENT_FLATTEN_CHARS
+            ? mb_substr($text, 0, self::SEARCH_CONTENT_FLATTEN_CHARS)
+            : $text;
+    }
+
+    /**
+     * Recursively gather non-empty string values from nested entry data.
+     *
+     * @param  mixed  $value
+     * @param  array<int, string>  $out
+     */
+    private function collectStringLeaves($value, array &$out, int $depth): void
+    {
+        if ($depth > 12 || count($out) > 5000) {
+            return;
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            if ($trimmed !== '') {
+                $out[] = $trimmed;
+            }
+
+            return;
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $key => $child) {
+                if (is_string($key) && in_array($key, self::CONTENT_SKIP_KEYS, true)) {
+                    continue;
+                }
+                $this->collectStringLeaves($child, $out, $depth + 1);
+            }
+        }
+    }
+
+    /**
+     * A short context window around the first query token found in the flat text.
+     *
+     * @param  array<int, string>  $tokens  Lower-cased, diacritics-preserved query tokens.
+     */
+    private function buildContentSnippet(string $flat, array $tokens): string
+    {
+        $pos = false;
+        foreach ($tokens as $token) {
+            $found = mb_stripos($flat, $token);
+            if ($found !== false) {
+                $pos = $found;
+                break;
+            }
+        }
+
+        if ($pos === false) {
+            return Str::limit($flat, 160);
+        }
+
+        $start = max(0, $pos - 40);
+        $snippet = trim(mb_substr($flat, $start, 200));
+
+        return ($start > 0 ? '…' : '').$snippet.'…';
     }
 
     /**
@@ -1190,6 +1589,247 @@ class EntryGeneratorService
         return $resolved;
     }
 
+    // ── entries relationship fields ──────────────────────────────────────
+    // Links to OTHER entries. The model outputs the title/slug of an existing
+    // entry; mapEntriesFieldValue resolves those to real ids. Linking a target
+    // that is being created in the SAME batch is not supported (it may not exist
+    // yet, and jobs run in parallel) — such a reference surfaces a warning
+    // instead of silently vanishing.
+
+    /**
+     * @return array{label: string, generatable: true, type: string, collections: array<int, string>, max_items: ?int, description: string}
+     */
+    private function buildEntriesFieldSchemaPayload(Field $field, ?string $instructions): array
+    {
+        $collections = $this->entriesFieldCollectionHandles($field);
+        $maxItems = is_numeric($field->get('max_items')) ? (int) $field->get('max_items') : null;
+
+        $descParts = [];
+        if ($instructions) {
+            $descParts[] = $instructions;
+        }
+        $descParts[] = 'Link EXISTING entries by their exact title (or slug). Only reference entries that already exist'
+            .($collections !== [] ? ' in the collection(s): '.implode(', ', $collections).'.' : '.')
+            .' Never invent an entry. If the target is being created in this same request and does not exist yet, leave this empty and still create the entry — never refuse or abort over a missing link.';
+        $descParts[] = $maxItems === 1
+            ? 'Return a single title string, or an empty string if none applies.'
+            : 'Return an array of titles (empty array if none applies)'.($maxItems !== null ? ", at most {$maxItems}." : '.');
+
+        return [
+            'label' => $field->display(),
+            'generatable' => true,
+            'type' => 'entry_references',
+            'collections' => $collections,
+            'max_items' => $maxItems,
+            'description' => implode(' ', $descParts),
+        ];
+    }
+
+    /**
+     * Resolve the model's entry references (titles/slugs) to real entry ids,
+     * scoped to the field's target collections. Unresolved references become a
+     * warning — never a silent drop.
+     */
+    private function mapEntriesFieldValue(mixed $value, Field $field, array &$warnings): mixed
+    {
+        $refs = [];
+        foreach (is_array($value) ? $value : [$value] as $item) {
+            if (is_string($item) && trim($item) !== '') {
+                $refs[] = trim($item);
+            } elseif (is_array($item) && isset($item['id']) && is_string($item['id'])) {
+                $refs[] = trim($item['id']); // tolerate {id:…}/{title:…} shapes
+            } elseif (is_array($item) && isset($item['title']) && is_string($item['title'])) {
+                $refs[] = trim($item['title']);
+            }
+        }
+
+        if ($refs === []) {
+            return null;
+        }
+
+        $collections = $this->entriesFieldCollectionHandles($field);
+        $ids = [];
+        foreach (array_unique($refs) as $ref) {
+            $id = $this->resolveEntryReference($ref, $collections);
+            if ($id !== null) {
+                $ids[] = $id;
+            } else {
+                $warnings[] = __(':field: could not link ":ref" — no existing entry with that title/slug was found.', [
+                    'field' => $field->display(),
+                    'ref' => Str::limit($ref, 60),
+                ]);
+            }
+        }
+
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return null;
+        }
+
+        $maxItems = is_numeric($field->get('max_items')) ? (int) $field->get('max_items') : null;
+        if ($maxItems !== null && count($ids) > $maxItems) {
+            $ids = array_slice($ids, 0, $maxItems);
+        }
+
+        return $maxItems === 1 ? $ids[0] : $ids;
+    }
+
+    /**
+     * Best existing-entry id for a title/slug reference, scoped to $collections
+     * (all collections when empty). Requires a confident title/slug match so a
+     * vague reference never links the wrong entry.
+     */
+    private function resolveEntryReference(string $ref, array $collections): ?string
+    {
+        $needle = $this->normalizeEntryRef($ref);
+        $scopes = $collections === [] ? [null] : $collections;
+
+        foreach ($scopes as $collection) {
+            foreach ($this->findEntriesShortlist($collection, $ref, 10) as $row) {
+                if ($this->normalizeEntryRef((string) ($row['title'] ?? '')) === $needle
+                    || $this->normalizeEntryRef((string) ($row['slug'] ?? '')) === $needle) {
+                    return (string) $row['id'];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** Case/punctuation-insensitive key so "Salt & Stone" == "salt and stone" == "salt-stone". */
+    private function normalizeEntryRef(string $s): string
+    {
+        $s = mb_strtolower(trim($s));
+        $s = str_replace(['&', '+'], ' and ', $s);
+        $s = preg_replace('~[^a-z0-9]+~u', ' ', $s) ?? $s;
+
+        return trim(preg_replace('~\s+~', ' ', $s) ?? $s);
+    }
+
+    /** @return array<int, string> */
+    private function entriesFieldCollectionHandles(Field $field): array
+    {
+        $configured = $field->get('collections');
+        if (! is_array($configured)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(
+            fn ($c) => is_string($c) ? $c : null,
+            $configured,
+        )));
+    }
+
+    // ── form relationship fields ─────────────────────────────────────────
+    // Links to a Statamic Form (a contact form etc.), stored as the form's
+    // HANDLE. The model picks from the site's existing forms (listed in the
+    // schema) by handle or title; mapFormFieldValue validates the choice.
+
+    /**
+     * @return array{label: string, generatable: true, type: string, forms: array<int, array{handle: string, title: string}>, max_items: ?int, description: string}|null
+     */
+    private function buildFormFieldSchemaPayload(Field $field, ?string $instructions): ?array
+    {
+        $forms = $this->availableForms();
+        if ($forms === []) {
+            // No forms exist on the site — nothing the model could validly pick.
+            return null;
+        }
+
+        $maxItems = is_numeric($field->get('max_items')) ? (int) $field->get('max_items') : 1;
+
+        $descParts = [];
+        if ($instructions) {
+            $descParts[] = $instructions;
+        }
+        $descParts[] = 'Link one of the site\'s EXISTING forms by its exact handle from the "forms" list below (match the user\'s intent, e.g. a contact form). Never invent a form handle.';
+        $descParts[] = $maxItems === 1
+            ? 'Return a single handle string, or an empty string if no form applies.'
+            : 'Return an array of handles (empty array if none applies)'.($maxItems > 1 ? ", at most {$maxItems}." : '.');
+
+        return [
+            'label' => $field->display(),
+            'generatable' => true,
+            'type' => 'form_reference',
+            'forms' => $forms,
+            'max_items' => $maxItems,
+            'description' => implode(' ', $descParts),
+        ];
+    }
+
+    /**
+     * Resolve the model's form reference(s) — handle or title — to valid existing
+     * form handles. Unresolved references warn rather than vanish.
+     */
+    private function mapFormFieldValue(mixed $value, Field $field, array &$warnings): mixed
+    {
+        $refs = [];
+        foreach (is_array($value) ? $value : [$value] as $item) {
+            if (is_string($item) && trim($item) !== '') {
+                $refs[] = trim($item);
+            } elseif (is_array($item) && isset($item['handle']) && is_string($item['handle'])) {
+                $refs[] = trim($item['handle']); // tolerate {handle:…}/{id:…} shapes
+            } elseif (is_array($item) && isset($item['id']) && is_string($item['id'])) {
+                $refs[] = trim($item['id']);
+            }
+        }
+
+        if ($refs === []) {
+            return null;
+        }
+
+        $handles = [];
+        foreach (array_unique($refs) as $ref) {
+            $handle = $this->resolveFormReference($ref);
+            if ($handle !== null) {
+                $handles[] = $handle;
+            } else {
+                $warnings[] = __(':field: could not link the form ":ref" — no form with that handle/title exists.', [
+                    'field' => $field->display(),
+                    'ref' => Str::limit($ref, 60),
+                ]);
+            }
+        }
+
+        $handles = array_values(array_unique($handles));
+        if ($handles === []) {
+            return null;
+        }
+
+        $maxItems = is_numeric($field->get('max_items')) ? (int) $field->get('max_items') : 1;
+        if ($maxItems >= 1 && count($handles) > $maxItems) {
+            $handles = array_slice($handles, 0, $maxItems);
+        }
+
+        // A relationship with max_items 1 stores a single handle string.
+        return $maxItems === 1 ? $handles[0] : $handles;
+    }
+
+    /** Match a handle/title reference to an existing form handle (case/punct-insensitive on title). */
+    private function resolveFormReference(string $ref): ?string
+    {
+        $needle = $this->normalizeEntryRef($ref);
+
+        foreach ($this->availableForms() as $form) {
+            if ($form['handle'] === $ref
+                || $this->normalizeEntryRef($form['handle']) === $needle
+                || $this->normalizeEntryRef($form['title']) === $needle) {
+                return $form['handle'];
+            }
+        }
+
+        return null;
+    }
+
+    /** @return array<int, array{handle: string, title: string}> */
+    private function availableForms(): array
+    {
+        return Form::all()
+            ->map(fn ($form) => ['handle' => (string) $form->handle(), 'title' => (string) $form->title()])
+            ->values()
+            ->all();
+    }
+
     private function firstTermValueForTermsField(Field $field, string $siteHandle): mixed
     {
         $ft = $field->fieldtype();
@@ -1264,6 +1904,16 @@ class EntryGeneratorService
             return $payload === null ? null : $this->finalizeSchemaEntry($field, $payload);
         }
 
+        if ($type === 'entries') {
+            return $this->finalizeSchemaEntry($field, $this->buildEntriesFieldSchemaPayload($field, $instructions));
+        }
+
+        if ($type === 'form') {
+            $payload = $this->buildFormFieldSchemaPayload($field, $instructions);
+
+            return $payload === null ? null : $this->finalizeSchemaEntry($field, $payload);
+        }
+
         if (in_array($type, self::GEN_SKIP_TYPES)) {
             return null;
         }
@@ -1318,6 +1968,14 @@ class EntryGeneratorService
             return $this->finalizeSchemaEntry($field, $entry);
         }
 
+        if ($type === 'markdown') {
+            $entry['type'] = 'markdown';
+            $entry['description'] = ($instructions ? $instructions.' ' : '')
+                .'Plain markdown string (**bold**, *italic*, [links](url), lists, ## headings). Do NOT return HTML tags or a JSON node tree — a string only.';
+
+            return $this->finalizeSchemaEntry($field, $entry);
+        }
+
         if (in_array($type, self::GEN_HTML_TYPES)) {
             $entry['type'] = 'html';
             $entry['description'] = ($instructions ? $instructions.' ' : '')
@@ -1327,14 +1985,13 @@ class EntryGeneratorService
         }
 
         if (in_array($type, self::GEN_CHOICE_TYPES)) {
-            $entry['type'] = 'select';
-            $options = $config['options'] ?? [];
-
-            if (is_array($options)) {
-                $entry['options'] = array_values(
-                    array_map(fn ($v) => is_array($v) ? ($v['value'] ?? $v['label'] ?? $v['key'] ?? '') : (string) $v, $options)
-                );
-            }
+            $multiple = $this->choiceFieldIsMultiple($field);
+            $entry['type'] = $multiple ? 'multi_select' : 'select';
+            $entry['options'] = $this->choiceFieldOptionValues($field);
+            $entry['description'] = ($instructions ? $instructions.' ' : '')
+                .($multiple
+                    ? 'Return an ARRAY of values copied EXACTLY from "options" (the stored values, not display labels).'
+                    : 'Return ONE value copied EXACTLY from "options" (the stored value, not a display label).');
 
             return $this->finalizeSchemaEntry($field, $entry);
         }
@@ -1349,6 +2006,31 @@ class EntryGeneratorService
             $entry['type'] = 'date';
             $entry['description'] = ($instructions ? $instructions.' ' : '')
                 .$this->statamicDateFieldSchemaDescriptionSuffix();
+
+            return $this->finalizeSchemaEntry($field, $entry);
+        }
+
+        if ($type === 'integer' || $type === 'float') {
+            $entry['type'] = 'number';
+            $entry['description'] = ($instructions ? $instructions.' ' : '')
+                .($type === 'integer' ? 'Whole number as a JSON number (no quotes).' : 'Number as a JSON number (no quotes).');
+
+            return $this->finalizeSchemaEntry($field, $entry);
+        }
+
+        if ($type === 'time') {
+            $entry['type'] = 'time';
+            $entry['description'] = ($instructions ? $instructions.' ' : '')
+                .'24-hour time string "HH:MM".';
+
+            return $this->finalizeSchemaEntry($field, $entry);
+        }
+
+        if ($type === 'table') {
+            $entry['type'] = 'table';
+            $entry['description'] = ($instructions ? $instructions.' ' : '')
+                .'Array of rows; EACH row is {"cells": [...]} with plain string/number cell values in column order (first row = header row when the table has one). '
+                .'Do NOT wrap cells as {"value": ...} objects and do NOT omit the "cells" key.';
 
             return $this->finalizeSchemaEntry($field, $entry);
         }
@@ -1511,7 +2193,7 @@ class EntryGeneratorService
 
             if ($t === 'assets') {
                 $tags['images'] = 'images / visual';
-            } elseif (in_array($t, self::GEN_HTML_TYPES, true)) {
+            } elseif (in_array($t, self::GEN_HTML_TYPES, true) || $t === 'markdown') {
                 $tags['html'] = 'rich text';
             } elseif (in_array($t, self::GEN_TEXT_TYPES, true)) {
                 $tags['text'] = 'short text';
@@ -1587,13 +2269,58 @@ class EntryGeneratorService
         return false;
     }
 
+    /**
+     * Internal schema keys that are noise for the model — present for our own
+     * bookkeeping, never referenced in the prompt rules and never read back.
+     * This is a DENYLIST: only these keys are dropped, so any other key (now or
+     * added in future) is preserved by default and can never be silently lost.
+     */
+    private const SCHEMA_NOISE_KEYS = ['generatable'];
+
+    /**
+     * Encode the field schema for the prompt: strip internal-only noise keys and
+     * emit minified JSON (no pretty-print indentation, unescaped slashes/unicode).
+     * This only shrinks what we SEND — it never changes the field handles, types,
+     * descriptions or constraints the model reads, nor how the response is parsed.
+     */
+    private function encodeSchemaForPrompt(array $fieldSchema): string
+    {
+        return (string) json_encode(
+            $this->stripSchemaNoise($fieldSchema),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+        );
+    }
+
+    /**
+     * Recursively drop {@see SCHEMA_NOISE_KEYS} at every depth (top level, group
+     * fields, grid row_fields, replicator sets, …). Everything else passes
+     * through untouched.
+     *
+     * @param  array<int|string, mixed>  $schema
+     * @return array<int|string, mixed>
+     */
+    private function stripSchemaNoise(array $schema): array
+    {
+        $clean = [];
+
+        foreach ($schema as $key => $value) {
+            if (is_string($key) && in_array($key, self::SCHEMA_NOISE_KEYS, true)) {
+                continue;
+            }
+
+            $clean[$key] = is_array($value) ? $this->stripSchemaNoise($value) : $value;
+        }
+
+        return $clean;
+    }
+
     private function buildSystemMessage(array $fieldSchema, string $locale): string
     {
         $preface = config('statamic-ai-assistant.prompt_generator_preface',
             'You are a CMS content creation assistant. Generate structured content for website entries. Respond ONLY with a valid JSON object — no markdown fences, no commentary.'
         );
 
-        $schemaJson = json_encode($fieldSchema, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $schemaJson = $this->encodeSchemaForPrompt($fieldSchema);
 
         $structuredRules = '';
 
@@ -1636,11 +2363,32 @@ class EntryGeneratorService
             ."- For fields with type \"link\": provide a URL, path, or entry::UUID reference as described in the field description.\n"
             ."- For fields with type \"video_url\": provide a YouTube or video page URL, or an empty string.\n"
             ."- For fields with type \"taxonomy_terms\": use only slugs from the schema \"taxonomies\" lists (exact slug when \"single_taxonomy\" is true; otherwise taxonomy_handle::term_slug).\n"
+            ."- For fields with type \"entry_references\": link ONLY entries that already exist, using their exact title (or slug). Use an array for multiple, a single string when the field allows one, and an empty array/string when none applies. If the entry you were asked to link does not exist yet (e.g. it is being created in this same request), LEAVE THIS FIELD EMPTY and still produce the rest of the entry normally — never refuse, abort, apologise, or demand a taxonomy just because a link target is missing.\n"
+            ."- For fields with type \"form_reference\": pick a form ONLY from that field's \"forms\" list, outputting its exact handle (match the user's intent, e.g. a contact form). Never invent a handle. Single string when the field allows one, otherwise an array; empty when none applies.\n"
             .$structuredRules
             ."- Field-level editorial guidance: when a field in the schema carries \"ai_description\" (what the field is and how it renders on the page) and/or \"writing_guidelines\" (concrete authoring rules such as length, tone, or structure), treat them as binding editorial instructions for THAT field's content — they override generic assumptions you would otherwise make from the handle alone.\n"
             ."- Every field in the schema that includes \"required\": true must have a non-empty, valid value for its type. Never omit those keys, never use empty strings for them, and never use HTML with no visible text. If the user is vague, says to do nothing, or gives minimal instructions, you must still invent sensible placeholder content so the entry would pass blueprint validation.\n"
             ."- For fields without \"required\": true, if you cannot determine content, use an empty string when appropriate.\n"
-            ."- Generate meaningful, high-quality content that is relevant to the user's request.";
+            ."- Generate meaningful, high-quality content that is relevant to the user's request."
+            .$this->siteInstructionsPromptBlock()
+            .$this->editorialGuidance->promptBlock($locale);
+    }
+
+    /**
+     * Editor-maintained site-wide instructions (AI agent settings), appended
+     * to every generation prompt. Length-capped so a very long document cannot
+     * crowd out the field schema.
+     */
+    private function siteInstructionsPromptBlock(): string
+    {
+        $instructions = $this->setHints->siteInstructions();
+
+        if ($instructions === '') {
+            return '';
+        }
+
+        return "\n\nSITE INSTRUCTIONS (set by this site's editors — always follow them):\n"
+            .Str::limit($instructions, 4000);
     }
 
     /**
@@ -1660,7 +2408,7 @@ class EntryGeneratorService
      */
     private function statamicDateFieldSchemaDescriptionSuffix(): string
     {
-        return 'Value: JSON string `YYYY-MM-DD` only (Statamic date / PHP Y-m-d). No time portion, no regional numeric dates, no "today" — normalize from source text if needed.';
+        return 'Value: JSON string `YYYY-MM-DD` (append ` HH:MM` only when a time matters). No regional numeric dates, no "today" — normalize from source text if needed.';
     }
 
     /**
@@ -1688,6 +2436,14 @@ class EntryGeneratorService
         }
 
         if ($attachmentContent) {
+            // The attached document IS the source material the user wants the
+            // entry built from. Say so explicitly and forbid going online for it
+            // — otherwise the model tends to fetch a URL it spots in the text and
+            // build the entry from that instead of the file the user attached.
+            $message = "The user attached a document whose full content is included below under \"--- ATTACHED DOCUMENT CONTENT ---\". "
+                ."Treat that content as your PRIMARY source for this entry: write the entry from its facts, structure, names, numbers and wording. "
+                ."Do NOT fetch external URLs to source this entry, and do NOT invent content the attachment does not contain.\n\n"
+                .$message;
             $message .= "\n\n--- ATTACHED DOCUMENT CONTENT ---\n\n".$attachmentContent;
         }
 
@@ -1725,8 +2481,21 @@ class EntryGeneratorService
         try {
             $decoded = json_decode($jsonStr, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
-            $this->logUnparseableResponse('generation', $rawResponse, $e->getMessage());
-            throw new \RuntimeException(__('Invalid JSON in AI response: :message', ['message' => $e->getMessage()]));
+            // Cheap local repair of common mid-tier defects (stray unescaped
+            // quotes, trailing commas, truncated tail) BEFORE paying for an LLM
+            // correction round. Re-validated below, so a bad repair costs nothing.
+            $repaired = JsonRepair::repair($response);
+            $repairedObject = JsonObjectExtractor::firstObject($repaired) ?? $repaired;
+            $decoded = json_decode($repairedObject, true);
+
+            if (is_array($decoded)) {
+                Log::info('[entry-gen] recovered malformed JSON via local repair (no LLM retry needed)', [
+                    'error' => $e->getMessage(),
+                ]);
+            } else {
+                $this->logUnparseableResponse('generation', $rawResponse, $e->getMessage());
+                throw new \RuntimeException(__('Invalid JSON in AI response: :message', ['message' => $e->getMessage()]));
+            }
         }
 
         if (! is_array($decoded) || array_is_list($decoded)) {
@@ -1735,6 +2504,73 @@ class EntryGeneratorService
         }
 
         return $decoded;
+    }
+
+    /**
+     * Parse the AI response, retrying ONCE with a strict-JSON correction when the
+     * first reply is not valid JSON. Mid-tier models frequently emit malformed
+     * JSON (unbalanced brackets) for deep nested Bard/replicator structures; a
+     * single corrective round usually recovers instead of failing the whole entry.
+     *
+     * @param  array<int, array<string, mixed>>  $messages  The messages that produced $rawResponse.
+     * @return array<string, mixed>
+     */
+    private function parseResponseOrRetry(string $rawResponse, array $messages, int $maxTokens, ?callable $onStreamToken = null): array
+    {
+        try {
+            return $this->parseResponse($rawResponse);
+        } catch (\RuntimeException $e) {
+            Log::warning('[entry-gen] invalid JSON from model; retrying once with a strict-JSON instruction', [
+                'error' => $e->getMessage(),
+            ]);
+
+            $retryMessages = array_merge($messages, [
+                ['role' => 'assistant', 'content' => Str::limit($rawResponse, 12000)],
+                ['role' => 'user', 'content' =>
+                    'Your previous reply could not be parsed as JSON ('.$e->getMessage().'). '
+                    .'Return the SAME content again as ONE strictly valid, minified JSON object and nothing else — '
+                    .'no markdown fences, no comments, no trailing commas, and every "{" and "[" must be properly closed. '
+                    .'For rich-text (Bard) fields, return the value as an HTML string rather than nested node objects.',
+                ],
+            ]);
+
+            $retryRaw = $this->aiService->generateFromMessages($retryMessages, $maxTokens, $onStreamToken);
+
+            if ($retryRaw === null || $retryRaw === '') {
+                throw $e;
+            }
+
+            return $this->parseResponse($retryRaw);
+        }
+    }
+
+    /**
+     * Coerce a model-supplied Bard value into a flat list of ProseMirror block
+     * nodes. Accepts a `doc` wrapper, a single node, or an already-flat list.
+     *
+     * @param  array<int|string, mixed>  $value
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeProseMirrorNodes(array $value): array
+    {
+        // Unwrap a { type: "doc", content: [...] } document.
+        if (($value['type'] ?? null) === 'doc' && is_array($value['content'] ?? null)) {
+            $value = $value['content'];
+        }
+
+        // A single node object → wrap into a list.
+        if (is_string($value['type'] ?? null)) {
+            $value = [$value];
+        }
+
+        $nodes = [];
+        foreach ($value as $node) {
+            if (is_array($node) && is_string($node['type'] ?? null)) {
+                $nodes[] = $node;
+            }
+        }
+
+        return $nodes;
     }
 
     /**
@@ -1856,33 +2692,75 @@ class EntryGeneratorService
         }
 
         if (in_array($type, self::GEN_HTML_TYPES)) {
-            if (! is_string($value) && ! is_scalar($value)) {
+            $buttons = $field->config()['buttons'] ?? null;
+            $buttons = is_array($buttons) ? $buttons : null;
+
+            // In UPDATE mode the current-values snapshot shows Bard content as raw
+            // ProseMirror JSON, so the model often returns the new value the same
+            // way (an array of nodes) rather than as an HTML string. Accept that
+            // directly instead of silently dropping the whole field.
+            if (is_array($value)) {
+                $nodes = $this->normalizeProseMirrorNodes($value);
+
+                if ($nodes === []) {
+                    $this->warnNonScalarDrop($field, $warnings);
+
+                    return null;
+                }
+
+                return $this->sanitizeBardNodesForFieldButtons($nodes, $buttons);
+            }
+
+            if (! is_scalar($value)) {
                 $this->warnNonScalarDrop($field, $warnings);
+
                 return null;
             }
             $html = is_string($value) ? $value : (string) $value;
 
             $nodes = $this->htmlToFullBardDocument($html);
-            $buttons = $field->config()['buttons'] ?? null;
 
-            return $this->sanitizeBardNodesForFieldButtons(
-                $nodes,
-                is_array($buttons) ? $buttons : null,
-            );
+            return $this->sanitizeBardNodesForFieldButtons($nodes, $buttons);
         }
 
         if (in_array($type, self::GEN_CHOICE_TYPES)) {
-            $options = $field->config()['options'] ?? [];
-            $validValues = [];
+            $validValues = $this->choiceFieldOptionValues($field);
 
-            if (is_array($options)) {
-                foreach ($options as $key => $opt) {
-                    if (is_array($opt)) {
-                        $validValues[] = $opt['value'] ?? $opt['key'] ?? (string) $key;
-                    } else {
-                        $validValues[] = (string) $key;
-                    }
+            if ($this->choiceFieldIsMultiple($field)) {
+                // LLMs regularly send a bare string where an array is expected —
+                // wrap it instead of dropping the field (same coercion the
+                // statamic-mcp addon applies to relationship-style values).
+                $values = is_array($value) ? array_values($value) : (is_scalar($value) ? [$value] : null);
+
+                if ($values === null) {
+                    $this->warnNonScalarDrop($field, $warnings);
+
+                    return null;
                 }
+
+                $picked = [];
+
+                foreach ($values as $v) {
+                    if (! is_scalar($v)) {
+                        continue;
+                    }
+                    $sv = (string) $v;
+
+                    if ($validValues !== [] && ! in_array($sv, $validValues, true)) {
+                        $warnings[] = __(':field: AI selected ":value" which is not a valid option. Value skipped.', [
+                            'field' => $field->display(),
+                            'value' => $sv,
+                        ]);
+
+                        continue;
+                    }
+
+                    $picked[] = $sv;
+                }
+
+                $picked = array_values(array_unique($picked));
+
+                return $picked === [] ? null : $picked;
             }
 
             if (! is_scalar($value)) {
@@ -1891,7 +2769,7 @@ class EntryGeneratorService
             }
             $strValue = (string) $value;
 
-            if (! empty($validValues) && ! in_array($strValue, $validValues)) {
+            if ($validValues !== [] && ! in_array($strValue, $validValues, true)) {
                 $warnings[] = __(':field: AI selected ":value" which is not a valid option. Field left empty.', [
                     'field' => $field->display(),
                     'value' => $strValue,
@@ -1908,27 +2786,79 @@ class EntryGeneratorService
         }
 
         if (in_array($type, self::GEN_DATE_TYPES)) {
-            if (! is_scalar($value)) {
-                $this->warnNonScalarDrop($field, $warnings);
-                return null;
-            }
-            $strValue = (string) $value;
-            $date = \DateTime::createFromFormat('Y-m-d', $strValue);
+            $date = $this->carbonFromLlmDateValue($value);
 
-            if (! $date || $date->format('Y-m-d') !== $strValue) {
+            if ($date === null) {
                 $warnings[] = __(':field: AI provided invalid date ":value". Field left empty.', [
                     'field' => $field->display(),
-                    'value' => $strValue,
+                    'value' => is_scalar($value) ? (string) $value : get_debug_type($value),
                 ]);
 
                 return null;
             }
 
-            return $strValue;
+            // Store in the shape the field keeps: time-enabled fields keep H:i,
+            // plain date fields stay Y-m-d (any parsed time is dropped).
+            return (bool) ($field->config()['time_enabled'] ?? false)
+                ? $date->format('Y-m-d H:i')
+                : $date->format('Y-m-d');
+        }
+
+        if ($type === 'markdown') {
+            if (! is_scalar($value)) {
+                $this->warnNonScalarDrop($field, $warnings);
+
+                return null;
+            }
+
+            return $this->aiService->cleanResult((string) $value);
+        }
+
+        if ($type === 'integer' || $type === 'float') {
+            if (! is_numeric($value)) {
+                $this->warnNonScalarDrop($field, $warnings);
+
+                return null;
+            }
+
+            return $type === 'integer' ? (int) $value : (float) $value;
+        }
+
+        if ($type === 'time') {
+            if (! is_scalar($value)) {
+                $this->warnNonScalarDrop($field, $warnings);
+
+                return null;
+            }
+
+            $str = trim((string) $value);
+
+            if (preg_match('/^(\d{1,2}):(\d{2})(?::\d{2})?$/', $str, $m) !== 1 || (int) $m[1] > 23 || (int) $m[2] > 59) {
+                $warnings[] = __(':field: AI provided invalid time ":value". Field left empty.', [
+                    'field' => $field->display(),
+                    'value' => $str,
+                ]);
+
+                return null;
+            }
+
+            return sprintf('%02d:%s', (int) $m[1], $m[2]);
+        }
+
+        if ($type === 'table') {
+            return $this->mapTableFieldValue($value, $field, $warnings);
         }
 
         if ($type === 'terms') {
             return $this->mapTermsFieldValue($value, $field, $warnings, $siteHandle);
+        }
+
+        if ($type === 'entries') {
+            return $this->mapEntriesFieldValue($value, $field, $warnings);
+        }
+
+        if ($type === 'form') {
+            return $this->mapFormFieldValue($value, $field, $warnings);
         }
 
         if (in_array($type, self::GEN_RECURSIVE_TYPES)) {
@@ -2049,6 +2979,59 @@ class EntryGeneratorService
         }
 
         return $result;
+    }
+
+    /**
+     * Normalize a table field to Statamic storage: each row {cells: [string|null, ...]}.
+     * Tolerant on purpose (adapted from cboxdk/statamic-mcp): LLMs commonly send
+     * bare arrays instead of {cells: ...} rows, or wrap cells as {value: x} — the
+     * latter renders as "[object Object]" in the CP editor if persisted raw.
+     *
+     * @return array<int, array{cells: array<int, string|null>}>|null
+     */
+    private function mapTableFieldValue(mixed $value, \Statamic\Fields\Field $field, array &$warnings): ?array
+    {
+        if (! is_array($value)) {
+            $this->warnNonScalarDrop($field, $warnings);
+
+            return null;
+        }
+
+        $rows = [];
+
+        foreach ($value as $row) {
+            if (is_array($row) && ! array_key_exists('cells', $row) && array_is_list($row)) {
+                $row = ['cells' => $row];
+            }
+
+            $cells = is_array($row) ? ($row['cells'] ?? null) : null;
+
+            if (! is_array($cells)) {
+                $warnings[] = __(':field: table row without "cells" was skipped.', ['field' => $field->display()]);
+
+                continue;
+            }
+
+            $rows[] = ['cells' => array_map(fn ($cell) => $this->normalizeTableCell($cell), array_values($cells))];
+        }
+
+        return $rows === [] ? null : $rows;
+    }
+
+    /**
+     * Coerce one table cell to string|null, unwrapping the augmented {value: x} form.
+     */
+    private function normalizeTableCell(mixed $cell): ?string
+    {
+        if (is_array($cell) && array_key_exists('value', $cell)) {
+            $cell = $cell['value'];
+        }
+
+        if ($cell === null) {
+            return null;
+        }
+
+        return is_scalar($cell) ? (string) $cell : null;
     }
 
     private function mapLinkFieldValue(mixed $value, \Statamic\Fields\Field $field, array &$warnings): ?string
@@ -2207,8 +3190,9 @@ class EntryGeneratorService
             $first = $this->firstSelectOptionValue($field);
 
             if ($first !== null && $first !== '') {
-                $data[$handle] = $first;
-                $displayData[$handle] = $first;
+                $value = $this->choiceFieldIsMultiple($field) ? [$first] : $first;
+                $data[$handle] = $value;
+                $displayData[$handle] = $value;
                 $this->requiredWasAutofilledWarning($field, $warnings);
             }
 
@@ -2246,6 +3230,22 @@ class EntryGeneratorService
 
         if ($type === 'video') {
             $warnings[] = __(':field is required but no video URL was provided. Add a URL in the editor after saving.', [
+                'field' => $field->display(),
+            ]);
+
+            return;
+        }
+
+        if ($type === 'entries') {
+            $warnings[] = __(':field is required but no matching existing entry was found to link. Set it in the editor after saving.', [
+                'field' => $field->display(),
+            ]);
+
+            return;
+        }
+
+        if ($type === 'form') {
+            $warnings[] = __(':field is required but no matching form was found to link. Set it in the editor after saving.', [
                 'field' => $field->display(),
             ]);
 
@@ -2332,27 +3332,57 @@ class EntryGeneratorService
         return Str::limit($p, $limit);
     }
 
-    private function firstSelectOptionValue(Field $field): ?string
+    /**
+     * Whether a choice field stores an ARRAY of values (checkboxes, or a
+     * select/button_group configured with multiple: true).
+     */
+    private function choiceFieldIsMultiple(Field $field): bool
+    {
+        return $field->type() === 'checkboxes' || (bool) ($field->config()['multiple'] ?? false);
+    }
+
+    /**
+     * The STORED values of a choice field's options — the single source used by
+     * the prompt schema, the mapper validation, and the required-field fallback,
+     * so the model is always shown exactly the values that will be accepted.
+     *
+     * Statamic option configs come in three shapes: a flat list of values
+     * (['red', 'blue']), a value => label map (['red' => 'Red']), or a list of
+     * {key, value} rows ([['key' => 'red', 'value' => 'Red']]). The stored value
+     * is the list item, the map KEY, or the row's `key` — never the label.
+     *
+     * @return array<int, string>
+     */
+    private function choiceFieldOptionValues(Field $field): array
     {
         $options = $field->config()['options'] ?? [];
 
         if (! is_array($options) || $options === []) {
-            return null;
+            return [];
         }
+
+        $values = [];
 
         foreach ($options as $key => $opt) {
             if (is_array($opt)) {
-                $v = $opt['value'] ?? $opt['key'] ?? null;
-
-                if ($v !== null && $v !== '') {
-                    return (string) $v;
-                }
+                $v = $opt['key'] ?? $opt['value'] ?? null;
             } elseif (is_string($key) && $key !== '') {
-                return $key;
+                $v = $key;
+            } else {
+                $v = is_scalar($opt) ? $opt : null;
+            }
+
+            if ($v !== null && $v !== '') {
+                $values[] = (string) $v;
             }
         }
 
-        return null;
+        return array_values(array_unique($values));
+    }
+
+    private function firstSelectOptionValue(Field $field): ?string
+    {
+        return $this->choiceFieldOptionValues($field)[0] ?? null;
     }
 
     /**
@@ -2456,6 +3486,8 @@ class EntryGeneratorService
         $maxTokens = (int) config('statamic-ai-assistant.generator_max_tokens', 4000);
         $toolWarnings = [];
 
+        $hasAttachment = (string) $attachmentContent !== '';
+
         if ($useUrlTool) {
             try {
                 $rawResponse = $this->generateContentWithUrlFetchToolLoop(
@@ -2467,6 +3499,7 @@ class EntryGeneratorService
                     null,
                     false,
                     $streamHeartbeat,
+                    $hasAttachment,
                 );
             } catch (\Throwable $e) {
                 Log::warning('[entry-update] tool loop failed; falling back to single-shot completion', [
@@ -2482,7 +3515,7 @@ class EntryGeneratorService
             throw new \RuntimeException(__('The AI returned no content. Check your provider settings and try again.'));
         }
 
-        $parsedData = $this->parseResponse($rawResponse);
+        $parsedData = $this->parseResponseOrRetry($rawResponse, $messages, $maxTokens, $onStreamToken);
         $result = $this->mapToFieldData($parsedData, $blueprint, $locale, $prompt, null, true);
 
         // Resolve asset fields (top-level + nested in groups) the LLM asked to
@@ -2914,30 +3947,40 @@ class EntryGeneratorService
     }
 
     /**
-     * Parse a Statamic date field value (Y-m-d string) for use as the dated entry's order date.
+     * Parse a Statamic date field value for use as the dated entry's order date.
+     * Accepts the stored shapes the mapper produces (Y-m-d, Y-m-d H:i).
      */
     private function carbonFromBlueprintDateData(mixed $value): ?Carbon
     {
-        if (! is_string($value)) {
-            return null;
+        return $this->carbonFromLlmDateValue($value);
+    }
+
+    /**
+     * Parse a model-provided date tolerantly (adapted from cboxdk/statamic-mcp):
+     * LLMs send Y-m-d, ISO 8601, "Y-m-d H:i", or a split {date, time} object —
+     * accept all of them instead of dropping the field over a format mismatch.
+     */
+    private function carbonFromLlmDateValue(mixed $value): ?Carbon
+    {
+        if (is_array($value)) {
+            $date = is_string($value['date'] ?? null) ? trim($value['date']) : '';
+
+            if ($date === '') {
+                return null;
+            }
+
+            $time = is_string($value['time'] ?? null) ? trim($value['time']) : '';
+            $value = trim($date.' '.$time);
         }
 
-        $raw = trim($value);
-
-        if ($raw === '') {
+        if (! is_string($value) || trim($value) === '') {
             return null;
         }
 
         try {
-            $c = Carbon::createFromFormat('Y-m-d', $raw);
+            return Carbon::parse(trim($value));
         } catch (\Throwable) {
             return null;
         }
-
-        if (! $c || $c->format('Y-m-d') !== $raw) {
-            return null;
-        }
-
-        return $c->startOfDay();
     }
 }

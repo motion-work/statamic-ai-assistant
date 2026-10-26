@@ -161,6 +161,23 @@ abstract class AbstractAiService
     }
 
     /**
+     * Whether this provider can analyze images (a vision model is configured).
+     */
+    public function supportsVision(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Describe an image (data URL) with the provider's vision model.
+     * Only callable when supportsVision() is true.
+     */
+    public function describeImage(string $imageDataUrl, string $prompt): string
+    {
+        throw new \RuntimeException(__('This AI provider does not support image analysis.'));
+    }
+
+    /**
      * Non-streaming chat completion with optional tools. Returns the raw API JSON (OpenAI shape).
      *
      * @param  array<int, array<string, mixed>>  $messages

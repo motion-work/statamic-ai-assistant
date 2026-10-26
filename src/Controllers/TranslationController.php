@@ -262,9 +262,17 @@ class TranslationController
         $status = $this->translationService->getTranslationStatus();
         $navigations = $this->translationService->getNavigationsList();
 
+        // Multi-site taxonomies for the bulk tool's taxonomy mode picker.
+        $taxonomies = \Statamic\Facades\Taxonomy::all()
+            ->filter(fn ($taxonomy) => $taxonomy->sites() && $taxonomy->sites()->count() > 1)
+            ->map(fn ($taxonomy) => ['handle' => $taxonomy->handle(), 'title' => $taxonomy->title()])
+            ->values()
+            ->all();
+
         return response()->json([
             'collections' => $status,
             'navigations' => $navigations,
+            'taxonomies' => $taxonomies,
         ]);
     }
 
@@ -308,7 +316,10 @@ class TranslationController
         $maxDepth = (int) config('statamic-ai-assistant.linked_entries_max_depth', 1);
 
         try {
-            $payload = $this->navigationTreeSyncService->sync(
+            // Same queue + progress-cache machinery as entry batches (falls back
+            // to the inline sync when no real queue is available).
+            $payload = $this->batchRunner->runNavigationSync(
+                $this->navigationTreeSyncService,
                 $data['navigation'],
                 $destinationLocales,
                 $overwrite,
@@ -383,5 +394,96 @@ class TranslationController
             'default_source_locale' => $defaultSite->locale(),
             'default_source_site_name' => $defaultSite->name(),
         ]);
+    }
+
+    /**
+     * Terms of a taxonomy with per-locale translation status — the taxonomy
+     * counterpart of collectionEntries, in the SAME response shape so the CP
+     * table, selection and progress components work unchanged. A term counts
+     * as translated in a site when it has localized data there.
+     */
+    public function taxonomyTerms(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'taxonomy' => 'required|string',
+        ]);
+
+        $taxonomy = \Statamic\Facades\Taxonomy::findByHandle($data['taxonomy']);
+        if (! $taxonomy) {
+            return response()->json(['error' => __('Taxonomy not found.')], 404);
+        }
+
+        $sites = $taxonomy->sites();
+        if (! $sites || $sites->count() <= 1) {
+            return response()->json(['error' => __('This taxonomy does not support multiple languages.')], 422);
+        }
+
+        $defaultSiteHandle = Site::default()->handle();
+        $originSite = $sites->contains($defaultSiteHandle)
+            ? $defaultSiteHandle
+            : $sites->first();
+
+        $terms = \Statamic\Facades\Term::query()
+            ->where('taxonomy', $data['taxonomy'])
+            ->where('site', $originSite)
+            ->get();
+
+        $result = $terms->map(function ($term) use ($sites, $originSite) {
+            $base = method_exists($term, 'term') ? $term->term() : $term;
+
+            $locales = [];
+            foreach ($sites as $siteHandle) {
+                $locales[$siteHandle] = $siteHandle === $originSite || collect($base->dataForLocale($siteHandle))->isNotEmpty()
+                    ? 'translated'
+                    : 'missing';
+            }
+
+            return [
+                'id' => (string) $base->id(),
+                'title' => (string) ($term->title() ?? $base->slug()),
+                'edit_url' => $term->editUrl(),
+                'locales' => $locales,
+            ];
+        });
+
+        $defaultSite = Site::default();
+
+        return response()->json([
+            'entries' => $result->values(),
+            'sites' => \Statamic\Facades\Site::all()->filter(function ($site) use ($sites) {
+                return $sites->contains($site->handle());
+            })->map(function ($site) {
+                return [
+                    'handle' => $site->handle(),
+                    'name' => $site->name(),
+                    'locale' => $site->locale(),
+                ];
+            })->values(),
+            'origin_site_handle' => $originSite,
+            'default_source_locale' => $defaultSite->locale(),
+            'default_source_site_name' => $defaultSite->name(),
+        ]);
+    }
+
+    /**
+     * Translate a single taxonomy term to one destination locale (the term
+     * counterpart of translateEntry; the CP loops term × locale pairs).
+     */
+    public function translateTerm(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'term_id' => 'required|string',
+            'destination_locale' => 'required|string',
+            'overwrite' => 'sometimes|boolean',
+        ]);
+
+        $result = $this->translationService->translateTerm(
+            $data['term_id'],
+            Site::default()->locale(),
+            $data['destination_locale'],
+            (bool) ($data['overwrite'] ?? false),
+        );
+
+        return response()->json($result, ($result['success'] ?? false) ? 200 : 422);
     }
 }

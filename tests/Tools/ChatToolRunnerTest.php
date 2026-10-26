@@ -75,6 +75,61 @@ class ChatToolRunnerTest extends TestCase
         $this->assertSame('limited_limit_reached', $second['error']);
     }
 
+    public function test_compaction_elides_old_large_tool_results_only(): void
+    {
+        $big = json_encode(['ok' => true, 'blob' => str_repeat('x', 5000)]);
+        $small = json_encode(['ok' => true]);
+
+        $working = [
+            ['role' => 'user', 'content' => 'go'],
+            ['role' => 'tool', 'tool_call_id' => 'a', 'content' => $big],   // old + big → elided
+            ['role' => 'tool', 'tool_call_id' => 'b', 'content' => $small], // old + small → kept
+            ['role' => 'tool', 'tool_call_id' => 'c', 'content' => $big],   // recent → kept
+            ['role' => 'tool', 'tool_call_id' => 'd', 'content' => $big],   // recent → kept
+        ];
+
+        ChatToolRunner::compactToolMessages($working, keepLast: 2, maxBytes: 2048);
+
+        $this->assertStringContainsString('"elided":true', $working[1]['content']);
+        $this->assertSame($small, $working[2]['content']);
+        $this->assertSame($big, $working[3]['content']);
+        $this->assertSame($big, $working[4]['content']);
+        // Non-tool messages are never touched.
+        $this->assertSame('go', $working[0]['content']);
+    }
+
+    public function test_result_observer_sees_every_dispatched_result(): void
+    {
+        $seen = [];
+        $runner = new ChatToolRunner(
+            [$this->fakeTool('good'), $this->fakeTool('bad', null, fn () => throw new \RuntimeException('boom'))],
+            new ToolContext,
+            function (string $name, array $result) use (&$seen) {
+                $seen[] = [$name, $result['ok']];
+            },
+        );
+
+        $working = [];
+        $runner->consume([$this->toolCall('good', '{}', 'a'), $this->toolCall('bad', '{}', 'b')], $working);
+
+        $this->assertSame([['good', true], ['bad', false]], $seen);
+    }
+
+    public function test_oversized_result_is_replaced_with_actionable_error(): void
+    {
+        $huge = $this->fakeTool('huge', null, fn () => ['ok' => true, 'blob' => str_repeat('x', 150_000)]);
+        $runner = new ChatToolRunner([$huge], new ToolContext);
+
+        $working = [];
+        $runner->consume([$this->toolCall('huge')], $working);
+
+        $decoded = json_decode($working[0]['content'], true);
+        $this->assertFalse($decoded['ok']);
+        $this->assertSame('result_too_large', $decoded['error']);
+        $this->assertStringContainsString('narrower', $decoded['hint']);
+        $this->assertLessThan(100_000, strlen($working[0]['content']));
+    }
+
     public function test_unknown_tool_routes_to_fallback_then_errors(): void
     {
         $runner = new ChatToolRunner([$this->fakeTool('known')], new ToolContext);

@@ -2,31 +2,35 @@
 
 namespace MotionWork\StatamicAiAssistant\Support;
 
+use MotionWork\StatamicAiAssistant\Services\AgentAccessStore;
+use Statamic\Contracts\Auth\User as UserContract;
 use Statamic\Facades\User;
 
 /**
  * Central rule for how many entries one AI agent request may create/update.
  *
- * Super users get the full configured batch cap
- * (`agent_max_plan_entries`). Everyone else is capped to a SINGLE entry
- * per request when `editor_limit_entries` (env `EDITOR_LIMIT_ENTRIES`) is on —
- * so editors can still use the agent, but a mistaken "create every page of this
- * site" prompt can never fan out into a bulk run.
+ * Super users get the full configured batch cap (`agent_max_plan_entries`).
+ * For everyone else — while `editor_limit_entries` (env `EDITOR_LIMIT_ENTRIES`)
+ * is on — the cap is resolved from the dashboard-managed access config: a
+ * per-user override wins, else the highest limit among the user's granted roles,
+ * else the configured default (1 when nothing is set). The result is clamped to
+ * [1, configured ceiling].
  *
- * The check must happen where the CP user is known (the controller), because
- * the planner itself runs in a queued job with no authenticated user. The
- * resolved cap is therefore computed up-front and carried on the batch session.
+ * The check must happen where the CP user is known (the controller), because the
+ * planner itself runs in a queued job with no authenticated user. The resolved
+ * cap is therefore computed up-front and carried on the batch session.
  */
 class EntryCreationPolicy
 {
     /**
-     * Entries a non-super user may create/update per request while the limit is
-     * enabled. Deliberately a single entry — "no multiple entries" for editors.
+     * Fallback per-request cap for a limited non-super user when the dashboard
+     * config sets no role/user/default limit. Historically the fixed editor cap.
      */
     public const EDITOR_ENTRY_LIMIT = 1;
 
     /**
-     * Whether the single-entry limit for non-super users is active.
+     * Whether the single-entry (dashboard-configurable) limit for non-super users
+     * is active at all.
      */
     public static function limitEnabled(): bool
     {
@@ -42,30 +46,57 @@ class EntryCreationPolicy
     }
 
     /**
-     * Whether the given user (or the current CP user) is subject to the limit.
+     * Whether the given user (or current CP user) is subject to a reduced limit.
      */
-    public static function appliesTo(?bool $isSuper = null): bool
+    public static function appliesTo(?UserContract $user = null): bool
     {
-        $isSuper ??= (bool) User::current()?->isSuper();
+        $user ??= User::current();
 
-        return self::limitEnabled() && ! $isSuper;
+        return self::limitEnabled() && $user !== null && ! $user->isSuper();
     }
 
     /**
-     * Effective max entries a request may create/update.
-     *
-     * Pass the user's super status explicitly from the request layer; when
-     * omitted the current CP user is used (do NOT rely on that inside a queued
-     * job, where there is no authenticated user).
+     * Effective max entries the given user (or current CP user) may create/update
+     * per request. Do NOT call inside a queued job (no authenticated user there) —
+     * resolve it in the request layer and carry the value on the session.
      */
-    public static function maxPlanEntries(?bool $isSuper = null): int
+    public static function maxPlanEntries(?UserContract $user = null): int
     {
-        $configured = self::configuredMaxPlanEntries();
+        $user ??= User::current();
+        $ceiling = self::configuredMaxPlanEntries();
 
-        if (! self::appliesTo($isSuper)) {
-            return $configured;
+        // No user context (or unlimited): fall back to the full ceiling rather
+        // than over-restricting.
+        if ($user === null || $user->isSuper() || ! self::limitEnabled()) {
+            return $ceiling;
         }
 
-        return min($configured, self::EDITOR_ENTRY_LIMIT);
+        return max(1, min($ceiling, self::resolveUserLimit($user)));
+    }
+
+    /**
+     * The dashboard-configured limit for this non-super user: user override,
+     * else the highest of their granted-role limits, else the default.
+     */
+    private static function resolveUserLimit(UserContract $user): int
+    {
+        $limits = app(AgentAccessStore::class)->agentLimits();
+
+        $userId = (string) $user->id();
+        if ($userId !== '' && isset($limits['users'][$userId])) {
+            return (int) $limits['users'][$userId];
+        }
+
+        $roleLimits = [];
+        foreach ($limits['roles'] as $roleHandle => $limit) {
+            if ($user->hasRole($roleHandle)) {
+                $roleLimits[] = (int) $limit;
+            }
+        }
+        if ($roleLimits !== []) {
+            return max($roleLimits);
+        }
+
+        return (int) ($limits['default'] ?? self::EDITOR_ENTRY_LIMIT);
     }
 }

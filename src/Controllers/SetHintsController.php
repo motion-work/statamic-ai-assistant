@@ -28,11 +28,13 @@ class SetHintsController
         return response()->json([
             'sets' => $this->hints->discoverSets(),
             'fields' => $this->hints->discoverFields(),
+            'site_instructions' => $this->hints->siteInstructions(),
         ]);
     }
 
     /**
-     * Persist the submitted hint maps (block hints and/or field hints).
+     * Persist the submitted hint maps (block hints and/or field hints) and/or
+     * the site-wide agent instructions.
      */
     public function save(Request $request): JsonResponse
     {
@@ -47,6 +49,7 @@ class SetHintsController
             'field_hints.*.ai_description' => 'nullable|string|max:4000',
             'field_hints.*.when_to_use' => 'nullable|array',
             'field_hints.*.when_to_use.*' => 'nullable|string|max:500',
+            'site_instructions' => 'sometimes|nullable|string|max:8000',
         ]);
 
         try {
@@ -56,6 +59,10 @@ class SetHintsController
 
             if ($request->has('field_hints')) {
                 $this->hints->saveFieldHints($data['field_hints'] ?? []);
+            }
+
+            if ($request->has('site_instructions')) {
+                $this->hints->saveSiteInstructions((string) ($data['site_instructions'] ?? ''));
             }
         } catch (\Throwable $e) {
             Log::error('Failed to save set hints', ['error' => $e->getMessage()]);
@@ -67,6 +74,7 @@ class SetHintsController
             'success' => true,
             'sets' => $this->hints->discoverSets(),
             'fields' => $this->hints->discoverFields(),
+            'site_instructions' => $this->hints->siteInstructions(),
         ]);
     }
 

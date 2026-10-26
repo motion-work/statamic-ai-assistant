@@ -234,12 +234,39 @@
           <button
             type="button"
             class="translation-page__segment"
+            :class="{ 'translation-page__segment--active': contentSourceType === 'taxonomy' }"
+            :disabled="translationUiLocked"
+            @click="setContentSourceType('taxonomy')"
+          >
+            {{ __('Taxonomy') }}
+          </button>
+          <button
+            type="button"
+            class="translation-page__segment"
             :class="{ 'translation-page__segment--active': contentSourceType === 'navigation' }"
             :disabled="translationUiLocked"
             @click="setContentSourceType('navigation')"
           >
             {{ __('Navigation') }}
           </button>
+        </div>
+      </div>
+
+      <!-- Taxonomy picker -->
+      <div v-if="contentSourceType === 'taxonomy'" class="translation-page__field">
+        <label class="translation-page__label" for="translation-taxonomy-select">{{ __('Taxonomy') }}</label>
+        <div class="translation-page__select-wrap">
+          <select
+            id="translation-taxonomy-select"
+            v-model="selectedTaxonomy"
+            class="translation-page__select"
+            @change="loadTaxonomyTerms"
+          >
+            <option value="">{{ __('Choose a taxonomy...') }}</option>
+            <option v-for="tax in taxonomies" :key="tax.handle" :value="tax.handle">
+              {{ tax.title }}
+            </option>
+          </select>
         </div>
       </div>
 
@@ -330,7 +357,7 @@
       </div>
 
       <!-- Entry listing with checkboxes -->
-      <div v-if="contentSourceType === 'collection' && collectionEntries.length" class="translation-page__entries-list">
+      <div v-if="isListMode && collectionEntries.length" class="translation-page__entries-list">
         <div class="translation-page__entries-toolbar">
           <label class="translation-page__checkbox-label">
             <input type="checkbox" v-model="selectAll" @change="toggleSelectAll" />
@@ -418,7 +445,7 @@
       </div>
 
       <div
-        v-else-if="contentSourceType === 'collection' && selectedCollection && !loadingEntries"
+        v-else-if="isListMode && selectedSourceHandle && !loadingEntries"
         class="translation-page__empty"
       >
         <span class="translation-page__empty-icon" aria-hidden="true">
@@ -452,12 +479,12 @@
 
       <div class="translation-page__actions translation-page__actions--step1">
         <Button
-          v-if="contentSourceType === 'collection'"
+          v-if="isListMode"
           variant="primary"
           :disabled="
             translationUiLocked ||
             selectedEntries.length === 0 ||
-            !selectedCollection ||
+            !selectedSourceHandle ||
             loadingEntries
           "
           @click="goToConfigure"
@@ -476,7 +503,7 @@
     </div>
 
     <!-- Step 2: Configure translation (collection only — navigation is merged into step 1) -->
-    <div v-if="step === 2 && contentSourceType === 'collection'" class="translation-page__panel">
+    <div v-if="step === 2 && isListMode" class="translation-page__panel">
       <div class="translation-page__panel-head">
         <span class="translation-page__panel-badge">2</span>
         <h2 class="translation-page__panel-title">{{ __('Configure translation') }}</h2>
@@ -614,6 +641,8 @@ export default {
       step: 1,
       collections: [],
       navigations: [],
+      taxonomies: [],
+      selectedTaxonomy: '',
       /** 'collection' | 'navigation' */
       contentSourceType: 'collection',
       selectedCollection: '',
@@ -730,6 +759,16 @@ export default {
         return this.__('Prepare navigation sync');
       }
       return this.__('Select content to translate');
+    },
+
+    /** Collection and taxonomy modes share the list → configure → progress flow. */
+    isListMode() {
+      return this.contentSourceType === 'collection' || this.contentSourceType === 'taxonomy';
+    },
+
+    /** The picked source handle for the active list mode. */
+    selectedSourceHandle() {
+      return this.contentSourceType === 'taxonomy' ? this.selectedTaxonomy : this.selectedCollection;
     },
 
     /** Per-target-locale rows for navigation sync (shown next to checkboxes). */
@@ -1132,7 +1171,7 @@ export default {
     },
 
     onClickStartTranslation() {
-      if (this.contentSourceType === 'collection' && this.overwrite) {
+      if (this.isListMode && this.overwrite) {
         this.showOverwriteConfirm = true;
         return;
       }
@@ -1149,6 +1188,7 @@ export default {
         const response = await axios.get('/cp/ai-translations/status');
         this.collections = response.data.collections || [];
         this.navigations = response.data.navigations || [];
+        this.taxonomies = response.data.taxonomies || [];
       } catch (error) {
         this.$toast.error(this.__('Failed to load collections.'));
       }
@@ -1157,6 +1197,8 @@ export default {
     async loadContentEntries() {
       if (this.contentSourceType === 'navigation') {
         await this.loadNavigationEntries();
+      } else if (this.contentSourceType === 'taxonomy') {
+        await this.loadTaxonomyTerms();
       } else {
         await this.loadCollectionEntries();
       }
@@ -1170,6 +1212,7 @@ export default {
       this.contentSourceType = type;
       this.selectedCollection = '';
       this.selectedNavigation = '';
+      this.selectedTaxonomy = '';
       this.collectionEntries = [];
       this.availableSites = [];
       this.originSiteHandle = '';
@@ -1199,6 +1242,47 @@ export default {
       try {
         const response = await axios.get('/cp/ai-translations/collection-entries', {
           params: { collection: this.selectedCollection },
+        });
+
+        this.collectionEntries = response.data.entries || [];
+        this.availableSites = response.data.sites || [];
+        this.originSiteHandle = response.data.origin_site_handle || '';
+        this.defaultSourceLocale = response.data.default_source_locale || '';
+        this.defaultSourceSiteName = response.data.default_source_site_name || '';
+
+        this.destinationLocales = [];
+      } catch (error) {
+        const msg =
+          error.response?.data?.error ||
+          error.response?.data?.message ||
+          this.__('Failed to load entries.');
+        this.$toast.error(msg);
+        this.collectionEntries = [];
+        this.availableSites = [];
+      } finally {
+        this.loadingEntries = false;
+      }
+    },
+
+    async loadTaxonomyTerms() {
+      if (!this.selectedTaxonomy) {
+        this.collectionEntries = [];
+        this.availableSites = [];
+        this.originSiteHandle = '';
+        this.defaultSourceLocale = '';
+        this.defaultSourceSiteName = '';
+        return;
+      }
+
+      this.loadingEntries = true;
+      this.selectedEntries = [];
+      this.selectAll = false;
+
+      try {
+        // Same response shape as collection-entries, so the term rows flow
+        // through the existing table/selection/progress components untouched.
+        const response = await axios.get('/cp/ai-translations/taxonomy-terms', {
+          params: { taxonomy: this.selectedTaxonomy },
         });
 
         this.collectionEntries = response.data.entries || [];
@@ -1352,6 +1436,20 @@ export default {
           destination_locales: this.normalizedDestinationLocales,
         });
 
+        // Queued run: pages stream into the progress list live via the same
+        // polling used for entry batches; one row per translated page.
+        if (data.mode === 'async' && data.batch_id) {
+          this.batchId = data.batch_id;
+          this.batchProgress = {
+            current: 0,
+            total: data.total || 1,
+            status: 'processing',
+            current_entry: this.__('Syncing navigation…'),
+          };
+          this.startPolling();
+          return;
+        }
+
         const results = data.results || [];
         const errs = results
           .filter((r) => !r.success)
@@ -1368,7 +1466,25 @@ export default {
         });
 
         const batchEntries = {};
+        let pagesTranslated = 0;
         results.forEach((r) => {
+          // One row per PAGE the sync had to translate (missing in the target
+          // locale) — same rendering as entry translations, incl. the
+          // "Also created (linked)" rows from linked_entries.
+          (r.pages || []).forEach((p) => {
+            pagesTranslated++;
+            batchEntries[`nav:${r.locale}:${p.source_entry_id}`] = {
+              status: 'completed',
+              error: null,
+              origin_title: p.origin_title,
+              target_title: p.target_title || p.origin_title,
+              edit_url: p.edit_url || null,
+              destination_locale: r.locale,
+              is_new: true,
+              linked_entries: p.linked_entries || [],
+            };
+          });
+
           const key = `nav:${r.locale}`;
           batchEntries[key] = {
             status: r.success ? 'completed' : 'failed',
@@ -1384,7 +1500,7 @@ export default {
           current: results.length,
           total: Math.max(results.length, 1),
           status: 'completed',
-          translated: ok.length,
+          translated: ok.length + pagesTranslated,
           updated: 0,
           errors: errs,
           navigation_warnings: navWarnings,
@@ -1443,11 +1559,16 @@ export default {
         };
 
         try {
-          const { data } = await axios.post('/cp/ai-translations/entry', {
-            entry_id: entryId,
-            destination_locale: locale,
-            overwrite: this.overwrite,
-          });
+          // Taxonomy mode reuses the whole flow — only the endpoint differs.
+          const isTaxonomy = this.contentSourceType === 'taxonomy';
+          const { data } = await axios.post(
+            isTaxonomy ? '/cp/ai-translations/term' : '/cp/ai-translations/entry',
+            {
+              ...(isTaxonomy ? { term_id: entryId } : { entry_id: entryId }),
+              destination_locale: locale,
+              overwrite: this.overwrite,
+            },
+          );
 
           const sid = data.source_entry_id || entryId;
           const key = `${sid}\x1e${locale}`;
@@ -1551,6 +1672,10 @@ export default {
     goToSourceView() {
       if (this.contentSourceType === 'navigation' && this.selectedNavigation) {
         window.location.href = `/cp/navigation/${this.selectedNavigation}`;
+        return;
+      }
+      if (this.contentSourceType === 'taxonomy' && this.selectedTaxonomy) {
+        window.location.href = `/cp/taxonomies/${this.selectedTaxonomy}`;
         return;
       }
       if (this.selectedCollection) {

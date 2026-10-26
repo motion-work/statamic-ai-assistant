@@ -76,4 +76,25 @@ class SetHintsServiceTest extends TestCase
             $service->forField('lead')
         );
     }
+
+    public function test_site_instructions_round_trip_and_preserve_hints(): void
+    {
+        $service = new SetHintsService;
+        $service->save(['hero' => ['ai_description' => 'Big opener.', 'when_to_use' => []]]);
+
+        $service->saveSiteInstructions("Address readers informally.\nNever invent prices.");
+
+        $fresh = new SetHintsService;
+        $this->assertSame("Address readers informally.\nNever invent prices.", $fresh->siteInstructions());
+        // The other sections of the file survive the instructions write.
+        $this->assertSame('Big opener.', $fresh->forSet('hero')['ai_description']);
+
+        // Saving hints afterwards keeps the instructions too.
+        $fresh->save(['hero' => ['ai_description' => 'Updated.', 'when_to_use' => []]]);
+        $this->assertSame("Address readers informally.\nNever invent prices.", (new SetHintsService)->siteInstructions());
+
+        // Empty string removes the key.
+        $fresh->saveSiteInstructions('   ');
+        $this->assertSame('', (new SetHintsService)->siteInstructions());
+    }
 }

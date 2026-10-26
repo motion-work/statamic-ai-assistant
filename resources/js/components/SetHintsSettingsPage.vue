@@ -54,6 +54,22 @@
     </header>
 
     <div class="sh-body">
+      <!-- Site-wide agent instructions: injected into every planner/generator prompt -->
+      <section class="sh-instructions translation-page__panel" aria-labelledby="sh-instructions-heading">
+        <h2 id="sh-instructions-heading" class="translation-page__panel-title">{{ __('Site instructions for the agent') }}</h2>
+        <p class="sh-instructions__intro">
+          {{ __('Free-form guidance the agent follows on every request for this site: brand voice, preferred wording, terminology, rules to always respect. Keep it short and concrete — it is added to every prompt.') }}
+        </p>
+        <textarea
+          v-model="siteInstructions"
+          class="sh-textarea"
+          rows="8"
+          maxlength="8000"
+          :placeholder="__('e.g. Address readers informally. Never invent prices. Events always mention the location in the lead paragraph.')"
+          @input="markDirty"
+        ></textarea>
+      </section>
+
       <!-- Figma OAuth: fetch design context when prompts include figma.com links -->
       <section class="sh-figma translation-page__panel" aria-labelledby="sh-figma-heading">
         <div v-if="figmaLoading" class="sh-figma__state">
@@ -368,6 +384,8 @@ export default {
       originalDraft: {},
       fieldDraft: {},
       originalFieldDraft: {},
+      siteInstructions: "",
+      originalSiteInstructions: "",
       dirty: false,
       search: "",
       // When true, only blocks without ai_description AND without any when_to_use tip are shown.
@@ -513,7 +531,7 @@ export default {
       this.loadError = null;
       try {
         const { data } = await this.$axios.get("/cp/ai-block-hints/list");
-        this.applyServerState(data.sets || [], data.fields || []);
+        this.applyServerState(data.sets || [], data.fields || [], data.site_instructions || "");
       } catch (e) {
         this.loadError =
           (e && e.response && e.response.data && e.response.data.error) ||
@@ -523,13 +541,15 @@ export default {
       }
     },
 
-    applyServerState(sets, fields) {
+    applyServerState(sets, fields, siteInstructions = "") {
       this.sets = sets;
       this.fields = fields;
       this.draft = this.buildDraft(sets);
       this.fieldDraft = this.buildDraft(fields);
       this.originalDraft = this.cloneDraft(this.draft);
       this.originalFieldDraft = this.cloneDraft(this.fieldDraft);
+      this.siteInstructions = siteInstructions;
+      this.originalSiteInstructions = siteInstructions;
       this.dirty = false;
     },
 
@@ -573,7 +593,8 @@ export default {
     computeDirty() {
       return (
         this.draftsDiffer(this.draft, this.originalDraft) ||
-        this.draftsDiffer(this.fieldDraft, this.originalFieldDraft)
+        this.draftsDiffer(this.fieldDraft, this.originalFieldDraft) ||
+        this.siteInstructions !== this.originalSiteInstructions
       );
     },
 
@@ -676,8 +697,9 @@ export default {
         const { data } = await this.$axios.post("/cp/ai-block-hints/save", {
           hints: this.serializeDraft(this.draft),
           field_hints: this.serializeDraft(this.fieldDraft),
+          site_instructions: this.siteInstructions,
         });
-        this.applyServerState(data.sets || this.sets, data.fields || this.fields);
+        this.applyServerState(data.sets || this.sets, data.fields || this.fields, data.site_instructions || "");
         this.$toast.success(this.__("AI agent settings saved."));
       } catch (e) {
         const msg =
@@ -934,6 +956,10 @@ export default {
   padding-bottom: 3rem;
 }
 
+.sh-instructions {
+  margin-bottom: 1.25rem;
+}
+
 .sh-figma {
   margin-bottom: 1.25rem;
 }
@@ -948,6 +974,14 @@ export default {
   line-height: 1.5;
   margin: 0 0 1rem;
 }
+
+.sh-instructions__intro {
+  font-size: 0.875rem;
+  color: var(--tp-text-muted);
+  line-height: 1.5;
+  margin: 0 0 1rem;
+}
+
 .sh-figma__credentials-hint {
   font-size: 0.875rem;
   color: var(--tp-text-muted);

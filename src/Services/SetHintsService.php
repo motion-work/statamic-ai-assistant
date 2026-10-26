@@ -255,6 +255,46 @@ class SetHintsService
     }
 
     /**
+     * Free-form site-wide agent instructions (brand voice, terminology,
+     * do/don'ts) maintained by editors on the AI agent settings page and
+     * injected into the planner + generator prompts — the site-level analog
+     * of a coding agent's project memory file.
+     */
+    public function siteInstructions(): string
+    {
+        $value = $this->readFile()['site_instructions'] ?? '';
+
+        return is_string($value) ? trim($value) : '';
+    }
+
+    /**
+     * Persist the site instructions, preserving the other sections of the file.
+     * An empty string removes the key.
+     */
+    public function saveSiteInstructions(string $instructions): string
+    {
+        $instructions = trim($instructions);
+
+        $document = $this->readFile();
+        $document['site_instructions'] = $instructions;
+
+        if ($instructions === '') {
+            unset($document['site_instructions']);
+        }
+
+        $path = $this->storagePath();
+        $dir = dirname($path);
+
+        if (! is_dir($dir)) {
+            mkdir($dir, 0775, true);
+        }
+
+        file_put_contents($path, YAML::dump($document));
+
+        return $instructions;
+    }
+
+    /**
      * Normalize + write one root key while preserving the other sections of the file.
      *
      * @param  array<string, mixed>  $hints
