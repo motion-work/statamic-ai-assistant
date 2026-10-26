@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
 use DeepL\DeepLClient;
 use DeepL\DeepLException;
@@ -433,7 +433,7 @@ class DeeplService
 
         $response = Http::withHeaders([
             'Authorization' => 'DeepL-Auth-Key '.$apiKey,
-            'User-Agent' => 'BoldWebStatamicAiAssistant/1.0',
+            'User-Agent' => 'MotionWorkStatamicAiAssistant/1.0',
         ])->timeout(20)->get($baseUrl.'/v2/usage');
 
         if (! $response->successful()) {

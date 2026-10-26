@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tools;
+namespace MotionWork\StatamicAiAssistant\Tools;
 
 use Illuminate\Support\Facades\Log;
 

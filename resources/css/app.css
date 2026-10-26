@@ -374,7 +374,7 @@ html.dark .translation-page {
     max-width: 40rem;
 }
 
-/* Hero variant: title block + actions (e.g. BOLD agent settings) */
+/* Hero variant: title block + actions (e.g. AI agent settings) */
 .translation-page__hero--agent {
     flex-wrap: wrap;
     justify-content: space-between;
@@ -3078,7 +3078,7 @@ html.dark .translation-progress__entry-error {
 }
 
 /* --------------------------------------------------------------------------
-   BOLD agent — chat UI (drawer)
+   AI agent — chat UI (drawer)
    -------------------------------------------------------------------------- */
 
 .eg-chat {

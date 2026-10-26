@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Log;
 use Statamic\Facades\YAML;

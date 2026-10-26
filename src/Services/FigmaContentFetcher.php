@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -85,7 +85,7 @@ class FigmaContentFetcher
             return $this->augmentationCache[$cacheKey] = [
                 'appendix' => '',
                 'warnings' => [
-                    __('A Figma link was detected, but Figma is not connected. Connect it in BOLD agent settings.'),
+                    __('A Figma link was detected, but Figma is not connected. Connect it in AI agent settings.'),
                 ],
             ];
         }

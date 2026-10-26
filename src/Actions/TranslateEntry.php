@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Actions;
+namespace MotionWork\StatamicAiAssistant\Actions;
 
-use BoldWeb\StatamicAiAssistant\Services\CpTranslationBatchRunner;
-use BoldWeb\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Services\CpTranslationBatchRunner;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use Statamic\Actions\Action;
 use Statamic\Contracts\Entries\Entry;
 use Statamic\Facades\Site;

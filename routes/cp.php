@@ -1,10 +1,10 @@
 <?php
 
-use BoldWeb\StatamicAiAssistant\Controllers\EntryGeneratorController;
-use BoldWeb\StatamicAiAssistant\Controllers\FigmaOAuthController;
-use BoldWeb\StatamicAiAssistant\Controllers\SetHintsController;
-use BoldWeb\StatamicAiAssistant\Controllers\TranslationController;
-use BoldWeb\StatamicAiAssistant\Controllers\TranslationGlossaryController;
+use MotionWork\StatamicAiAssistant\Controllers\EntryGeneratorController;
+use MotionWork\StatamicAiAssistant\Controllers\FigmaOAuthController;
+use MotionWork\StatamicAiAssistant\Controllers\SetHintsController;
+use MotionWork\StatamicAiAssistant\Controllers\TranslationController;
+use MotionWork\StatamicAiAssistant\Controllers\TranslationGlossaryController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('ai-generate')->name('statamic-ai-assistant.generate.')->group(function () {

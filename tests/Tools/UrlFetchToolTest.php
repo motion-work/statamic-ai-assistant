@@ -1,11 +1,11 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Tools;
+namespace MotionWork\StatamicAiAssistant\Tests\Tools;
 
-use BoldWeb\StatamicAiAssistant\Services\PromptUrlFetcher;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
-use BoldWeb\StatamicAiAssistant\Tools\ToolContext;
-use BoldWeb\StatamicAiAssistant\Tools\UrlFetchTool;
+use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
+use MotionWork\StatamicAiAssistant\Tools\UrlFetchTool;
 use Illuminate\Support\Facades\Http;
 
 class UrlFetchToolTest extends TestCase

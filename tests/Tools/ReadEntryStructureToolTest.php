@@ -1,11 +1,11 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Tools;
+namespace MotionWork\StatamicAiAssistant\Tests\Tools;
 
-use BoldWeb\StatamicAiAssistant\Services\EntryStructureSerializer;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
-use BoldWeb\StatamicAiAssistant\Tools\ReadEntryStructureTool;
-use BoldWeb\StatamicAiAssistant\Tools\ToolContext;
+use MotionWork\StatamicAiAssistant\Services\EntryStructureSerializer;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Tools\ReadEntryStructureTool;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 
 class ReadEntryStructureToolTest extends TestCase
 {

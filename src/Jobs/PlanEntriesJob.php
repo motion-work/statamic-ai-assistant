@@ -1,11 +1,11 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Jobs;
+namespace MotionWork\StatamicAiAssistant\Jobs;
 
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationPlanner;
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorService;
-use BoldWeb\StatamicAiAssistant\Support\PlanEntryDecorator;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Run the BOLD agent planner asynchronously so the HTTP request returns immediately.
+ * Run the AI agent planner asynchronously so the HTTP request returns immediately.
  *
  * - When auto_resolve is true the planner is invoked in agentic mode: it can call
  *   `create_entry_job` to incrementally append plan rows + dispatch generation
@@ -79,7 +79,7 @@ class PlanEntriesJob implements ShouldQueue
 
             $message = $e instanceof \RuntimeException
                 ? $e->getMessage()
-                : (string) __('BOLD agent planning failed. Please try again.');
+                : (string) __('AI agent planning failed. Please try again.');
 
             $batch->markPlanningFailed($this->sessionId, $message);
         }
@@ -114,7 +114,7 @@ class PlanEntriesJob implements ShouldQueue
             'label' => Str::limit($prompt, 60),
         ]);
 
-        $cap = max(1, min(500, (int) config('statamic-ai-assistant.bold_agent_max_plan_entries', 100)));
+        $cap = max(1, min(500, (int) config('statamic-ai-assistant.agent_max_plan_entries', 100)));
         if ($batch->addPlannedEntry($this->sessionId, $decorated, $cap)) {
             GeneratePlannedEntryJob::dispatch($this->sessionId, (string) $decorated['id']);
         }

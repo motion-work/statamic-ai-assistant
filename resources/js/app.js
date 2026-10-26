@@ -11,7 +11,7 @@ import EntryGeneratorCpLauncher from "./components/EntryGeneratorCpLauncher.vue"
 import SetHintsSettingsPage from "./components/SetHintsSettingsPage.vue";
 import TranslationGlossaryPage from "./components/TranslationGlossaryPage.vue";
 import { AiTextLegacyBardNode } from "./AiTextLegacyBardNode";
-import { BoldAiBardService } from "./BoldAiBardService";
+import { AiBardService } from "./AiBardService";
 import { TranslationInfoDisplay } from "./utils/TranslationInfoDisplay";
 
 /**
@@ -61,7 +61,7 @@ Statamic.booting((statamic) => {
     TranslationTargetLanguagesFieldtype
   );
 
-  Statamic.$bard.addExtension(BoldAiBardService);
+  Statamic.$bard.addExtension(AiBardService);
   Statamic.$bard.addExtension(AiTextLegacyBardNode);
 
   Statamic.$bard.buttons((buttons) => {

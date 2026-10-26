@@ -2,7 +2,7 @@ import axios from "axios";
 import { applyBardWriteContent } from "./utils/applyBardWriteContent";
 import { normalizeAiOutput } from "./utils/normalizeAiOutput";
 
-export const BoldAiBardService = ({ tiptap }) => {
+export const AiBardService = ({ tiptap }) => {
   const { Extension } = tiptap.core;
 
   return Extension.create({

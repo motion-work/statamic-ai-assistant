@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -105,7 +105,7 @@ class RemoteImageFetcher
             return $this->fail('no_asset_container', $url, $reason);
         }
 
-        $folder = (string) config('statamic-ai-assistant.image_fetch.folder', 'bold-agent-fetched');
+        $folder = (string) config('statamic-ai-assistant.image_fetch.folder', 'ai-agent-fetched');
         $timeout = max(1, (int) config('statamic-ai-assistant.image_fetch.timeout', 20));
         $maxBytes = max(1024, (int) config('statamic-ai-assistant.image_fetch.max_bytes', 10 * 1024 * 1024));
 

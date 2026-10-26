@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\InfomaniakService;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class TieredModelTest extends TestCase
 {

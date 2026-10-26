@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Fieldtypes;
+namespace MotionWork\StatamicAiAssistant\Fieldtypes;
 
 use Statamic\Fields\Fieldtype;
 

@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
 use Statamic\Entries\Entry as StatamicEntry;
 use Statamic\Fields\Blueprint;

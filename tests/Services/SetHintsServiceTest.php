@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\SetHintsService;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\SetHintsService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class SetHintsServiceTest extends TestCase
 {

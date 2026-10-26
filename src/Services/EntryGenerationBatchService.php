@@ -1,14 +1,14 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Redis-backed session for queued BOLD agent entry generation (post-planner).
+ * Redis-backed session for queued AI agent entry generation (post-planner).
  *
  * @phpstan-type EntryRow array{
  *   id: string,

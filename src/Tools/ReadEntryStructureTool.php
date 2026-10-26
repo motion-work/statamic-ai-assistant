@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tools;
+namespace MotionWork\StatamicAiAssistant\Tools;
 
-use BoldWeb\StatamicAiAssistant\Services\EntryStructureSerializer;
+use MotionWork\StatamicAiAssistant\Services\EntryStructureSerializer;
 use Statamic\Facades\Entry;
 
 /**

@@ -1,16 +1,16 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
-use BoldWeb\StatamicAiAssistant\Support\EntryCreationPolicy;
-use BoldWeb\StatamicAiAssistant\Support\JsonObjectExtractor;
-use BoldWeb\StatamicAiAssistant\Support\PlanEntryDecorator;
-use BoldWeb\StatamicAiAssistant\Tools\ChatToolRunner;
-use BoldWeb\StatamicAiAssistant\Tools\ReadEntryStructureTool;
-use BoldWeb\StatamicAiAssistant\Tools\ToolContext;
-use BoldWeb\StatamicAiAssistant\Tools\UrlFetchTool;
+use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
+use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
+use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
+use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
+use MotionWork\StatamicAiAssistant\Tools\ReadEntryStructureTool;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
+use MotionWork\StatamicAiAssistant\Tools\UrlFetchTool;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -70,7 +70,7 @@ class EntryGenerationPlanner
         }
 
         $catalogJson = json_encode($catalog, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-        $maxEntries = max(1, min(500, (int) config('statamic-ai-assistant.bold_agent_max_plan_entries', 100)));
+        $maxEntries = max(1, min(500, (int) config('statamic-ai-assistant.agent_max_plan_entries', 100)));
 
         $useUrlTool = (bool) config('statamic-ai-assistant.entry_generator_fetch_url_tool', true)
             && (bool) config('statamic-ai-assistant.prompt_url_fetch.enabled', true)
@@ -207,7 +207,7 @@ class EntryGenerationPlanner
         }
 
         if (! $this->aiService->supportsChatTools()) {
-            throw new \RuntimeException(__('The configured AI provider does not support tool calls; cannot run BOLD agent planner.'));
+            throw new \RuntimeException(__('The configured AI provider does not support tool calls; cannot run AI agent planner.'));
         }
 
         $session = $this->batch->getSession($sessionId);
@@ -221,7 +221,7 @@ class EntryGenerationPlanner
             ? $session['attachment_content']
             : null;
 
-        $shortlistLimit = max(0, (int) config('statamic-ai-assistant.bold_agent_catalog_entries_shortlist', 25));
+        $shortlistLimit = max(0, (int) config('statamic-ai-assistant.agent_catalog_entries_shortlist', 25));
         $catalog = $this->generator->getCollectionsCatalog($shortlistLimit);
         if ($catalog === []) {
             throw new \RuntimeException(__('No collections with blueprints are available.'));
@@ -434,7 +434,7 @@ class EntryGenerationPlanner
 
         $tools = array_merge($runner->definitions(), [
             $this->createEntryJobToolDefinition($cap),
-            // The two tools below power the BOLD agent's UPDATE flow. They are
+            // The two tools below power the AI agent's UPDATE flow. They are
             // intentionally separate from create_entry_job — to drop update
             // support, remove these two tool defs + their handlers + the
             // dispatch branches below; create_entry_job is unaffected.
@@ -494,7 +494,7 @@ class EntryGenerationPlanner
                         return $result;
                     }
 
-                    // BOLD agent UPDATE tool — independent of create_entry_job.
+                    // AI agent UPDATE tool — independent of create_entry_job.
                     if ($name === 'update_entry_job') {
                         $result = $this->handleUpdateEntryJobToolCall($args, $sessionId, $catalog, $cap, $created);
                         if (($result['ok'] ?? false) === true) {
@@ -671,7 +671,7 @@ class EntryGenerationPlanner
     }
 
     // ---------------------------------------------------------------------
-    //  BOLD agent UPDATE tools — kept structurally separate from
+    //  AI agent UPDATE tools — kept structurally separate from
     //  create_entry_job so removing/replacing update support is a clean delete:
     //  drop these three methods + the wiring in planAgenticToolLoop.
     // ---------------------------------------------------------------------

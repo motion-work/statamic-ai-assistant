@@ -1,10 +1,10 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\HtmlReadableExtractor;
-use BoldWeb\StatamicAiAssistant\Services\PromptUrlFetcher;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\HtmlReadableExtractor;
+use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Support\Facades\Http;
 
 class PromptUrlFetcherTest extends TestCase

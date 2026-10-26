@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Jobs;
+namespace MotionWork\StatamicAiAssistant\Jobs;
 
-use BoldWeb\StatamicAiAssistant\Support\EntryLabel;
-use BoldWeb\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;

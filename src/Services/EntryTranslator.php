@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\Concerns\TranslatesFields;
-use BoldWeb\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Services\Concerns\TranslatesFields;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use DeepL\TranslateTextOptions;
 use Illuminate\Support\Str;
 use Statamic\Entries\Entry as StatamicEntry;

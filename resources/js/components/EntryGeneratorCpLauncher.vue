@@ -46,7 +46,7 @@
             class="eg-cp-launcher__panel"
             role="dialog"
             tabindex="-1"
-            :aria-label="`${__('BOLD agent')} (${__('Beta')})`"
+            :aria-label="`${__('AI agent')} (${__('Beta')})`"
             @click.stop
           >
             <header class="eg-cp-launcher__head">
@@ -61,7 +61,7 @@
     
               </span>
               <div class="eg-cp-launcher__head-title-row">
-                <span class="eg-cp-launcher__head-title">{{ __('BOLD agent') }}</span>
+                <span class="eg-cp-launcher__head-title">{{ __('AI agent') }}</span>
                 <span class="eg-cp-launcher__beta">{{ __('Beta') }}</span>
               </div>
               <button
@@ -131,11 +131,11 @@ export default {
     },
 
     bubbleTitle() {
-      if (this.activity.busy) return this.__('BOLD agent — working in the background…');
+      if (this.activity.busy) return this.__('AI agent — working in the background…');
       if (this.activity.ready > 0) {
         return this.__(':n entries ready to review', { n: this.activity.ready });
       }
-      return this.__('Open BOLD agent');
+      return this.__('Open AI agent');
     },
   },
 

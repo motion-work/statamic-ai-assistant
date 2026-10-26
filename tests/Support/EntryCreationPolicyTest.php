@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Support;
+namespace MotionWork\StatamicAiAssistant\Tests\Support;
 
-use BoldWeb\StatamicAiAssistant\Support\EntryCreationPolicy;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class EntryCreationPolicyTest extends TestCase
 {
@@ -11,7 +11,7 @@ class EntryCreationPolicyTest extends TestCase
     {
         config([
             'statamic-ai-assistant.editor_limit_entries' => true,
-            'statamic-ai-assistant.bold_agent_max_plan_entries' => 100,
+            'statamic-ai-assistant.agent_max_plan_entries' => 100,
         ]);
 
         $this->assertTrue(EntryCreationPolicy::appliesTo(isSuper: false));
@@ -22,7 +22,7 @@ class EntryCreationPolicyTest extends TestCase
     {
         config([
             'statamic-ai-assistant.editor_limit_entries' => true,
-            'statamic-ai-assistant.bold_agent_max_plan_entries' => 100,
+            'statamic-ai-assistant.agent_max_plan_entries' => 100,
         ]);
 
         $this->assertFalse(EntryCreationPolicy::appliesTo(isSuper: true));
@@ -33,7 +33,7 @@ class EntryCreationPolicyTest extends TestCase
     {
         config([
             'statamic-ai-assistant.editor_limit_entries' => false,
-            'statamic-ai-assistant.bold_agent_max_plan_entries' => 42,
+            'statamic-ai-assistant.agent_max_plan_entries' => 42,
         ]);
 
         $this->assertFalse(EntryCreationPolicy::appliesTo(isSuper: false));
@@ -42,10 +42,10 @@ class EntryCreationPolicyTest extends TestCase
 
     public function test_configured_cap_is_clamped_to_the_sane_ceiling(): void
     {
-        config(['statamic-ai-assistant.bold_agent_max_plan_entries' => 100000]);
+        config(['statamic-ai-assistant.agent_max_plan_entries' => 100000]);
         $this->assertSame(500, EntryCreationPolicy::configuredMaxPlanEntries());
 
-        config(['statamic-ai-assistant.bold_agent_max_plan_entries' => 0]);
+        config(['statamic-ai-assistant.agent_max_plan_entries' => 0]);
         $this->assertSame(1, EntryCreationPolicy::configuredMaxPlanEntries());
     }
 }

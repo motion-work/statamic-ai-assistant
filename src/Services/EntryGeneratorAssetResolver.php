@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use Illuminate\Support\Collection;
 use Statamic\Assets\Asset as StatamicAsset;
 use Statamic\Contracts\Assets\Asset as AssetContract;
@@ -280,7 +280,7 @@ class EntryGeneratorAssetResolver
     }
 
     /**
-     * Public listing of asset paths in the field's container — used by the BOLD
+     * Public listing of asset paths in the field's container — used by the AI
      * agent UPDATE flow so the LLM can pick a specific image (e.g. respecting
      * user constraints like "not from the set previews folder") instead of
      * relying on the random pick fallback.
@@ -316,7 +316,7 @@ class EntryGeneratorAssetResolver
      * Pick a replacement value for ONE asset field, respecting its max_files /
      * min_files config. Single-file fields return a string path; multi-file
      * fields return an array of paths. Returns null when the container has no
-     * candidates. Used by the BOLD agent UPDATE flow as a safe alternative to
+     * candidates. Used by the AI agent UPDATE flow as a safe alternative to
      * fillAssetFieldsWithRandom (which iterates the whole blueprint and would
      * over-fill nested fields the user did not ask about).
      */

@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tools;
+namespace MotionWork\StatamicAiAssistant\Tools;
 
-use BoldWeb\StatamicAiAssistant\Services\PromptUrlFetcher;
+use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
 
 /**
  * ChatTool adapter over PromptUrlFetcher's fetch_page_content capability. The

@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Controllers;
+namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use BoldWeb\StatamicAiAssistant\Services\TranslationGlossaryService;
-use BoldWeb\StatamicAiAssistant\Services\TranslationStyleRulesService;
+use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
+use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;

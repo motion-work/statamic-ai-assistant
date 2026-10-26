@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Fieldtypes;
+namespace MotionWork\StatamicAiAssistant\Fieldtypes;
 
 use Statamic\Fields\Fieldtype;
 
@@ -22,5 +22,5 @@ class AiTextarea extends Fieldtype
 </svg>
 ';
   public $categories = ['text'];
-  protected $keywords = ['ai', 'ia', 'bold', 'text','textarea'];
+  protected $keywords = ['ai', 'ia', 'text','textarea'];
 }

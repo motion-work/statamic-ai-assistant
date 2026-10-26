@@ -1,13 +1,13 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Controllers;
+namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use BoldWeb\StatamicAiAssistant\Jobs\PlanEntriesJob;
-use BoldWeb\StatamicAiAssistant\Services\AbstractAiService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorService;
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
-use BoldWeb\StatamicAiAssistant\Support\EntryCreationPolicy;
+use MotionWork\StatamicAiAssistant\Jobs\PlanEntriesJob;
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -366,7 +366,7 @@ class EntryGeneratorController
         }
 
         return (string) __(
-            'BOLD agent batch generation requires an asynchronous queue. Set QUEUE_CONNECTION=redis in your .env, then start php artisan horizon or php artisan queue:work. The sync driver cannot be used.',
+            'AI agent batch generation requires an asynchronous queue. Set QUEUE_CONNECTION=redis in your .env, then start php artisan horizon or php artisan queue:work. The sync driver cannot be used.',
         );
     }
 

@@ -1,17 +1,17 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Jobs;
+namespace MotionWork\StatamicAiAssistant\Tests\Jobs;
 
-use BoldWeb\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
-use BoldWeb\StatamicAiAssistant\Jobs\PlanEntriesJob;
-use BoldWeb\StatamicAiAssistant\Services\AbstractAiService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationPlanner;
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorService;
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
-use BoldWeb\StatamicAiAssistant\Services\PromptUrlFetcher;
-use BoldWeb\StatamicAiAssistant\Support\PlanEntryDecorator;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
+use MotionWork\StatamicAiAssistant\Jobs\PlanEntriesJob;
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
+use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 

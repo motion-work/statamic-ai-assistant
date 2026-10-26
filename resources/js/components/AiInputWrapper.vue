@@ -1,6 +1,6 @@
 <template>
-    <div class="bold-ai-statamic-assistant">
-      <div ref="aiBoldContainer" class="ai-bold-wrapper">
+    <div class="ai-statamic-assistant">
+      <div ref="aiContainer" class="ai-assistant-wrapper">
         <!-- AI Icon Button -->
         <div class="ai-icon-wrapper">
           <button type="button" @click="openModal(() => internalValue)">
@@ -231,7 +231,7 @@
         if (!group) return;
 
         const label = group.querySelector('label');
-        const container = this.$refs.aiBoldContainer;
+        const container = this.$refs.aiContainer;
         if (label && container) {
           if (label.prepend) {
             label.prepend(container);
@@ -345,7 +345,7 @@
    * Statamic often uses justify-between on labels — that pushes title and icons to opposite ends; override so
    * they stay inline next to each other.
    */
-  label:has(.ai-bold-wrapper) {
+  label:has(.ai-assistant-wrapper) {
     display: flex !important;
     align-items: center;
     justify-content: flex-start !important;
@@ -355,7 +355,7 @@
     box-sizing: border-box;
   }
 
-  .ai-bold-wrapper {
+  .ai-assistant-wrapper {
     display: flex;
     align-items: center;
     flex-shrink: 0;

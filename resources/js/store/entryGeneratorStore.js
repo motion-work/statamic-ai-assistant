@@ -766,7 +766,7 @@ function notifyBackgroundCompletionIfNeeded() {
   state._backgroundedAt = null;
 
   if (state.generationError) {
-    _toast.error(_trans('BOLD agent: generation failed. Open the assistant to see why.'));
+    _toast.error(_trans('AI agent: generation failed. Open the assistant to see why.'));
     return;
   }
 
@@ -777,13 +777,13 @@ function notifyBackgroundCompletionIfNeeded() {
   if (ready > 0 && failed === 0) {
     _toast.success(
       ready === 1
-        ? _trans('BOLD agent: 1 entry is ready to review.')
-        : _trans('BOLD agent: :n entries are ready to review.', { n: ready })
+        ? _trans('AI agent: 1 entry is ready to review.')
+        : _trans('AI agent: :n entries are ready to review.', { n: ready })
     );
   } else if (ready > 0 && failed > 0) {
-    _toast.success(_trans('BOLD agent: :ready ready, :failed failed. Open the assistant to review.', { ready, failed }));
+    _toast.success(_trans('AI agent: :ready ready, :failed failed. Open the assistant to review.', { ready, failed }));
   } else if (failed > 0) {
-    _toast.error(_trans('BOLD agent: generation failed for all entries.'));
+    _toast.error(_trans('AI agent: generation failed for all entries.'));
   }
 }
 

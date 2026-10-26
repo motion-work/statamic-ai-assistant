@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tools;
+namespace MotionWork\StatamicAiAssistant\Tools;
 
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
-use BoldWeb\StatamicAiAssistant\Services\RemoteImageFetcher;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Services\RemoteImageFetcher;
 
 /**
  * ChatTool adapter over RemoteImageFetcher's save_remote_image capability. Pulls

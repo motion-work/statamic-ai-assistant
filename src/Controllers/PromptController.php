@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Controllers;
+namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use BoldWeb\StatamicAiAssistant\Services\GroqService;
-use BoldWeb\StatamicAiAssistant\Services\InfomaniakService;
+use MotionWork\StatamicAiAssistant\Services\GroqService;
+use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Statamic\Facades\Site;

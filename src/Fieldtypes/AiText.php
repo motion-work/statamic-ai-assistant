@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Fieldtypes;
+namespace MotionWork\StatamicAiAssistant\Fieldtypes;
 
 use Statamic\Fields\Fieldtype;
 
@@ -12,5 +12,5 @@ class AiText extends Fieldtype
   <path d="M5.1,3.9c.1-.3.5-.3.7,0l.5,1.3c0,0,.1.1.2.2l1.3.5c.3.1.3.5,0,.7l-1.3.5c0,0-.1,0-.2.1l-.5,1.3c-.1.3-.5.3-.7,0l-.5-1.3c0,0-.1-.1-.2-.2l-1.3-.5c-.3-.1-.3-.5,0-.7l1.3-.5c0,0,.1,0,.2-.1l.5-1.3Z" style="fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: .7px;"/>
 </svg>';
   public $categories = ['text'];
-  protected $keywords = ['ai', 'ia', 'bold', 'text'];
+  protected $keywords = ['ai', 'ia', 'text'];
 }

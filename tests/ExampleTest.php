@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests;
+namespace MotionWork\StatamicAiAssistant\Tests;
 
 class ExampleTest extends TestCase
 {

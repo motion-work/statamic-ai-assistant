@@ -2,7 +2,7 @@
 
 namespace Tests\Support;
 
-use BoldWeb\StatamicAiAssistant\Support\JsonObjectExtractor;
+use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
 use PHPUnit\Framework\TestCase;
 
 class JsonObjectExtractorTest extends TestCase

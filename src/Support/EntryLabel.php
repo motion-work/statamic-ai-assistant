@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Support;
+namespace MotionWork\StatamicAiAssistant\Support;
 
 use Statamic\Contracts\Entries\Entry;
 

@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Controllers;
+namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use BoldWeb\StatamicAiAssistant\Services\AbstractAiService;
-use BoldWeb\StatamicAiAssistant\Services\SetHintsService;
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;

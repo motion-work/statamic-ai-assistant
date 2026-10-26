@@ -209,7 +209,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | BOLD agent settings (set hints)
+    | AI agent settings (set hints)
     |--------------------------------------------------------------------------
     |
     | YAML file path for per-block AI hints (replicator / components sets).
@@ -267,7 +267,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Create an app at https://www.figma.com/developers/apps and register the
-    | redirect URL shown in BOLD agent settings. Store credentials only in .env
+    | redirect URL shown in AI agent settings. Store credentials only in .env
     | (never commit). Run `php artisan config:clear` after changing .env.
     |
     | Legacy: credentials were stored in storage/app/statamic-ai-assistant/figma-app.yaml
@@ -283,7 +283,7 @@ return [
     | AI Entry Generator
     |--------------------------------------------------------------------------
     |
-    | Master switch for the AI entry generator feature (the floating "BOLD agent"
+    | Master switch for the AI entry generator feature (the floating "AI agent"
     | assistant button + generator). When false, the feature is off for everyone,
     | including super admins.
     |
@@ -295,7 +295,7 @@ return [
     'entry_generator' => (bool) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR', true),
 
     /*
-    | Show the BOLD agent to non-super editors
+    | Show the AI agent to non-super editors
     |--------------------------------------------------------------------------
     |
     | ENABLE_AGENT_FOR_EDITORS=false hides the agent (floating button + settings)
@@ -307,7 +307,7 @@ return [
     'enable_agent_for_editors' => (bool) env('ENABLE_AGENT_FOR_EDITORS', true),
 
     /*
-    | Show the "BOLD agent settings" entry in the CP Settings sidebar
+    | Show the "AI agent settings" entry in the CP Settings sidebar
     |--------------------------------------------------------------------------
     |
     | Independent from `entry_generator`: set this to false to keep the agent
@@ -316,10 +316,10 @@ return [
     |
     */
 
-    'bold_agent_settings_nav' => env('STATAMIC_AI_ASSISTANT_BOLD_AGENT_SETTINGS_NAV', true),
+    'agent_settings_nav' => env('STATAMIC_AI_ASSISTANT_AGENT_SETTINGS_NAV', env('STATAMIC_AI_ASSISTANT_BOLD_AGENT_SETTINGS_NAV', true)),
 
     /*
-    | BOLD agent — queued batch generation (after planner)
+    | AI agent — queued batch generation (after planner)
     |--------------------------------------------------------------------------
     |
     | Multi-entry content generation runs in Bus::chain jobs so the CP request
@@ -362,15 +362,15 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | BOLD agent — multi-entry plan cap
+    | AI agent — multi-entry plan cap
     |--------------------------------------------------------------------------
     |
     | Maximum entries the planner may return in one generate request. Increase
-    | STATAMIC_AI_ASSISTANT_BOLD_AGENT_MAX_PLAN_ENTRIES if users need larger
+    | STATAMIC_AI_ASSISTANT_AGENT_MAX_PLAN_ENTRIES if users need larger
     | batches (capped at 500 to avoid runaway API use).
     |
     */
-    'bold_agent_max_plan_entries' => max(1, min(500, (int) env('STATAMIC_AI_ASSISTANT_BOLD_AGENT_MAX_PLAN_ENTRIES', 100))),
+    'agent_max_plan_entries' => max(1, min(500, (int) env('STATAMIC_AI_ASSISTANT_AGENT_MAX_PLAN_ENTRIES', env('STATAMIC_AI_ASSISTANT_BOLD_AGENT_MAX_PLAN_ENTRIES', 100)))),
 
     /*
     |--------------------------------------------------------------------------
@@ -378,10 +378,10 @@ return [
     |--------------------------------------------------------------------------
     |
     | When enabled (default), only super users can create/update multiple
-    | entries in a single BOLD agent request. Everyone else is capped to a
+    | entries in a single AI agent request. Everyone else is capped to a
     | SINGLE entry per request — editors can still use the agent, but a prompt
     | like "create every page of this website" can never fan out into a bulk
-    | run for a non-admin. Super users keep the full bold_agent_max_plan_entries
+    | run for a non-admin. Super users keep the full agent_max_plan_entries
     | cap. Disable to let all users run multi-entry batches:
     |
     | EDITOR_LIMIT_ENTRIES=false
@@ -449,7 +449,7 @@ return [
         // The default lives on PromptUrlFetcher so code and config can't drift.
         'remove_selector' => env(
             'STATAMIC_AI_ASSISTANT_REMOVE_SELECTOR',
-            \BoldWeb\StatamicAiAssistant\Services\PromptUrlFetcher::DEFAULT_REMOVE_SELECTOR,
+            \MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher::DEFAULT_REMOVE_SELECTOR,
         ),
     ],
 
@@ -473,7 +473,7 @@ return [
         'enabled' => env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH', true),
 
         // Folder inside the container where copied images are stored.
-        'folder' => env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH_FOLDER', 'bold-agent-fetched'),
+        'folder' => env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH_FOLDER', 'ai-agent-fetched'),
 
         // Asset container that downloaded images go into when the blueprint
         // does not dictate one. If null, the first available container is used.

@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\InfomaniakService;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;

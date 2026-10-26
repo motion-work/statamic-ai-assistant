@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Support;
+namespace MotionWork\StatamicAiAssistant\Support;
 
 /**
  * Removes leading/trailing whitespace and empty boundary paragraphs from AI / DeepL HTML output.

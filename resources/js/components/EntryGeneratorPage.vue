@@ -9,13 +9,13 @@
 
       <!-- Agent: welcome -->
       <div class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('BOLD agent') }}</span>
+        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
         <p>{{ __("Describe what you need. I'll choose the right collection and draft the entry for you.") }}</p>
       </div>
 
       <!-- Step 2: brief -->
       <div v-if="renderedStep === 2" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('BOLD agent') }}</span>
+        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
         <p>{{ __('Tell me what you want. Examples:') }}</p>
         <ul class="eg-chat__examples">
           <li>{{ __('“Create a page about our new pilot program”') }}</li>
@@ -63,7 +63,7 @@
 
       <!-- Step 3: planning indicator -->
       <div v-if="renderedStep === 3 && store.planning" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('BOLD agent') }}</span>
+        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
         <div class="eg-chat__stream-panel" aria-live="polite" aria-busy="true">
           <div class="eg-chat__stream-panel__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="planProgressPercent" :aria-label="__('Planning')">
             <div class="eg-chat__stream-panel__fill" :style="{ width: planProgressPercent + '%' }" />
@@ -89,7 +89,7 @@
 
       <!-- Step 3: plan summary + cards -->
       <div v-if="renderedStep === 3 && store.plan" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('BOLD agent') }}</span>
+        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
         <p v-if="store.plan.entries.length === 1">{{ __('Drafting one entry for you.') }}</p>
         <!-- Only announce a count once at least one entry is planned; while the count
              is still 0 the planning panel + activity feed carry the UX (no "0 entries"). -->
@@ -127,7 +127,7 @@
 
       <!-- Step 3: stop confirmation (inline, above error/footer) -->
       <div v-if="renderedStep === 3 && stopConfirmOpen" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('BOLD agent') }}</span>
+        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
         <div class="eg-chat__notice eg-chat__notice--warn eg-stop-confirm">
           <p>
             <strong>{{ __('Stop generation?') }}</strong>
@@ -150,7 +150,7 @@
 
       <!-- Step 3: fatal error -->
       <div v-if="renderedStep === 3 && store.generationError" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('BOLD agent') }}</span>
+        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
         <div class="eg-chat__notice eg-chat__notice--error">
           <p><strong>{{ __('Something went wrong') }}</strong></p>
           <p v-html="chatHtml(store.generationError)"></p>

@@ -1,10 +1,10 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Support\Facades\Cache;
 
 class EntryGenerationBatchServiceTest extends TestCase

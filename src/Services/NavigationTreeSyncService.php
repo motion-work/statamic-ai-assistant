@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use Facades\Statamic\Structures\BranchIds;
 use Statamic\Contracts\Entries\Entry;
 use Statamic\Facades\Entry as EntryFacade;

@@ -1,15 +1,32 @@
 {
-    "name": "bold-web/statamic-ai-assistant",
+    "name": "motion-work/statamic-ai-assistant",
     "description": "Statamic 6 addon: AI text generation and refactoring in the Control Panel (Ai Text, Bard, DeepL translations). Requires statamic/cms ^6.5.",
     "keywords": ["statamic", "statamic-6", "ai", "bard", "deepl"],
+    "type": "statamic-addon",
+    "homepage": "https://github.com/motion-work/statamic-ai-assistant",
+    "authors": [
+        {
+            "name": "Motion Work",
+            "homepage": "https://github.com/motion-work"
+        },
+        {
+            "name": "BoldWeb",
+            "homepage": "https://github.com/boldwebdev",
+            "role": "Original author"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/motion-work/statamic-ai-assistant/issues",
+        "source": "https://github.com/motion-work/statamic-ai-assistant"
+    },
     "autoload": {
         "psr-4": {
-            "BoldWeb\\StatamicAiAssistant\\": "src"
+            "MotionWork\\StatamicAiAssistant\\": "src"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "BoldWeb\\StatamicAiAssistant\\Tests\\": "tests"
+            "MotionWork\\StatamicAiAssistant\\Tests\\": "tests"
         }
     },
     "require": {
@@ -38,7 +55,7 @@
         },
         "laravel": {
             "providers": [
-                "BoldWeb\\StatamicAiAssistant\\ServiceProvider"
+                "MotionWork\\StatamicAiAssistant\\ServiceProvider"
             ]
         }
     },

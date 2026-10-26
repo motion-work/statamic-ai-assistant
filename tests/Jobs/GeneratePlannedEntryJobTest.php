@@ -1,12 +1,12 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Jobs;
+namespace MotionWork\StatamicAiAssistant\Tests\Jobs;
 
-use BoldWeb\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorService;
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Support\Facades\Cache;
 
 class GeneratePlannedEntryJobTest extends TestCase

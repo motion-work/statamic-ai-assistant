@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Tools;
+namespace MotionWork\StatamicAiAssistant\Tests\Tools;
 
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
-use BoldWeb\StatamicAiAssistant\Tools\ToolContext;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 
 class ToolContextTest extends TestCase
 {

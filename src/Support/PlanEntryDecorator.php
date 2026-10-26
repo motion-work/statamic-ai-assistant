@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Support;
+namespace MotionWork\StatamicAiAssistant\Support;
 
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 use Illuminate\Support\Str;
 
 /**

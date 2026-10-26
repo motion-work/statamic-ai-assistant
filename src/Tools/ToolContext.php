@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tools;
+namespace MotionWork\StatamicAiAssistant\Tools;
 
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 
 /**
  * Per-run side-channels a ChatTool may need. Bundling them here means tools with

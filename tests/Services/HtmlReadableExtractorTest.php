@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\HtmlReadableExtractor;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\HtmlReadableExtractor;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class HtmlReadableExtractorTest extends TestCase
 {

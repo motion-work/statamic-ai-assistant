@@ -1,14 +1,14 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Support;
+namespace MotionWork\StatamicAiAssistant\Support;
 
 use Statamic\Facades\User;
 
 /**
- * Central rule for how many entries one BOLD agent request may create/update.
+ * Central rule for how many entries one AI agent request may create/update.
  *
  * Super users get the full configured batch cap
- * (`bold_agent_max_plan_entries`). Everyone else is capped to a SINGLE entry
+ * (`agent_max_plan_entries`). Everyone else is capped to a SINGLE entry
  * per request when `editor_limit_entries` (env `EDITOR_LIMIT_ENTRIES`) is on —
  * so editors can still use the agent, but a mistaken "create every page of this
  * site" prompt can never fan out into a bulk run.
@@ -38,7 +38,7 @@ class EntryCreationPolicy
      */
     public static function configuredMaxPlanEntries(): int
     {
-        return max(1, min(500, (int) config('statamic-ai-assistant.bold_agent_max_plan_entries', 100)));
+        return max(1, min(500, (int) config('statamic-ai-assistant.agent_max_plan_entries', 100)));
     }
 
     /**

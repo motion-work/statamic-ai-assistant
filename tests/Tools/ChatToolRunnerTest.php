@@ -1,11 +1,11 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Tools;
+namespace MotionWork\StatamicAiAssistant\Tests\Tools;
 
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
-use BoldWeb\StatamicAiAssistant\Tools\ChatTool;
-use BoldWeb\StatamicAiAssistant\Tools\ChatToolRunner;
-use BoldWeb\StatamicAiAssistant\Tools\ToolContext;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Tools\ChatTool;
+use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 
 class ChatToolRunnerTest extends TestCase
 {

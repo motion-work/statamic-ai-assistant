@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Statamic\Contracts\Entries\Entry;

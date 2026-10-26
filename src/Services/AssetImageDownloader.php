@@ -1,6 +1,6 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -59,7 +59,7 @@ class AssetImageDownloader
     {
         $folder = trim($folder, '/');
         if ($folder === '') {
-            $folder = 'bold-agent-fetched';
+            $folder = 'ai-agent-fetched';
         }
 
         try {
@@ -99,7 +99,7 @@ class AssetImageDownloader
             // Race window: another worker may have written this exact path
             // between the early check and here. upload() overwrites idempotently
             // (same URL → same bytes), so the race is benign.
-            $tmp = tempnam(sys_get_temp_dir(), 'bold-mig-');
+            $tmp = tempnam(sys_get_temp_dir(), 'ai-assistant-');
             if ($tmp === false) {
                 return null;
             }

@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
+use MotionWork\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 

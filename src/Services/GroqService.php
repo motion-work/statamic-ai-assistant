@@ -1,8 +1,8 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
+use MotionWork\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 use LucianoTonet\GroqLaravel\Facades\Groq;

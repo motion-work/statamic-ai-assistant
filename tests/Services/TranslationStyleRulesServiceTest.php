@@ -1,10 +1,10 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\DeeplService;
-use BoldWeb\StatamicAiAssistant\Services\TranslationStyleRulesService;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\DeeplService;
+use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class FakeStyleRulesDeeplService extends DeeplService
 {

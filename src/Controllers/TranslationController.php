@@ -1,13 +1,13 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Controllers;
+namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use BoldWeb\StatamicAiAssistant\Services\CpTranslationBatchRunner;
-use BoldWeb\StatamicAiAssistant\Services\DeeplService;
-use BoldWeb\StatamicAiAssistant\Services\NavigationTreeSyncService;
-use BoldWeb\StatamicAiAssistant\Services\TranslationService;
-use BoldWeb\StatamicAiAssistant\Support\EntryLabel;
-use BoldWeb\StatamicAiAssistant\Support\TrimAiOutput;
+use MotionWork\StatamicAiAssistant\Services\CpTranslationBatchRunner;
+use MotionWork\StatamicAiAssistant\Services\DeeplService;
+use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Support\TrimAiOutput;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Statamic\Facades\Collection;

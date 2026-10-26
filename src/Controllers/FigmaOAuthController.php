@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Controllers;
+namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use BoldWeb\StatamicAiAssistant\Services\FigmaOAuthService;
-use BoldWeb\StatamicAiAssistant\Services\FigmaTokenStore;
+use MotionWork\StatamicAiAssistant\Services\FigmaOAuthService;
+use MotionWork\StatamicAiAssistant\Services\FigmaTokenStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;

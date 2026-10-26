@@ -1,36 +1,36 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant;
+namespace MotionWork\StatamicAiAssistant;
 
-use BoldWeb\StatamicAiAssistant\Actions\TranslateEntry;
-use BoldWeb\StatamicAiAssistant\Controllers\PromptController;
-use BoldWeb\StatamicAiAssistant\Controllers\TranslationController;
-use BoldWeb\StatamicAiAssistant\Fieldtypes\AiText;
-use BoldWeb\StatamicAiAssistant\Fieldtypes\AiTextarea;
-use BoldWeb\StatamicAiAssistant\Fieldtypes\TranslationActionPreflight;
-use BoldWeb\StatamicAiAssistant\Fieldtypes\TranslationTargetLanguages;
-use BoldWeb\StatamicAiAssistant\Services\AbstractAiService;
-use BoldWeb\StatamicAiAssistant\Services\DeeplService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use BoldWeb\StatamicAiAssistant\Services\EntryGenerationPlanner;
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorAssetResolver;
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorLinkFallback;
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorService;
-use BoldWeb\StatamicAiAssistant\Services\EntryReferenceResolver;
-use BoldWeb\StatamicAiAssistant\Services\EntryTranslator;
-use BoldWeb\StatamicAiAssistant\Services\FigmaContentFetcher;
-use BoldWeb\StatamicAiAssistant\Services\FigmaOAuthService;
-use BoldWeb\StatamicAiAssistant\Services\FigmaTokenStore;
-use BoldWeb\StatamicAiAssistant\Services\GroqService;
-use BoldWeb\StatamicAiAssistant\Services\InfomaniakService;
-use BoldWeb\StatamicAiAssistant\Services\NavigationTreeSyncService;
-use BoldWeb\StatamicAiAssistant\Services\AssetImageDownloader;
-use BoldWeb\StatamicAiAssistant\Services\PromptUrlFetcher;
-use BoldWeb\StatamicAiAssistant\Services\RemoteImageFetcher;
-use BoldWeb\StatamicAiAssistant\Services\SetHintsService;
-use BoldWeb\StatamicAiAssistant\Services\TranslationGlossaryService;
-use BoldWeb\StatamicAiAssistant\Services\TranslationService;
-use BoldWeb\StatamicAiAssistant\Services\TranslationStyleRulesService;
+use MotionWork\StatamicAiAssistant\Actions\TranslateEntry;
+use MotionWork\StatamicAiAssistant\Controllers\PromptController;
+use MotionWork\StatamicAiAssistant\Controllers\TranslationController;
+use MotionWork\StatamicAiAssistant\Fieldtypes\AiText;
+use MotionWork\StatamicAiAssistant\Fieldtypes\AiTextarea;
+use MotionWork\StatamicAiAssistant\Fieldtypes\TranslationActionPreflight;
+use MotionWork\StatamicAiAssistant\Fieldtypes\TranslationTargetLanguages;
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Services\DeeplService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorAssetResolver;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorLinkFallback;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\EntryReferenceResolver;
+use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
+use MotionWork\StatamicAiAssistant\Services\FigmaContentFetcher;
+use MotionWork\StatamicAiAssistant\Services\FigmaOAuthService;
+use MotionWork\StatamicAiAssistant\Services\FigmaTokenStore;
+use MotionWork\StatamicAiAssistant\Services\GroqService;
+use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
+use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
+use MotionWork\StatamicAiAssistant\Services\AssetImageDownloader;
+use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
+use MotionWork\StatamicAiAssistant\Services\RemoteImageFetcher;
+use MotionWork\StatamicAiAssistant\Services\SetHintsService;
+use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use Illuminate\Support\Facades\Route;
 use Statamic\Facades\CP\Nav;
 use Statamic\Facades\User;
@@ -161,7 +161,7 @@ class ServiceProvider extends AddonServiceProvider
                 $app->make(PromptUrlFetcher::class),
                 $app->make(FigmaContentFetcher::class),
                 $app->make(EntryGenerationBatchService::class),
-                $app->make(\BoldWeb\StatamicAiAssistant\Support\PlanEntryDecorator::class),
+                $app->make(\MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator::class),
             );
         });
 
@@ -235,7 +235,7 @@ class ServiceProvider extends AddonServiceProvider
         }
 
         if (config('statamic-ai-assistant.entry_generator', true)
-            && config('statamic-ai-assistant.bold_agent_settings_nav', true)) {
+            && config('statamic-ai-assistant.agent_settings_nav', true)) {
             Nav::extend(function ($nav) {
                 if (! User::current()?->isSuper()) {
                     return;
@@ -245,7 +245,7 @@ class ServiceProvider extends AddonServiceProvider
                     return;
                 }
 
-                $nav->settings(__('BOLD agent settings'))
+                $nav->settings(__('AI agent settings'))
                     ->route('statamic-ai-assistant.block-hints.page')
                     ->icon('layers-stacks');
             });
@@ -255,13 +255,13 @@ class ServiceProvider extends AddonServiceProvider
             'translationsActiv' => config('statamic-ai-assistant.translations'),
             // Closures are resolved per CP request (User::current() is null at boot).
             'entryGeneratorEnabled' => fn () => $this->agentEnabledForCurrentUser(),
-            'entryCreationMax' => fn () => \BoldWeb\StatamicAiAssistant\Support\EntryCreationPolicy::maxPlanEntries(),
-            'entryCreationLimited' => fn () => \BoldWeb\StatamicAiAssistant\Support\EntryCreationPolicy::appliesTo(),
+            'entryCreationMax' => fn () => \MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy::maxPlanEntries(),
+            'entryCreationLimited' => fn () => \MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy::appliesTo(),
         ]);
     }
 
     /**
-     * Whether the BOLD agent (floating button + generator) is available to the
+     * Whether the AI agent (floating button + generator) is available to the
      * current CP user. Super admins always have access when the master switch
      * is on; non-super editors additionally require enable_agent_for_editors.
      */

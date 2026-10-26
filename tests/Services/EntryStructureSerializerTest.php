@@ -1,10 +1,10 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\EntryGeneratorService;
-use BoldWeb\StatamicAiAssistant\Services\EntryStructureSerializer;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\EntryStructureSerializer;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Entry;
 use Statamic\Fields\Field;

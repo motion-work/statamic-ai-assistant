@@ -11,8 +11,8 @@
           </svg>
         </div>
         <div class="translation-page__hero-text">
-          <p class="translation-page__eyebrow">{{ __('BOLD agent') }}</p>
-          <h1 class="translation-page__title">{{ __('BOLD agent settings') }}</h1>
+          <p class="translation-page__eyebrow">{{ __('AI agent') }}</p>
+          <h1 class="translation-page__title">{{ __('AI agent settings') }}</h1>
           <p class="translation-page__subtitle">
             {{ __('Tell the AI what each page-builder block and blueprint field is for and when to use it. Hints are passed to the model whenever content is generated.') }}
           </p>
@@ -678,7 +678,7 @@ export default {
           field_hints: this.serializeDraft(this.fieldDraft),
         });
         this.applyServerState(data.sets || this.sets, data.fields || this.fields);
-        this.$toast.success(this.__("BOLD agent settings saved."));
+        this.$toast.success(this.__("AI agent settings saved."));
       } catch (e) {
         const msg =
           (e && e.response && e.response.data && e.response.data.error) ||

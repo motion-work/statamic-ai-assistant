@@ -1,14 +1,14 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Services;
+namespace MotionWork\StatamicAiAssistant\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\Concerns\TranslatesFields;
-use BoldWeb\StatamicAiAssistant\Support\JsonObjectExtractor;
-use BoldWeb\StatamicAiAssistant\Tools\ChatToolRunner;
-use BoldWeb\StatamicAiAssistant\Tools\ReadEntryStructureTool;
-use BoldWeb\StatamicAiAssistant\Tools\SaveImageTool;
-use BoldWeb\StatamicAiAssistant\Tools\ToolContext;
-use BoldWeb\StatamicAiAssistant\Tools\UrlFetchTool;
+use MotionWork\StatamicAiAssistant\Services\Concerns\TranslatesFields;
+use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
+use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
+use MotionWork\StatamicAiAssistant\Tools\ReadEntryStructureTool;
+use MotionWork\StatamicAiAssistant\Tools\SaveImageTool;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
+use MotionWork\StatamicAiAssistant\Tools\UrlFetchTool;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -90,7 +90,7 @@ class EntryGeneratorService
      * Generate content for an entry from a prompt (does NOT save).
      *
      * @param  callable(string): void|null  $onStreamToken  Optional callback for each streamed assistant text delta (NDJSON / CP drawer)
-     * @param  array{appendix: string, warnings: array<int, string>, preferred: \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths, appended_to_prompts?: bool}|null  $prefetchedUrlAug  When set (multi-entry stream), reuses one Jina text fetch and appendix so each entry does not re-fetch URLs.
+     * @param  array{appendix: string, warnings: array<int, string>, preferred: \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths, appended_to_prompts?: bool}|null  $prefetchedUrlAug  When set (multi-entry stream), reuses one Jina text fetch and appendix so each entry does not re-fetch URLs.
      * @param  callable(): void|null  $streamHeartbeat  Optional NDJSON keepalive between tool rounds (same as planner stream).
      * @return array{data: array<string, mixed>, displayData: array<string, mixed>, warnings: string[]}
      */
@@ -101,7 +101,7 @@ class EntryGeneratorService
         string $locale,
         ?string $attachmentContent = null,
         ?callable $onStreamToken = null,
-        ?\BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths $preferredAssets = null,
+        ?\MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths $preferredAssets = null,
         ?array $prefetchedUrlAug = null,
         ?callable $streamHeartbeat = null,
     ): array {
@@ -152,7 +152,7 @@ class EntryGeneratorService
             $urlAug = [
                 'appendix' => '',
                 'warnings' => [],
-                'preferred' => new \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths,
+                'preferred' => new \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths,
             ];
             $figmaAug = $this->figma ? $this->figma->buildAugmentation($prompt) : ['appendix' => '', 'warnings' => []];
             $combinedAppendix = $figmaAug['appendix'];
@@ -175,7 +175,7 @@ class EntryGeneratorService
         // Images the LLM copies from the source via save_remote_image land here;
         // merged into the preferred-asset queue below so the resolver assigns
         // them to this entry's image fields (matched by container).
-        $fetchedImages = new \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
+        $fetchedImages = new \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
         $imageContainerHint = $this->assetResolver->primaryAssetContainer($blueprint);
 
         if ($useUrlTool) {
@@ -210,10 +210,10 @@ class EntryGeneratorService
         // Merge any preferred assets surfaced by the URL augmentation step
         // (single-prompt path) with the explicit ones passed in by the caller.
         // Either or both can be empty.
-        $aggregatedPreferred = \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths::merge(
+        $aggregatedPreferred = \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths::merge(
             $fetchedImages,
-            $preferredAssets ?? new \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths,
-            $urlAug['preferred'] ?? new \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths,
+            $preferredAssets ?? new \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths,
+            $urlAug['preferred'] ?? new \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths,
         );
 
         $result = $this->mapToFieldData($parsedData, $blueprint, $locale, $prompt, $aggregatedPreferred);
@@ -247,7 +247,7 @@ class EntryGeneratorService
         int $maxTokens,
         ?callable $onStreamToken,
         array &$toolWarningsOut,
-        \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths $imageSink,
+        \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths $imageSink,
         ?string $imageContainerHint,
         bool $allowImageTool,
         ?callable $streamHeartbeat = null,
@@ -746,7 +746,7 @@ class EntryGeneratorService
             $entry['required'] = true;
         }
 
-        // Field hints (BOLD agent settings): editors can describe what a field
+        // Field hints (AI agent settings): editors can describe what a field
         // like `hero_title` or `lead` is for and add writing guidelines. Hints
         // match by handle wherever the field appears (top level, groups, sets).
         $hint = $this->setHints->forField((string) $field->handle());
@@ -1760,7 +1760,7 @@ class EntryGeneratorService
      *
      * @return array{data: array<string, mixed>, displayData: array<string, mixed>, warnings: string[]}
      */
-    private function mapToFieldData(array $parsedData, Blueprint $blueprint, string $locale, string $prompt = '', ?\BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths $preferredAssets = null, bool $partial = false): array
+    private function mapToFieldData(array $parsedData, Blueprint $blueprint, string $locale, string $prompt = '', ?\MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths $preferredAssets = null, bool $partial = false): array
     {
         $data = [];
         $displayData = [];
@@ -2377,7 +2377,7 @@ class EntryGeneratorService
     }
 
     // ---------------------------------------------------------------------
-    //  Update path (BOLD agent update_entry_job tool).
+    //  Update path (AI agent update_entry_job tool).
     //  Kept structurally separate from the create path so it can be removed,
     //  swapped, or replaced without touching generateContent / createEntry.
     // ---------------------------------------------------------------------
@@ -2388,7 +2388,7 @@ class EntryGeneratorService
      * values so the model can decide what to keep, what to rewrite, and what to leave alone.
      *
      * @param  callable(string): void|null  $onStreamToken
-     * @param  array{appendix: string, warnings: array<int, string>, preferred: \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths, appended_to_prompts?: bool}|null  $prefetchedUrlAug
+     * @param  array{appendix: string, warnings: array<int, string>, preferred: \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths, appended_to_prompts?: bool}|null  $prefetchedUrlAug
      * @param  callable(): void|null  $streamHeartbeat
      * @return array{data: array<string, mixed>, displayData: array<string, mixed>, warnings: string[], collection: string, blueprint: string}
      */
@@ -2463,7 +2463,7 @@ class EntryGeneratorService
                     $maxTokens,
                     $onStreamToken,
                     $toolWarnings,
-                    new \BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths,
+                    new \MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths,
                     null,
                     false,
                     $streamHeartbeat,
@@ -2540,7 +2540,7 @@ class EntryGeneratorService
     private function augmentSchemaWithAssetFields(array &$fieldSchema, Blueprint $blueprint): array
     {
         $assetFields = [];
-        $listingCap = max(0, (int) config('statamic-ai-assistant.bold_agent_asset_listing_cap', 100));
+        $listingCap = max(0, (int) config('statamic-ai-assistant.agent_asset_listing_cap', 100));
 
         $this->walkAndInjectAssets(
             $blueprint->fields()->all(),

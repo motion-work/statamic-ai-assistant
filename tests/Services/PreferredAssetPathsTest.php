@@ -1,9 +1,9 @@
 <?php
 
-namespace BoldWeb\StatamicAiAssistant\Tests\Services;
+namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use BoldWeb\StatamicAiAssistant\Services\PreferredAssetPaths;
-use BoldWeb\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class PreferredAssetPathsTest extends TestCase
 {
@@ -17,14 +17,14 @@ class PreferredAssetPathsTest extends TestCase
     public function test_takes_paths_matching_container_in_order(): void
     {
         $q = new PreferredAssetPaths([
-            ['container' => 'images', 'path' => 'bold-agent-fetched/s1/a.jpg'],
-            ['container' => 'docs',   'path' => 'bold-agent-fetched/s1/b.pdf'],
-            ['container' => 'images', 'path' => 'bold-agent-fetched/s1/c.jpg'],
-            ['container' => 'images', 'path' => 'bold-agent-fetched/s1/d.jpg'],
+            ['container' => 'images', 'path' => 'ai-agent-fetched/s1/a.jpg'],
+            ['container' => 'docs',   'path' => 'ai-agent-fetched/s1/b.pdf'],
+            ['container' => 'images', 'path' => 'ai-agent-fetched/s1/c.jpg'],
+            ['container' => 'images', 'path' => 'ai-agent-fetched/s1/d.jpg'],
         ]);
 
         $this->assertSame(
-            ['bold-agent-fetched/s1/a.jpg', 'bold-agent-fetched/s1/c.jpg'],
+            ['ai-agent-fetched/s1/a.jpg', 'ai-agent-fetched/s1/c.jpg'],
             $q->takeForContainer('images', 2),
         );
         $this->assertFalse($q->isEmpty()); // 'd.jpg' (images) and 'b.pdf' (docs) remain
