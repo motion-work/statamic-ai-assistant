@@ -36,7 +36,7 @@ No linter/formatter is configured.
 
 ### Wiring
 - `src/ServiceProvider.php` is the single wiring point: registers fieldtypes, the `TranslateEntry` action, CP routes (`routes/cp.php` plus legacy `/prompt*` routes registered inline), CP nav items, and binds nearly every service as a singleton with explicit constructor dependencies. When adding a service or a constructor dependency, update the binding here.
-- `AbstractAiService` is bound to `InfomaniakService` (default) or `GroqService` based on `provider_name`. Both speak OpenAI-style chat completions; the base class owns retry policy (transient = 429/5xx/dropped connection; timeouts deliberately **not** retried) and a fast/strong model tier (`usingFastModel()` temporarily swaps the config model, e.g. `infomaniak_model_fast`).
+- `AbstractAiService` is bound to `InfomaniakService` (default) or `GroqService` based on `provider_name`. Both speak OpenAI-style chat completions; the base class owns retry policy (transient = 429/5xx/dropped connection; timeouts deliberately **not** retried) a fast/strong model tier (`usingFastModel()` temporarily swaps the config model, e.g. `infomaniak_model_fast`), and `withoutThinking()` for quick tasks (Infomaniak sends `chat_template_kwargs` to skip reasoning; never for Mistral models, which return 400 on it). `usingFastModel()` implies `withoutThinking()`; agent planning/generation must keep thinking on.
 - Values passed to JS via `Statamic::provideToScript` are **closures** so they resolve per request — `User::current()` is null at boot. Keep it that way for anything role-dependent.
 
 ### Access rules

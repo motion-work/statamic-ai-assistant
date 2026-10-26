@@ -100,6 +100,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Reasoning ("thinking") for quick tasks
+    |--------------------------------------------------------------------------
+    |
+    | Reasoning models (Kimi K2.6, Qwen3.5/3.8, …) think before answering —
+    | 1–2k tokens even for a single sentence. For quick tasks (Ai Text / Bard
+    | generate and refactor, alt text, image analysis, fast-tier helpers) that
+    | means ≈15s instead of ≈1s, and an empty reply when the max_tokens budget
+    | runs out first. When true, those calls ask the model to answer directly.
+    | The AI agent's planning and entry generation always keep thinking on.
+    |
+    | Infomaniak only (sent as chat_template_kwargs; skipped for Mistral models,
+    | which reject it and don't think anyway). Set false to keep thinking
+    | everywhere.
+    |
+    */
+    'quick_tasks_without_thinking' => (bool) env('STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Infomaniak HTTP client
     |--------------------------------------------------------------------------
     |

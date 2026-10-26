@@ -103,6 +103,7 @@ Higher values increase DeepL usage and runtime (more entries may be created in o
   > default refactor preface of the addon: 'You are a professional text refactoring expert. Your only task is to transform the provided HTML text according to the specific instructions given by the user. Output solely the final refactored HTML! DO NOT INCLUDE the user instructions, any commentary, or any additional text. ALWAYS RENDER the output as valid HTML. Keep all links intact unless the user specifically instructs you to modify them, and always strive to preserve the original HTML structure unless instructed otherwise.ALWAYS update lorem ipsum. Preserve the original language and maintain a similar length to the input text unless otherwise specified.'
 - You can override TEMPERATURE
 - You can override MAX_TOKENS
+- Reasoning ("thinking") models such as Kimi K2.6 or Qwen3.5 answer quick tasks (Ai Text / Bard generate and refactor, alt text, image analysis) without thinking first, which is much faster. Set `STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING=false` to keep thinking everywhere. The AI agent always keeps thinking on. Infomaniak only.
 - You can disable the AI agent for **editors only** with `ENABLE_AGENT_FOR_EDITORS=false` (super admins always keep access). The master switch `STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR=false` disables the agent for everyone.
 - DeepL translation requires `DEEPL_API_KEY` in `.env` (see **Translations (DeepL)** above)
 

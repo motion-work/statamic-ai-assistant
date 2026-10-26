@@ -2,6 +2,13 @@
 
 All notable changes to **motion-work/statamic-ai-assistant** are documented here.
 
+## Unreleased
+
+### Changed
+
+- **Quick tasks skip reasoning:** Ai Text / Bard generate and refactor, alt text, image analysis and fast-tier helpers now ask Infomaniak reasoning models (Kimi K2.6, Qwen3.5/3.8) to answer without thinking first (≈0.5–3s instead of ≈13–16s, and no more empty replies when `max_tokens` runs out during thinking). The AI agent's planning and entry generation keep thinking on. New config `quick_tasks_without_thinking` (`STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING`, default `true`). Mistral models are skipped automatically, since they reject the switch.
+- **Planner without URL tool:** uses `entry_generator_planner_max_output_tokens` instead of a fixed 1024 tokens, so reasoning models no longer fall back to a single entry.
+
 ## 3.0.0 — 2026-07-06
 
 Major release with CP, DeepL, and AI agent changes. **Review the upgrade steps below before updating from 2.x.**

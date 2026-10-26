@@ -10,6 +10,9 @@ use Statamic\Facades\Site;
 
 abstract class AbstractAiService
 {
+    /** Whether calls inside withoutThinking() should ask the model to skip reasoning. */
+    private bool $thinkingDisabled = false;
+
     /**
      * @param  array  $messages
      * @return string
@@ -94,6 +97,10 @@ abstract class AbstractAiService
      */
     public function usingFastModel(callable $fn): mixed
     {
+        // Fast-tier tasks are short by design (small max_tokens budgets), so a
+        // reasoning model must answer directly instead of thinking first.
+        $fn = fn () => $this->withoutThinking($fn);
+
         $key = $this->modelConfigKey();
         $fast = $this->fastModel();
 
@@ -109,6 +116,42 @@ abstract class AbstractAiService
         } finally {
             config([$key => $original]);
         }
+    }
+
+    /**
+     * Run $fn with reasoning ("thinking") switched off for every provider call it
+     * makes. Reasoning models otherwise spend 1–2k tokens thinking before even a
+     * one-sentence answer: slow (≈15s instead of ≈1s) and, with small max_tokens
+     * budgets, an empty reply. Used for quick tasks (fieldtype generate/refactor,
+     * alt text, fast-tier helpers); the AI agent's planning and entry generation
+     * keep thinking on.
+     *
+     * Providers that have no thinking switch ignore the flag. A no-op when
+     * quick_tasks_without_thinking is false.
+     *
+     * @template T
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    public function withoutThinking(callable $fn): mixed
+    {
+        if (! config('statamic-ai-assistant.quick_tasks_without_thinking', true)) {
+            return $fn();
+        }
+
+        $previous = $this->thinkingDisabled;
+        $this->thinkingDisabled = true;
+
+        try {
+            return $fn();
+        } finally {
+            $this->thinkingDisabled = $previous;
+        }
+    }
+
+    protected function thinkingDisabled(): bool
+    {
+        return $this->thinkingDisabled;
     }
 
     /**
@@ -214,7 +257,7 @@ abstract class AbstractAiService
             'content' => $prompt,
         ];
 
-        $content = $this->callApi($messages);
+        $content = $this->withoutThinking(fn () => $this->callApi($messages));
 
         return $this->cleanResult($content);
     }
@@ -241,7 +284,7 @@ abstract class AbstractAiService
             'content' => $combinedPrompt,
         ];
 
-        $content = $this->callApi($messages);
+        $content = $this->withoutThinking(fn () => $this->callApi($messages));
 
         return $this->cleanResult($content);
     }
@@ -268,7 +311,7 @@ abstract class AbstractAiService
             'content' => $combinedPrompt,
         ];
 
-        $content = $this->callApi($messages);
+        $content = $this->withoutThinking(fn () => $this->callApi($messages));
 
         return $this->cleanResult($content);
     }

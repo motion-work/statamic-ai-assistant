@@ -58,6 +58,25 @@ class InfomaniakService extends AbstractAiService
         );
     }
 
+    /**
+     * Request fields that switch reasoning off while withoutThinking() is active.
+     *
+     * Infomaniak serves its open models through vLLM, where the switch is a chat
+     * template kwarg: `thinking` for Kimi, `enable_thinking` for Qwen; templates
+     * ignore the one they don't know. Mistral tokenizers reject any
+     * chat_template_kwargs (HTTP 400), and those models don't think anyway.
+     *
+     * @return array<string, mixed>
+     */
+    private function thinkingParams(string $model): array
+    {
+        if (! $this->thinkingDisabled() || str_contains(strtolower($model), 'mistral')) {
+            return [];
+        }
+
+        return ['chat_template_kwargs' => ['thinking' => false, 'enable_thinking' => false]];
+    }
+
     public function supportsVision(): bool
     {
         return trim((string) config('statamic-ai-assistant.infomaniak_vision_model', '')) !== '';
@@ -73,7 +92,7 @@ class InfomaniakService extends AbstractAiService
             throw new \RuntimeException(__('This AI provider does not support image analysis.'));
         }
 
-        $payload = [
+        $payload = $this->withoutThinking(fn () => [
             'messages' => [[
                 'role' => 'user',
                 'content' => [
@@ -85,7 +104,8 @@ class InfomaniakService extends AbstractAiService
             'temperature' => config('statamic-ai-assistant.temperature'),
             'max_tokens' => 800,
             'stream' => false,
-        ];
+            ...$this->thinkingParams((string) config('statamic-ai-assistant.infomaniak_vision_model')),
+        ]);
 
         $response = Http::timeout($this->timeout())
             ->retry($this->aiRetryTimes(), $this->aiRetrySleepMs(), $this->aiRetryWhen(), throw: false)
@@ -121,6 +141,7 @@ class InfomaniakService extends AbstractAiService
             'temperature' => config('statamic-ai-assistant.temperature'),
             'max_tokens' => $maxTokens ?? (int) config('statamic-ai-assistant.max_tokens'),
             'stream' => false,
+            ...$this->thinkingParams((string) config('statamic-ai-assistant.infomaniak_model')),
         ];
 
         if ($tools !== []) {
@@ -174,6 +195,7 @@ class InfomaniakService extends AbstractAiService
             'temperature' => config('statamic-ai-assistant.temperature'),
             'max_tokens'  => config('statamic-ai-assistant.max_tokens'),
             'stream'      => false,
+            ...$this->thinkingParams((string) config('statamic-ai-assistant.infomaniak_model')),
         ];
 
         try {
@@ -230,6 +252,7 @@ class InfomaniakService extends AbstractAiService
             'temperature' => config('statamic-ai-assistant.temperature'),
             'max_tokens' => config('statamic-ai-assistant.max_tokens'),
             'stream' => true,
+            ...$this->thinkingParams((string) config('statamic-ai-assistant.infomaniak_model')),
         ];
 
         $timeout = $this->timeout();

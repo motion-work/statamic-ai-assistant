@@ -144,7 +144,9 @@ class EntryGenerationPlanner
             if ($useUrlTool) {
                 $raw = $this->planWithToolLoop($messages, $prompt, $plannerToolWarnings, $streamHeartbeat);
             } else {
-                $raw = $this->aiService->generateFromMessages($messages, 1024);
+                // Same budget as the tool-loop planner: reasoning models think before
+                // emitting the JSON plan, and a 1024 cap left them with an empty reply.
+                $raw = $this->aiService->generateFromMessages($messages, max(4096, (int) config('statamic-ai-assistant.entry_generator_planner_max_output_tokens', 12000)));
             }
         } catch (\Throwable) {
             return $this->singleEntryFallback($prompt, $attachmentContent, $warnings, $urlAug, $figmaAug);
