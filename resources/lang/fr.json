@@ -525,5 +525,7 @@
   "Translate (AI)": "Traduire (IA)",
   "DeepL is not configured (DEEPL_API_KEY is missing), so the AI model translated instead.": "DeepL n’est pas configuré (DEEPL_API_KEY manquante) : la traduction a été faite par le modèle d’IA.",
   "Translating with the AI model": "Traduction avec le modèle d’IA",
-  "The AI model returned no usable translation.": "Le modèle d’IA n’a renvoyé aucune traduction exploitable."
+  "The AI model returned no usable translation.": "Le modèle d’IA n’a renvoyé aucune traduction exploitable.",
+  "Describe one or more entries you want to create… Paste a URL to copy a page (text and images).": "Décrivez une ou plusieurs entrées à créer… Collez une URL pour copier une page (textes et images).",
+  "Tell the AI what content you want. Be as specific as you can. Paste a URL to copy a page — its text and images are pulled in for you.": "Dites à l’IA quel contenu vous souhaitez. Soyez aussi précis que possible. Collez une URL pour copier une page — ses textes et images sont repris automatiquement."
 }
