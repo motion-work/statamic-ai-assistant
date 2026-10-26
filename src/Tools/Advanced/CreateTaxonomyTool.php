@@ -71,7 +71,7 @@ class CreateTaxonomyTool extends AbstractAdvancedTool
             'created' => true,
             'handle' => $taxonomy->handle(),
             'title' => $taxonomy->title(),
-            'next_step' => 'To use it on entries, attach it to a collection with configure_collection {"handle": "<collection>", "settings": {"taxonomies": ["'.$handle.'"]}}.',
+            'next_step' => 'This created the empty taxonomy only. Add its terms with create_terms {"taxonomy": "'.$handle.'", "terms": [{"title": "..."}]}, and to use it on entries attach it to a collection with configure_collection {"handle": "<collection>", "settings": {"taxonomies": ["'.$handle.'"]}}.',
         ];
     }
 }

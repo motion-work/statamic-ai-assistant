@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools;
 
+use Illuminate\Support\Arr;
 use Statamic\Facades\AssetContainer;
 
 /**
@@ -92,22 +93,43 @@ class ListAssetsTool implements ChatTool
         // text?" and resorts to probing with update_asset writes.
         $metaFields = $container->blueprint()?->fields()->all()->keys()->values()->all() ?? [];
 
-        $rows = $assets->take(self::MAX_ASSETS)->map(function ($asset) use ($metaFields) {
+        // Which assets already have a persisted .meta file (cached container
+        // listing — one in-memory lookup, no per-asset I/O). We read meta ONLY
+        // for those: calling ->get()/->meta() on an asset WITHOUT a meta file
+        // makes Statamic generate it, which on a remote (S3) disk downloads the
+        // file for its dimensions AND writes the meta back — and metaValue()
+        // does that regeneration once PER MISSING FIELD. Browsing a folder then
+        // turned into hundreds of S3 round-trips and hung the run. Assets that
+        // never had meta simply show none here; the model can still pick them
+        // by filename and analyze_image reads content when it actually needs it.
+        $existingMeta = $container->metaFiles();
+
+        $rows = $assets->take(self::MAX_ASSETS)->map(function ($asset) use ($metaFields, $existingMeta, $context) {
+            // Keep the stream/queue job alive and cancellable across a long
+            // listing — there is no other checkpoint inside this single call.
+            $context->heartbeat();
+
             $row = [
                 'ref' => $asset->containerHandle().'::'.$asset->path(),
                 'filename' => $asset->basename(),
                 'is_image' => (bool) $asset->isImage(),
             ];
 
-            $meta = [];
-            foreach ($metaFields as $handle) {
-                $value = $asset->get($handle);
-                if (is_string($value) && trim($value) !== '') {
-                    $meta[$handle] = $value;
+            if ($metaFields !== [] && $existingMeta->contains($asset->metaPath())) {
+                // One meta read per asset (reads the existing yaml, no
+                // generation), then pull handles from the in-memory data map —
+                // never a per-field ->get() that could regenerate.
+                $data = Arr::get($asset->meta(), 'data', []);
+                $meta = [];
+                foreach ($metaFields as $handle) {
+                    $value = is_array($data) ? ($data[$handle] ?? null) : null;
+                    if (is_string($value) && trim($value) !== '') {
+                        $meta[$handle] = $value;
+                    }
                 }
-            }
-            if ($meta !== []) {
-                $row['meta'] = $meta;
+                if ($meta !== []) {
+                    $row['meta'] = $meta;
+                }
             }
 
             return $row;

@@ -146,6 +146,11 @@ class CreateBlueprintTool extends AbstractAdvancedTool
             $blueprint = Blueprint::make($handle)
                 ->setNamespace($ns['namespace'])
                 ->setContents(array_merge(['title' => $title], $fieldContents));
+
+            if ($resolveError = $this->blueprintResolutionError($blueprint)) {
+                return ['ok' => false, 'error' => $resolveError];
+            }
+
             $blueprint->save();
 
             $result = [

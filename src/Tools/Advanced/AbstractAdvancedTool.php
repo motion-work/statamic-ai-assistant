@@ -65,4 +65,32 @@ abstract class AbstractAdvancedTool implements ChatTool
 
         return null;
     }
+
+    /**
+     * Resolve a blueprint's fields (expanding fieldset imports) so Statamic's
+     * unique-handle check runs BEFORE the blueprint is persisted. Call this on
+     * the fully-populated in-memory blueprint just before ->save().
+     *
+     * The field-list validator only sees the EXPLICIT handles the model sent;
+     * it cannot look inside imported fieldsets. An import that already defines a
+     * field the model also declared (classically "title", which component sets
+     * like a teaser slider carry) would otherwise persist a blueprint that
+     * throws DuplicateFieldException on every later read — breaking the CP
+     * blueprint endpoint and all entry generation for that collection.
+     *
+     * Returns an actionable error string, or null when the blueprint resolves.
+     * setContents() forgets the fields Blink cache, so this always reflects the
+     * blueprint's current contents (verified for both create and update paths).
+     */
+    protected function blueprintResolutionError(\Statamic\Fields\Blueprint $blueprint): ?string
+    {
+        try {
+            $blueprint->fields()->all();
+        } catch (\Throwable $e) {
+            return 'The blueprint was NOT saved because its fields could not be resolved: '.$e->getMessage()
+                .' This usually means an imported fieldset already defines a field you also declared explicitly — most often "title", which component sets such as a news/teaser slider include. Fix it by removing the duplicate explicit field, dropping the conflicting import, or (for a component like news_teaser_slider) using it as a set inside main_components rather than importing it at blueprint level.';
+        }
+
+        return null;
+    }
 }

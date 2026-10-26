@@ -41,6 +41,7 @@ class AdvancedToolset
             new CreateCollectionTool,
             new ConfigureCollectionTool,
             new CreateTaxonomyTool,
+            new CreateTermsTool,
         ];
     }
 
@@ -66,7 +67,8 @@ class AdvancedToolset
             ."- `list_fieldsets`: list the site's reusable fieldsets (hero, seo, ...) and their fields.\n"
             ."- `create_collection`: create a new collection (then create a blueprint for it).\n"
             ."- `configure_collection`: change an existing collection's settings (title, route, dated, taxonomies, ...).\n"
-            ."- `create_taxonomy`: create a new taxonomy, then attach it to a collection via configure_collection.\n"
+            ."- `create_taxonomy`: create a new taxonomy (the container only). Then add its terms with create_terms, and attach it to a collection via configure_collection.\n"
+            ."- `create_terms`: add terms (categories/tags) to an EXISTING taxonomy — call it after create_taxonomy, or on a taxonomy that already exists. Existing terms are skipped, so it is safe to re-run. Titles land in the default locale.\n"
             ."- `create_blueprint` / `update_blueprint`: create a blueprint or add/modify fields on one. Updates MERGE by default; read_blueprint first. "
             ."Both also handle FORM blueprints (contact forms etc.) via the `form` parameter — when the user says \"form\", it is almost always a FORM blueprint (listed under `forms` in list_blueprints), NOT a page/collection blueprint. NEVER add form fields to a page blueprint as a substitute.\n"
             ."- `create_fieldset`: create a new reusable fieldset (same field format as create_blueprint).\n"

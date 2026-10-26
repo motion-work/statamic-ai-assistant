@@ -8,12 +8,15 @@ use MotionWork\StatamicAiAssistant\Tools\Advanced\ConfigureCollectionTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateBlueprintTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateCollectionTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateTaxonomyTool;
+use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateTermsTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\ReadBlueprintTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\UpdateBlueprintTool;
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
+use Statamic\Facades\Site;
 use Statamic\Facades\Taxonomy;
+use Statamic\Facades\Term;
 
 class AdvancedToolsTest extends TestCase
 {
@@ -28,7 +31,12 @@ class AdvancedToolsTest extends TestCase
             $bp->delete();
         }
         Collection::find(self::COLLECTION)?->delete();
-        Taxonomy::find(self::TAXONOMY)?->delete();
+        if ($taxonomy = Taxonomy::find(self::TAXONOMY)) {
+            foreach ($taxonomy->queryTerms()->get() as $term) {
+                $term->delete();
+            }
+            $taxonomy->delete();
+        }
         foreach (['adv_hero', 'component_adv_slider', 'adv_main_components', 'adv_flat_components'] as $fs) {
             \Statamic\Facades\Fieldset::find($fs)?->delete();
         }
@@ -136,6 +144,52 @@ class AdvancedToolsTest extends TestCase
         $this->assertFalse($badTax['ok']);
         $this->assertStringContainsString('ghost_tax', $badTax['error']);
         $this->assertNull(Collection::find('adv_other'));
+    }
+
+    public function test_create_terms_adds_terms_and_is_idempotent(): void
+    {
+        $this->invokeTool(new CreateTaxonomyTool, ['handle' => self::TAXONOMY, 'title' => 'Adv Topics']);
+
+        // Mixed input: bare string title, {title}, and {title, explicit slug}.
+        $result = $this->invokeTool(new CreateTermsTool, [
+            'taxonomy' => self::TAXONOMY,
+            'terms' => ['Kulinarik', ['title' => 'Wellness'], ['title' => 'Live Musik', 'slug' => 'musik']],
+        ]);
+        $this->assertTrue($result['ok'], $result['error'] ?? '');
+        $this->assertEqualsCanonicalizing(['kulinarik', 'wellness', 'musik'], $result['created']);
+        $this->assertSame([], $result['skipped']);
+
+        $this->assertNotNull(Term::find(self::TAXONOMY.'::kulinarik'));
+        $this->assertSame('Live Musik', Term::find(self::TAXONOMY.'::musik')->in(Site::default()->handle())->get('title'));
+
+        // Re-run: existing terms are skipped, only genuinely new ones created.
+        $again = $this->invokeTool(new CreateTermsTool, [
+            'taxonomy' => self::TAXONOMY,
+            'terms' => ['Kulinarik', 'Familie'],
+        ]);
+        $this->assertTrue($again['ok'], $again['error'] ?? '');
+        $this->assertSame(['familie'], $again['created']);
+        $this->assertEqualsCanonicalizing(['kulinarik'], $again['skipped']);
+    }
+
+    public function test_create_terms_requires_existing_taxonomy(): void
+    {
+        $res = $this->invokeTool(new CreateTermsTool, ['taxonomy' => 'ghost_tax', 'terms' => ['X']]);
+        $this->assertFalse($res['ok']);
+        $this->assertStringContainsString('ghost_tax', $res['error']);
+        $this->assertStringContainsString('create_taxonomy', $res['error']);
+    }
+
+    public function test_create_terms_validates_input(): void
+    {
+        $this->invokeTool(new CreateTaxonomyTool, ['handle' => self::TAXONOMY, 'title' => 'Adv Topics']);
+
+        $empty = $this->invokeTool(new CreateTermsTool, ['taxonomy' => self::TAXONOMY, 'terms' => []]);
+        $this->assertFalse($empty['ok']);
+
+        $noTitle = $this->invokeTool(new CreateTermsTool, ['taxonomy' => self::TAXONOMY, 'terms' => [['slug' => 'x']]]);
+        $this->assertFalse($noTitle['ok']);
+        $this->assertStringContainsString('title', $noTitle['error']);
     }
 
     public function test_create_blueprint_requires_existing_collection_and_valid_fields(): void

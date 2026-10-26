@@ -109,9 +109,13 @@ return [
     | Multi-entry runs and tool loops can take several minutes per provider call;
     | raise this if you see cURL timeout 28 / operation timed out in logs.
     |
+    | Default is 180s: generous for a single generation call, but low enough that
+    | one stuck/slow call fails in ~3 min instead of hanging for 10. Sites running
+    | very large models with big outputs can raise it via the env var.
+    |
     */
 
-    'infomaniak_http_timeout' => max(30, (int) env('STATAMIC_AI_ASSISTANT_INFOMANIAK_HTTP_TIMEOUT', 600)),
+    'infomaniak_http_timeout' => max(30, (int) env('STATAMIC_AI_ASSISTANT_INFOMANIAK_HTTP_TIMEOUT', 180)),
 
     /*
     | Groq HTTP client (Guzzle) timeout for direct chat/completions calls.
@@ -368,10 +372,11 @@ return [
     // Max agentic tool-loop rounds per request. Rounds are consumed on demand
     // (a two-entry create finishes in a handful), so this only bounds long bulk
     // jobs — e.g. "add alt text to every image in a folder", where each item
-    // costs ~2 rounds (analyze_image + update_asset). Keep it high enough that
-    // such per-item work finishes instead of the model wrapping up early once
-    // the round budget looks tight.
-    'entry_generator_tool_max_rounds' => max(1, min(60, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_ROUNDS', 120))),
+    // costs ~2 rounds (analyze_image + update_asset). Default lowered to 40: a
+    // safety net against a misbehaving model grinding through slow rounds. Bulk
+    // jobs still finish ~20 items/run; sites doing larger sweeps can raise it via
+    // the env var (clamped to 60).
+    'entry_generator_tool_max_rounds' => max(1, min(60, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_ROUNDS', 40))),
     'entry_generator_tool_max_fetches' => max(1, min(40, (int) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR_TOOL_MAX_FETCHES', 100))),
     // Max read_entry_structure calls per request (the agent reads existing entries
     // to mirror their layout/components when creating or updating an entry).

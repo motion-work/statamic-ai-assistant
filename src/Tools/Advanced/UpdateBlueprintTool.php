@@ -112,6 +112,11 @@ class UpdateBlueprintTool extends AbstractAdvancedTool
         $context->reportActivity((string) __('Updating blueprint :handle', ['handle' => $handle]));
 
         $blueprint->setContents($contents);
+
+        if ($resolveError = $this->blueprintResolutionError($blueprint)) {
+            return ['ok' => false, 'error' => $resolveError];
+        }
+
         $blueprint->save();
 
         return [

@@ -706,6 +706,26 @@ class EntryGenerationPlanner
                 return;
             }
 
+            // create_terms adds N terms in one call, so it carries a list rather
+            // than a single `handle`. Report the concrete new terms. A call where
+            // every term already existed (created == []) is a no-op and must not
+            // surface as work — otherwise a "nothing new" run looks like a change.
+            if ($name === 'create_terms' && ($result['ok'] ?? false) === true) {
+                $newTerms = array_values(array_filter((array) ($result['created'] ?? []), 'is_string'));
+                if ($newTerms === []) {
+                    return;
+                }
+                $structuralWrites++;
+                $description = (string) __('terms :list added to taxonomy ":taxonomy"', [
+                    'list' => implode(', ', $newTerms),
+                    'taxonomy' => (string) ($result['taxonomy'] ?? ''),
+                ]);
+                $structuralChangesOut[] = $description;
+                $this->batch?->appendOperation($sessionId, 'taxonomy', $description);
+
+                return;
+            }
+
             if (($result['ok'] ?? false) !== true || ! in_array($name, $structuralNames, true)) {
                 return;
             }
