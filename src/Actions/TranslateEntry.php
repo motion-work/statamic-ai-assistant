@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Actions;
 
 use MotionWork\StatamicAiAssistant\Services\CpTranslationBatchRunner;
+use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use Statamic\Actions\Action;
@@ -22,7 +23,7 @@ class TranslateEntry extends Action
 
     public function visibleTo($item)
     {
-        if (! config('statamic-ai-assistant.translations', true)) {
+        if (! CpFeatures::translationsEnabled()) {
             return false;
         }
 

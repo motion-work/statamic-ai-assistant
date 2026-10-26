@@ -68,11 +68,13 @@ Statamic.booting((statamic) => {
   Statamic.$bard.addExtension(AiTextLegacyBardNode);
 
   Statamic.$bard.buttons((buttons) => {
-    buttons.push({
-      name: "BardManagement",
-      text: cpTranslate("AI assistant", {}, translations),
-      component: BardAiButton,
-    });
+    if (Statamic.$config.get("aiFeaturesEnabled")) {
+      buttons.push({
+        name: "BardManagement",
+        text: cpTranslate("AI assistant", {}, translations),
+        component: BardAiButton,
+      });
+    }
 
     if (Statamic.$config.get("translationsActiv")) {
       buttons.push({
@@ -86,8 +88,10 @@ Statamic.booting((statamic) => {
 
 // Initialize translation-related services
 Statamic.booted(() => {
-  const translationInfoDisplay = new TranslationInfoDisplay();
-  translationInfoDisplay.init();
+  if (Statamic.$config.get("translationsActiv")) {
+    const translationInfoDisplay = new TranslationInfoDisplay();
+    translationInfoDisplay.init();
+  }
 
   if (Statamic.$config.get("entryGeneratorEnabled")) {
     Statamic.$components.append("entry-generator-cp-launcher", { props: {} });

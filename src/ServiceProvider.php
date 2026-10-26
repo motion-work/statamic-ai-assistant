@@ -34,6 +34,7 @@ use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
+use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Statamic\Facades\CP\Nav;
@@ -258,6 +259,10 @@ class ServiceProvider extends AddonServiceProvider
         if (config('statamic-ai-assistant.translations', true)
             && config('statamic-ai-assistant.bulk_translations', true)) {
             Nav::extend(function ($nav) use ($section) {
+                if (! CpFeatures::translationsEnabled()) {
+                    return;
+                }
+
                 $nav->create(__('Bulk translations'))
                     ->section($section())
                     ->route('statamic-ai-assistant.translations')
@@ -270,6 +275,10 @@ class ServiceProvider extends AddonServiceProvider
         // terminology and tone applied across all translation paths.
         if (config('statamic-ai-assistant.translations', true)) {
             Nav::extend(function ($nav) use ($section) {
+                if (! CpFeatures::translationsEnabled()) {
+                    return;
+                }
+
                 $nav->create(__('Glossary & style rules'))
                     ->section($section())
                     ->route('statamic-ai-assistant.glossary.page')
@@ -282,6 +291,10 @@ class ServiceProvider extends AddonServiceProvider
         if (config('statamic-ai-assistant.entry_generator', true)
             && config('statamic-ai-assistant.agent_settings_nav', true)) {
             Nav::extend(function ($nav) use ($section) {
+                if (! CpFeatures::aiEnabled()) {
+                    return;
+                }
+
                 $nav->create(__('AI instructions'))
                     ->section($section())
                     ->route('statamic-ai-assistant.block-hints.page')
@@ -293,6 +306,10 @@ class ServiceProvider extends AddonServiceProvider
         // "AI agent access" — super-admins only.
         if (config('statamic-ai-assistant.entry_generator', true)) {
             Nav::extend(function ($nav) use ($section) {
+                if (! CpFeatures::aiEnabled()) {
+                    return;
+                }
+
                 $nav->create(__('AI agent access'))
                     ->section($section())
                     ->route('statamic-ai-assistant.access.page')
@@ -302,7 +319,8 @@ class ServiceProvider extends AddonServiceProvider
         }
 
         Statamic::provideToScript([
-            'translationsActiv' => config('statamic-ai-assistant.translations'),
+            'translationsActiv' => fn () => CpFeatures::translationsEnabled(),
+            'aiFeaturesEnabled' => fn () => CpFeatures::aiEnabled(),
             // Closures are resolved per CP request (User::current() is null at boot).
             'entryGeneratorEnabled' => fn () => $this->agentEnabledForCurrentUser(),
             'entryCreationMax' => fn () => \MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy::maxPlanEntries(),
@@ -317,7 +335,7 @@ class ServiceProvider extends AddonServiceProvider
      */
     protected function agentEnabledForCurrentUser(): bool
     {
-        if (! config('statamic-ai-assistant.entry_generator', true)) {
+        if (! config('statamic-ai-assistant.entry_generator', true) || ! CpFeatures::aiEnabled()) {
             return false;
         }
 

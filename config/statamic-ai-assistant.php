@@ -39,10 +39,11 @@ return [
     |--------------------------------------------------------------------------
     |
     | Without DEEPL_API_KEY, translations (field, Bard, entry, bulk, terms,
-    | navigation) run on the configured AI model instead of failing. The CP
-    | tells editors each time. Glossary terms and style rules from the CP still
-    | apply (sent as instructions in the prompt). DeepL is used again as soon
-    | as a key is set.
+    | navigation) run on the configured AI model instead of failing, but only
+    | when INFOMANIAK_API_TOKEN is set. With neither key, translation UI is
+    | hidden. The CP tells editors when the model translated instead of DeepL.
+    | Glossary terms and style rules from the CP still apply (sent as
+    | instructions in the prompt). DeepL is used again as soon as a key is set.
     |
     | Disable with your .env file (translations then fail without a key):
     | STATAMIC_AI_ASSISTANT_TRANSLATION_LLM_FALLBACK=false
@@ -89,6 +90,11 @@ return [
     |
     | For GROQ: set GROQ_API_KEY in your environment.
     | For INFOMANIAK: set INFOMANIAK_API_TOKEN in your environment.
+    |
+    | An empty INFOMANIAK_API_TOKEN hides every AI feature in the Control Panel
+    | (agent, field buttons, AI instructions, agent access). DeepL translations,
+    | the glossary and the translate actions stay, and only when DEEPL_API_KEY
+    | is set.
     |
     */
 

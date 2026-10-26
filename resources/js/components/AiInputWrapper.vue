@@ -1,19 +1,20 @@
 <template>
     <div class="ai-statamic-assistant">
-      <div ref="aiContainer" class="ai-assistant-wrapper">
-        <div class="ai-icon-wrapper">
-          <button
-            type="button"
-            :title="__('AI assistant')"
-            :aria-label="__('AI assistant')"
-            @click="openAssistant"
-          >
-            <AiIcon class="size-4 text-blue" />
-          </button>
-        </div>
+        <div v-if="showAi || showTranslate" ref="aiContainer" class="ai-assistant-wrapper">
+          <div v-if="showAi" class="ai-icon-wrapper">
+            <button
+              type="button"
+              :title="__('AI assistant')"
+              :aria-label="__('AI assistant')"
+              @click="openAssistant"
+            >
+              <AiIcon class="size-4 text-blue" />
+            </button>
+          </div>
 
-        <AiTranslateMenu
-          v-show="languages.length > 0"
+          <AiTranslateMenu
+            v-if="showTranslate"
+            v-show="languages.length > 0"
           class="translation-wrapper"
           :languages="languages"
           :disabled="!internalValue"
@@ -95,6 +96,15 @@
         if (newVal !== this.internalValue) {
           this.internalValue = newVal;
         }
+      },
+    },
+
+    computed: {
+      showAi() {
+        return Statamic.$config.get('aiFeaturesEnabled') === true;
+      },
+      showTranslate() {
+        return Statamic.$config.get('translationsActiv') === true;
       },
     },
 

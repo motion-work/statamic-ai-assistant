@@ -83,6 +83,8 @@ export default {
   },
 
   mounted() {
-    this.getLocalizations();
+    if (Statamic.$config.get('translationsActiv') === true) {
+      this.getLocalizations();
+    }
   },
 };
