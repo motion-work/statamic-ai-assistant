@@ -3,6 +3,7 @@
     "description": "Statamic 6 addon: AI text generation and refactoring in the Control Panel (Ai Text, Bard, DeepL translations). Requires statamic/cms ^6.5.",
     "keywords": ["statamic", "statamic-6", "ai", "bard", "deepl"],
     "type": "statamic-addon",
+    "license": "MIT",
     "homepage": "https://github.com/motion-work/statamic-ai-assistant",
     "authors": [
         {

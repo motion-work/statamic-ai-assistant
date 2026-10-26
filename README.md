@@ -119,3 +119,7 @@ Higher values increase DeepL usage and runtime (more entries may be created in o
 
 ## Issues & ideas
 If you run into problems or have ideas for improvements, please open an issue at [github.com/motion-work/statamic-ai-assistant/issues](https://github.com/motion-work/statamic-ai-assistant/issues). 
+
+## License
+
+MIT. See [LICENSE](./LICENSE).
