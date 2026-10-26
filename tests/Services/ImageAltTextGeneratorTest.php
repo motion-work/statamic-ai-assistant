@@ -40,7 +40,7 @@ class ImageAltTextGeneratorTest extends TestCase
                 return $this->result;
             }
 
-            public function generateContentFromPrompt(string $prompt): string
+            public function generateContentFromPrompt(string $prompt, array $context = []): string
             {
                 $this->calls['prompt'][] = $prompt;
                 if ($this->result instanceof \Throwable) {

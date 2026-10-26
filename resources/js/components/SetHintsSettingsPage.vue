@@ -366,11 +366,24 @@ STATAMIC_AI_ASSISTANT_FIGMA_OAUTH_CLIENT_SECRET=</pre>
         </template>
       </template>
     </div>
+
+    <ConfirmationModal
+      :open="confirmRequest !== null"
+      :title="confirmRequest ? confirmRequest.title : ''"
+      :body-text="confirmRequest ? confirmRequest.body : ''"
+      :button-text="confirmRequest ? confirmRequest.button : 'Continue'"
+      @confirm="runConfirm"
+      @cancel="confirmRequest = null"
+    />
   </div>
 </template>
 
 <script>
+import { ConfirmationModal } from '@statamic/cms/ui';
+
 export default {
+  components: { ConfirmationModal },
+
   data() {
     return {
       loading: true,
@@ -398,6 +411,7 @@ export default {
       figmaError: null,
       figmaStatus: null,
       figmaDisconnecting: false,
+      confirmRequest: null,
     };
   },
 
@@ -725,12 +739,19 @@ export default {
           (d.when_to_use || []).some((t) => (t || "").trim() !== ""));
 
       if (hasExisting) {
-        const ok = window.confirm(
-          this.__("Replace the current description and tips with an AI-generated draft?")
-        );
-        if (!ok) return;
+        this.confirmRequest = {
+          title: "Replace with an AI draft",
+          body: this.__("Replace the current description and tips with an AI-generated draft?"),
+          button: "Replace",
+          action: () => this.executeGenerateForRow(handle, kind, draft),
+        };
+        return;
       }
 
+      return this.executeGenerateForRow(handle, kind, draft);
+    },
+
+    async executeGenerateForRow(handle, kind, draft) {
       this.generating = { ...this.generating, [handle]: true };
 
       try {
@@ -779,16 +800,26 @@ export default {
           .map((f) => ({ kind: "field", handle: f.handle, draft: this.fieldDraft })),
       ];
 
-      const ok = window.confirm(
-        this.__n(
+      this.confirmRequest = {
+        title: "AI fill unconfigured",
+        body: this.__n(
           "Draft AI descriptions for :count unconfigured block?",
           "Draft AI descriptions for :count unconfigured blocks and fields?",
           jobs.length,
           { count: jobs.length }
-        )
-      );
-      if (!ok) return;
+        ),
+        button: "Continue",
+        action: () => this.executeGenerateAll(jobs),
+      };
+    },
 
+    runConfirm() {
+      const action = this.confirmRequest && this.confirmRequest.action;
+      this.confirmRequest = null;
+      if (typeof action === "function") action();
+    },
+
+    async executeGenerateAll(jobs) {
       this.generatingAll = true;
       this.generatingAllProgress = { current: 0, total: jobs.length };
 

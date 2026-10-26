@@ -226,11 +226,25 @@
         </section>
       </template>
     </div>
+
+    <ConfirmationModal
+      :open="pendingRemoveRow !== null"
+      title="Remove term"
+      :body-text="__('Remove this term from the glossary?')"
+      button-text="Remove term"
+      danger
+      @confirm="confirmRemoveRow"
+      @cancel="pendingRemoveRow = null"
+    />
   </div>
 </template>
 
 <script>
+import { ConfirmationModal } from '@statamic/cms/ui';
+
 export default {
+  components: { ConfirmationModal },
+
   data() {
     return {
       loading: true,
@@ -251,6 +265,7 @@ export default {
       syncWarnings: [],
       dirty: false,
       search: "",
+      pendingRemoveRow: null,
     };
   },
 
@@ -357,9 +372,19 @@ export default {
         (t) => (t || "").trim() !== ""
       );
       if (hasContent) {
-        const ok = window.confirm(this.__("Remove this term from the glossary?"));
-        if (!ok) return;
+        this.pendingRemoveRow = row;
+        return;
       }
+      this.deleteRow(row);
+    },
+
+    confirmRemoveRow() {
+      const row = this.pendingRemoveRow;
+      this.pendingRemoveRow = null;
+      if (row) this.deleteRow(row);
+    },
+
+    deleteRow(row) {
       this.rows = this.rows.filter((r) => r !== row);
       this.markDirty();
     },
