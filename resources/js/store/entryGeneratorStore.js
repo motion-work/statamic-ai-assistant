@@ -367,8 +367,20 @@ function clearGenerationBatchPoll() {
   }
 }
 
+function cardOperation(se) {
+  return se.operation === 'update' || se.operation === 'localize' ? se.operation : 'create';
+}
+
+function initialCardStatus(se) {
+  if (se.status === 'saved') return STATUS.SAVED;
+  if (se.status === 'ready') return STATUS.READY;
+  if (se.status === 'failed') return STATUS.FAILED;
+  if (se.status === 'generating') return STATUS.DRAFTING;
+  return STATUS.QUEUED;
+}
+
 function buildCardFromSnapshotEntry(se, index) {
-  const operation = se.operation === 'update' ? 'update' : 'create';
+  const operation = cardOperation(se);
   const entryId = typeof se.entry_id === 'string' && se.entry_id ? se.entry_id : null;
   return {
     id: se.id,
@@ -381,19 +393,19 @@ function buildCardFromSnapshotEntry(se, index) {
     blueprintTitle: se.blueprint_title || se.blueprint,
     operation,
     entryId,
-    status: STATUS.QUEUED,
+    status: initialCardStatus(se),
     tokenLength: 0,
     data: null,
     displayData: null,
     fieldPreview: null,
-    warnings: [],
-    error: null,
-    savedEntry: null,
+    warnings: Array.isArray(se.warnings) ? se.warnings : [],
+    error: se.error || null,
+    savedEntry: se.saved_entry || null,
     savingMode: null,
     _tokenScratch: '',
     streamKeysLogged: {},
     _lastKeyScanTokenLen: 0,
-    _pollStatus: 'pending',
+    _pollStatus: se.status || 'pending',
   };
 }
 
@@ -493,9 +505,11 @@ function applyBatchProgressSnapshot(data) {
       card.tokenLength = typeof se.token_length === 'number' ? se.token_length : card.tokenLength;
       const label = truncateActivityLabel(card.label || card.collectionTitle || card.collection);
       pushActivityLine(
-        card.operation === 'update'
-          ? _trans('Updating — :label', { label })
-          : _trans('Drafting — :label', { label }),
+        card.operation === 'localize'
+          ? _trans('Translating — :label', { label })
+          : (card.operation === 'update'
+            ? _trans('Updating — :label', { label })
+            : _trans('Drafting — :label', { label })),
         card.id,
       );
     } else if (next === 'pending') {
@@ -526,6 +540,18 @@ function applyBatchProgressSnapshot(data) {
           : _trans('Finished — :label', { label }),
         card.id,
       );
+    }
+
+    if (next === 'saved' && prev !== 'saved') {
+      card.status = STATUS.SAVED;
+      card.savedEntry = se.saved_entry || card.savedEntry;
+      card.warnings = se.warnings || [];
+      const label = truncateActivityLabel(card.label || card.collectionTitle || card.collection);
+      pushActivityLine(_trans('Localized — :label', { label }), card.id);
+    }
+
+    if (se.saved_entry && !card.savedEntry) {
+      card.savedEntry = se.saved_entry;
     }
 
     if (next === 'failed' && prev !== 'failed') {

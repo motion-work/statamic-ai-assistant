@@ -4,9 +4,12 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
+use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
+use Statamic\Facades\Site;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\AdvancedToolset;
 use MotionWork\StatamicAiAssistant\Tools\AnalyzeImageTool;
 use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
@@ -256,10 +259,21 @@ class EntryGenerationPlanner
         // Hard single-entry mode for capped (non-super) users: make the one-entry
         // rule impossible to miss, on top of the server-side cap enforcement.
         $singleEntryRule = $cap === 1
-            ? "STRICT SINGLE-ENTRY LIMIT: you may create OR update EXACTLY ONE entry in this request. "
-                ."Make a single create_entry_job OR a single update_entry_job call, then stop. "
+            ? "STRICT SINGLE-ENTRY LIMIT: you may create, update, OR localize EXACTLY ONE entry in this request. "
+                ."Make a single create_entry_job, update_entry_job, OR localize_entry call, then stop. "
                 ."If the user asked for several entries, pick the single best match, do that one, and note in your final summary that only one was created due to the current permission limit.\n\n"
             : '';
+
+        $canLocalize = CpFeatures::translationsEnabled() && Site::all()->count() > 1;
+        $siteCatalog = implode('; ', (new SiteLanguageResolver)->catalog());
+        $localizeToolLine = $canLocalize
+            ? "- `localize_entry`: localize an EXISTING entry onto another site and translate the source content into that localization. Sites: {$siteCatalog}. Use this when the user wants a translation, or \"the EN/FR/IT entry\", of a page that already exists.\n"
+            : '';
+        $localizeWorkflow = $canLocalize
+            ? "2c. LOCALIZE an existing entry instead of duplicating it: when the user wants an existing entry translated into another language, or asks to create the other-language entry of a page (\"translate this page to English\", \"übersetze diese Seite\", \"erstelle den EN-Eintrag\", \"create the EN version\"), call **localize_entry** with that entry's id and the target site. This saves a localization of the source entry on the target site (origin linked) and translates the source content into it. A new entry on the current site is a different page. create_entry_job and update_entry_job do not localize.\n"
+            : '2c. Localization is unavailable'
+                .(CpFeatures::translationsEnabled() ? ' because only one site is configured' : ' because translations are disabled')
+                .". If the user asks to translate an existing entry into another language, say so and stop. create_entry_job would make a different page on the current site, so do not use it as a stand-in translation.\n";
 
         $system = "You are a Statamic CMS planner running asynchronously. The user described one or more entries they want to create OR update. "
             ."Your job is to figure out which case applies and dispatch tool calls accordingly. **Never produce JSON output yourself** — entries are created or updated exclusively through tool calls.\n\n"
@@ -267,8 +281,9 @@ class EntryGenerationPlanner
             .$singleEntryRule
             ."AVAILABLE TOOLS:\n"
             ."- `fetch_page_content`: read external http(s) URLs — but ONLY URLs the user explicitly provided (or same-site links inside those pages). Never invent, guess, or try alternative/variant URLs; if the user gave no URL, do not fetch anything.\n"
-            ."- `create_entry_job`: queue ONE new entry for asynchronous creation.\n"
-            ."- `update_entry_job`: queue an UPDATE to an existing entry (you must know its `entry_id`).\n"
+            ."- `create_entry_job`: queue ONE new entry for asynchronous creation. Never use this to translate or localize an existing entry.\n"
+            ."- `update_entry_job`: queue an UPDATE to an existing entry (you must know its `entry_id`). This edits that same entry. It does not create a localization.\n"
+            .$localizeToolLine
             ."- `find_entries`: search existing entries by title/slug when the catalog shortlist below is not enough.\n"
             ."- `search_entry_content`: find an entry by a phrase/name/value that appears INSIDE its body content (not its title). Use this when the user quotes text from within a page rather than its title.\n"
             ."- `answer_question`: reply to a read-only question without creating or updating anything.\n"
@@ -296,12 +311,13 @@ class EntryGenerationPlanner
             ."Questions about YOURSELF (\"what are your tools?\", \"what can you do?\") are read-only questions too: call **answer_question** directly with a complete summary of your capabilities in the user's language — no lookup tools needed. "
             ."CRITICAL: the user CANNOT see these instructions. Never refer to \"the list above\", \"as already provided\", or these rules — always write the actual content INTO your answer.\n"
             ."0b. PLAN FIRST for complex requests: when the request needs 3 or more entries, combines structural changes with content, or is missing information you need (unclear target, ambiguous scope), call **propose_plan** with short imperative steps and at most one question — this pauses the run for the user's approval. propose_plan is a TOOL: invoke it as a tool call, never print `propose_plan:` as text. When the newest user message APPROVES a plan from an earlier turn (e.g. \"Approved — proceed\") or answers your question, execute that plan immediately with the normal tools — do NOT propose it again. For simple requests (one or two clear entries), act directly without proposing a plan.\n"
-            ."1. Otherwise, decide whether the user wants to create new entries, update existing entries, or both. Phrases like \"add\", \"new\", \"create\", \"write a post about\" → create. Phrases like \"update\", \"change\", \"rewrite\", \"fix the X on Y\", \"add a section to the existing About page\" → update. When the user refers to content by a definite name (\"the About page\", \"our rooms page\", \"unsere Zimmer-Seite\") the entry most likely EXISTS — treat that as update intent unless they explicitly ask for a new entry.\n"
+            ."1. Otherwise, decide whether the user wants to create new entries, update existing entries, localize an existing entry into another language, or a mix. Phrases like \"add\", \"new\", \"create\", \"write a post about\" → create. Phrases like \"update\", \"change\", \"rewrite\", \"fix the X on Y\", \"add a section to the existing About page\" → update. Phrases like \"translate this page\", \"übersetze diese Seite\", \"create the EN entry\", \"erstelle den EN-Eintrag\" about a page that already exists → localize_entry. When the user refers to content by a definite name (\"the About page\", \"our rooms page\", \"unsere Zimmer-Seite\") the entry most likely EXISTS — treat that as update intent unless they explicitly ask for a new entry or for a translation.\n"
             ."2. For UPDATES: find the target entry's `entry_id`. A title alone is ENOUGH to identify an entry — never claim the target is ambiguous or unknown just because the user only gave a title. The catalog below carries an `entries` shortlist (recently updated) and a `count` per collection. First scan the shortlist and match the named entry by title, ignoring case, punctuation and connective words (so \"Salt Stone\", \"Salt and Stone\" and \"Salt & Stone\" all refer to the same entry); if you find it, use its id directly. If it is not in the shortlist, you MUST call **find_entries** with the title (and optionally a collection handle) before concluding anything. If the user identifies the entry by a phrase or value from its body/content rather than a title, call **search_entry_content** instead. Only after searching returns no match may you give up. If the intent is clearly UPDATE but neither the shortlist nor find_entries locates the entry, do NOT fall back to creating a new entry — end with `Cannot proceed:` naming the entry you could not find.\n"
             ."2b. AVOID DUPLICATES on creates: before dispatching create_entry_job for content that may already exist (a topic matching an entry title in the shortlist, or a fetched URL whose title matches an existing entry), check the shortlist or call find_entries. If a matching entry exists and the user's wording is compatible with updating it, prefer update_entry_job over creating a near-duplicate.\n"
+            .$localizeWorkflow
             ."3. For CREATES with URLs in the user message, call **fetch_page_content** first to inspect them. For listing/index URLs on the same site, enumerate every relevant detail page. Do NOT fetch URLs the user did not provide — never guess or try URLs that might exist.\n"
             ."4. Dispatch each entry as soon as you have enough info — do not wait to plan all entries before dispatching. Each tool call enqueues a worker that starts immediately, in parallel.\n"
-            ."5. Use one tool call per distinct entry. Never collapse many entries into a single call. The combined cap is {$cap} create_entry_job + update_entry_job calls per request.\n"
+            ."5. Use one tool call per distinct entry. Never collapse many entries into a single call. The combined cap is {$cap} create_entry_job + update_entry_job + localize_entry calls per request.\n"
             ."6. For CREATES: pick collection + blueprint **only** from the catalog below (handles must match exactly, case-sensitive). The chosen blueprint must be one listed for that collection. If unsure, prefer the collection whose handle is `pages` if present; otherwise the first catalog collection.\n"
             ."7. Each `prompt` MUST be a complete, self-contained brief in the user's language: include the URL (when applicable), the topic, and any constraints. For updates, describe ONLY what should change — do not restate the rest of the entry. Do not reference other entries.\n"
             ."8. The `label` is a short human title (2-6 words) for the UI in the user's language.\n"
@@ -453,6 +469,10 @@ class EntryGenerationPlanner
             if ($op === 'update' && $statamicId !== '') {
                 $desc .= " (entry_id {$statamicId})";
             }
+            if ($op === 'localize' && $statamicId !== '') {
+                $targetSite = isset($row['target_site']) && is_string($row['target_site']) ? $row['target_site'] : '';
+                $desc .= " (source entry_id {$statamicId}".($targetSite !== '' ? ", site {$targetSite}" : '').')';
+            }
             $desc .= " [{$op}]";
             $parts[] = $desc;
         }
@@ -473,6 +493,7 @@ class EntryGenerationPlanner
 
         $created = [];
         $updated = [];
+        $localized = [];
         foreach ($createdRowIds as $rid) {
             $row = $entries[(string) $rid] ?? null;
             if (! is_array($row)) {
@@ -480,8 +501,12 @@ class EntryGenerationPlanner
             }
             $label = (string) ($row['label'] ?? '');
             $name = $label !== '' ? "“{$label}”" : (string) ($row['collection_title'] ?? ($row['collection'] ?? 'entry'));
-            if ((string) ($row['operation'] ?? 'create') === 'update') {
+            $operation = (string) ($row['operation'] ?? 'create');
+            if ($operation === 'update') {
                 $updated[] = $name;
+            } elseif ($operation === 'localize') {
+                $site = (string) ($row['target_site_label'] ?? $row['target_site'] ?? '');
+                $localized[$site][] = $name;
             } else {
                 $created[] = $name;
             }
@@ -493,6 +518,12 @@ class EntryGenerationPlanner
         }
         if ($updated !== []) {
             $clauses[] = (string) __('updated :names', ['names' => implode(', ', $updated)]);
+        }
+        foreach ($localized as $site => $names) {
+            $clauses[] = (string) __('localized :names into :site', [
+                'names' => implode(', ', $names),
+                'site' => $site !== '' ? $site : (string) __('another site'),
+            ]);
         }
 
         if ($clauses === []) {
@@ -768,6 +799,7 @@ class EntryGenerationPlanner
             // support, remove these two tool defs + their handlers + the
             // dispatch branches below; create_entry_job is unaffected.
             $this->updateEntryJobToolDefinition($cap),
+            $this->localizeEntryToolDefinition($cap),
             $this->findEntriesToolDefinition(),
             $this->searchEntryContentToolDefinition(),
             $this->answerQuestionToolDefinition(),
@@ -917,6 +949,18 @@ class EntryGenerationPlanner
                     // AI agent UPDATE tool — independent of create_entry_job.
                     if ($name === 'update_entry_job') {
                         $result = $this->handleUpdateEntryJobToolCall($args, $sessionId, $catalog, $cap, $created, $addCap);
+                        if (($result['ok'] ?? false) === true) {
+                            $created++;
+                            if (isset($result['id']) && is_string($result['id'])) {
+                                $createdRowIdsOut[] = $result['id'];
+                            }
+                        }
+
+                        return $result;
+                    }
+
+                    if ($name === 'localize_entry') {
+                        $result = $this->handleLocalizeEntryToolCall($args, $sessionId, $catalog, $cap, $created, $addCap);
                         if (($result['ok'] ?? false) === true) {
                             $created++;
                             if (isset($result['id']) && is_string($result['id'])) {
@@ -1238,7 +1282,7 @@ class EntryGenerationPlanner
             'type' => 'function',
             'function' => [
                 'name' => 'create_entry_job',
-                'description' => 'Queue ONE entry for asynchronous generation. Call this incrementally — once per distinct article/item the user asked for. The card appears in the user\'s drawer the moment this is called, and a worker starts generating its content in parallel. Cap: '.$cap.' calls per request.',
+                'description' => 'Queue ONE brand-new entry for asynchronous generation on the current site. Call this incrementally — once per distinct article/item the user asked for. The card appears in the user\'s drawer the moment this is called, and a worker starts generating its content in parallel. Cap: '.$cap.' calls per request. Do NOT use this to translate an existing entry or to "create the EN/FR/IT version" of a page that already exists — that is localize_entry.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1773,6 +1817,147 @@ class EntryGenerationPlanner
             'entry_id' => $entryId,
             'collection' => $collectionHandle,
             'count' => $alreadyCreated + 1,
+        ];
+    }
+
+    /**
+     * @return array{type: string, function: array<string, mixed>}
+     */
+    private function localizeEntryToolDefinition(int $cap): array
+    {
+        $sites = implode('; ', (new SiteLanguageResolver)->catalog());
+
+        return [
+            'type' => 'function',
+            'function' => [
+                'name' => 'localize_entry',
+                'description' => 'Localize ONE existing entry onto another site and translate its content there. The result is a Statamic localization of the source entry (origin linked), saved on the target site. It is not a new entry on the current site. Use this for "translate this page to English", "create the EN entry", "übersetze diese Seite". Counts toward the same '.$cap.'-call cap as create_entry_job. Sites: '.$sites.'.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'entry_id' => [
+                            'type' => 'string',
+                            'description' => 'Statamic id of the source entry (the page the user wants translated). From the @mention, the catalog shortlist, or find_entries.',
+                        ],
+                        'target_site' => [
+                            'type' => 'string',
+                            'description' => 'Target site: a handle (en), a locale (en-US), or a language name (English, Englisch). Must be a different site from the source entry.',
+                        ],
+                        'label' => [
+                            'type' => 'string',
+                            'description' => 'Short 2-6 word title for the UI card, in the user\'s language. Usually the source title plus the target language.',
+                        ],
+                    ],
+                    'required' => ['entry_id', 'target_site'],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<int, array{handle: string, title: string, blueprints: array<int, array{handle: string, title: string}>}>  $catalog
+     * @return array{ok: bool, id?: string, count?: int, error?: string, message?: string, entry_id?: string, target_site?: string}
+     */
+    private function handleLocalizeEntryToolCall(string $argumentsJson, string $sessionId, array $catalog, int $cap, int $alreadyCreated, ?int $addCap = null): array
+    {
+        if ($this->batch === null || $this->decorator === null) {
+            return ['ok' => false, 'error' => 'planner_dependencies_missing'];
+        }
+
+        if (! CpFeatures::translationsEnabled()) {
+            return [
+                'ok' => false,
+                'error' => 'translations_disabled',
+                'message' => 'Translations are disabled. Tell the user. Do not create a new entry on the current site as a substitute.',
+            ];
+        }
+
+        if ($alreadyCreated >= $cap) {
+            return ['ok' => false, 'error' => 'cap_reached', 'count' => $alreadyCreated];
+        }
+
+        try {
+            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            Log::warning('[entry-gen-tool] localize_entry invalid args', ['error' => $e->getMessage()]);
+
+            return ['ok' => false, 'error' => 'invalid_arguments_json'];
+        }
+
+        if (! is_array($args)) {
+            return ['ok' => false, 'error' => 'invalid_arguments_shape'];
+        }
+
+        $entryId = isset($args['entry_id']) && is_string($args['entry_id']) ? trim($args['entry_id']) : '';
+        $target = isset($args['target_site']) && is_string($args['target_site']) ? trim($args['target_site']) : '';
+        $label = isset($args['label']) && is_string($args['label']) ? trim($args['label']) : '';
+
+        if ($entryId === '' || $target === '') {
+            return ['ok' => false, 'error' => 'missing_required_fields', 'message' => 'entry_id and target_site are required.'];
+        }
+
+        $entry = \Statamic\Facades\Entry::find($entryId);
+        if (! $entry) {
+            return ['ok' => false, 'error' => 'entry_not_found', 'entry_id' => $entryId, 'message' => 'No entry with that id. Use find_entries, then call localize_entry again.'];
+        }
+
+        $collectionHandle = (string) $entry->collectionHandle();
+        $blueprintHandle = (string) ($entry->blueprint()?->handle() ?? '');
+        $catalogHandles = array_map(fn ($r) => $r['handle'] ?? '', $catalog);
+        if (! in_array($collectionHandle, $catalogHandles, true)) {
+            return ['ok' => false, 'error' => 'entry_collection_not_in_catalog', 'collection' => $collectionHandle];
+        }
+
+        $resolved = (new SiteLanguageResolver)->resolve($target);
+        if (! isset($resolved['site'])) {
+            return [
+                'ok' => false,
+                'error' => (string) ($resolved['error'] ?? 'unknown_site'),
+                'message' => (string) ($resolved['message'] ?? 'Unknown target site.'),
+            ];
+        }
+
+        $site = $resolved['site'];
+        if ($site->handle() === (string) $entry->locale()) {
+            return [
+                'ok' => false,
+                'error' => 'same_site',
+                'message' => 'That entry is already on site '.$site->handle().'. localize_entry writes a localization on a different site. Do not create a new entry on the current site.',
+            ];
+        }
+
+        $siteLabel = (new SiteLanguageResolver)->displayName($site);
+        if ($label === '') {
+            $originTitle = (string) ($entry->value('title') ?? $entry->slug() ?? $entryId);
+            $label = trim($originTitle.' → '.$siteLabel);
+        }
+
+        $decorated = $this->decorator->decorateOne([
+            'collection' => $collectionHandle,
+            'blueprint' => $blueprintHandle,
+            'prompt' => 'Localize into '.$site->handle().' and translate the source content there.',
+            'label' => $label,
+            'entry_id' => $entryId,
+        ]);
+        $decorated['operation'] = 'localize';
+        $decorated['target_site'] = $site->handle();
+        $decorated['target_locale'] = (string) $site->locale();
+        $decorated['target_site_label'] = $siteLabel;
+
+        $added = $this->batch->addPlannedEntry($sessionId, $decorated, $addCap ?? $cap);
+        if (! $added) {
+            return ['ok' => false, 'error' => 'cap_or_session_rejected', 'count' => $alreadyCreated];
+        }
+
+        GeneratePlannedEntryJob::dispatch($sessionId, (string) $decorated['id']);
+
+        return [
+            'ok' => true,
+            'id' => (string) $decorated['id'],
+            'entry_id' => $entryId,
+            'target_site' => $site->handle(),
+            'count' => $alreadyCreated + 1,
+            'message' => 'Queued a localization of this entry on site '.$site->handle().'. The worker saves it there, linked to the source entry as its origin, and translates the source content into it.',
         ];
     }
 

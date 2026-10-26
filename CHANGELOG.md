@@ -10,6 +10,8 @@ All notable changes to **motion-work/statamic-ai-assistant** are documented here
 
 ### Changed
 
+- **AI features need an Infomaniak token:** an empty `INFOMANIAK_API_TOKEN` hides the agent, field buttons, AI instructions and agent access. Translation UI stays only when `DEEPL_API_KEY` is set, or when the token is set and the LLM translation fallback is on.
+- **AI agent localizes instead of duplicating:** asking the agent to translate an existing entry (for example “übersetze diese Seite auf English” / “erstelle den EN-Eintrag”) localizes that source entry onto the target site and translates it there. It no longer creates a separate entry on the site that is open in the Control Panel.
 - **Quick tasks skip reasoning:** Ai Text / Bard generate and refactor, alt text, image analysis and fast-tier helpers now ask Infomaniak reasoning models (Kimi K2.6, Qwen3.5/3.8) to answer without thinking first (≈0.5–3s instead of ≈13–16s, and no more empty replies when `max_tokens` runs out during thinking). The AI agent's planning and entry generation keep thinking on. New config `quick_tasks_without_thinking` (`STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING`, default `true`). Mistral models are skipped automatically, since they reject the switch.
 - **Planner without URL tool:** uses `entry_generator_planner_max_output_tokens` instead of a fixed 1024 tokens, so reasoning models no longer fall back to a single entry.
 

@@ -14,7 +14,12 @@
             <p class="eg-entry-card__label">{{ displayLabel }}</p>
             <p class="eg-entry-card__target">
               <span
-                v-if="isUpdate"
+                v-if="isLocalize"
+                class="eg-entry-card__badge eg-entry-card__badge--update"
+                :title="__('Creating a localization of an existing entry')"
+              >{{ __('Localization') }}</span>
+              <span
+                v-else-if="isUpdate"
                 class="eg-entry-card__badge eg-entry-card__badge--update"
                 :title="__('Updating an existing entry')"
               >{{ __('Update') }}</span>
@@ -75,7 +80,7 @@
           <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
         </svg>
       </span>
-      <span class="eg-entry-card__saved-text">{{ isUpdate ? __('Update applied.') : __('Saved as draft.') }}</span>
+      <span class="eg-entry-card__saved-text">{{ savedText }}</span>
       <a
         :href="entry.savedEntry.edit_url"
         :target="otherPendingEntries ? '_blank' : null"
@@ -86,7 +91,7 @@
     </div>
 
     <!-- Warnings (collapsed unless preview is expanded or there are no other actions) -->
-    <div v-if="entry.warnings && entry.warnings.length && (isExpanded || entry.status === 'ready')" class="eg-entry-card__warnings">
+    <div v-if="entry.warnings && entry.warnings.length && (isExpanded || entry.status === 'ready' || entry.status === 'saved')" class="eg-entry-card__warnings">
       <p class="eg-entry-card__warnings-title">{{ __('Notes') }}</p>
       <ul>
         <li v-for="(w, i) in entry.warnings" :key="i" v-html="chatHtml(w)"></li>
@@ -235,6 +240,15 @@ export default {
       return this.entry.operation === 'update';
     },
 
+    isLocalize() {
+      return this.entry.operation === 'localize';
+    },
+
+    savedText() {
+      if (this.isLocalize) return this.__('Localized.');
+      return this.isUpdate ? this.__('Update applied.') : this.__('Saved as draft.');
+    },
+
     /**
      * Other entries in the batch still hold unsaved/in-flight content. When true,
      * opening this entry's editor must happen in a NEW TAB so the batch panel —
@@ -257,10 +271,10 @@ export default {
     statusLabel() {
       switch (this.entry.status) {
         case 'queued': return this.__('Waiting…');
-        case 'drafting': return this.isUpdate ? this.__('Updating…') : this.__('Drafting…');
+        case 'drafting': return this.isLocalize ? this.__('Translating…') : (this.isUpdate ? this.__('Updating…') : this.__('Drafting…'));
         case 'ready': return this.__('Ready to review');
         case 'saving': return this.__('Saving…');
-        case 'saved': return this.isUpdate ? this.__('Updated') : this.__('Saved');
+        case 'saved': return this.isLocalize ? this.__('Localized') : (this.isUpdate ? this.__('Updated') : this.__('Saved'));
         case 'failed': return this.__('Failed');
         default: return '';
       }

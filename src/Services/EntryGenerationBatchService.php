@@ -222,6 +222,11 @@ class EntryGenerationBatchService
                 ? $decoratedRow['entry_id']
                 : null;
 
+            $operation = (string) ($decoratedRow['operation'] ?? '');
+            if (! in_array($operation, ['create', 'update', 'localize'], true)) {
+                $operation = $entryId !== null ? 'update' : 'create';
+            }
+
             $session['entry_order'][] = $eid;
             $session['entries'][$eid] = [
                 'id' => $eid,
@@ -233,7 +238,11 @@ class EntryGenerationBatchService
                 'collection_title' => (string) ($decoratedRow['collection_title'] ?? ''),
                 'blueprint_title' => (string) ($decoratedRow['blueprint_title'] ?? ''),
                 'entry_id' => $entryId,
-                'operation' => $entryId !== null ? 'update' : 'create',
+                'operation' => $operation,
+                'target_site' => isset($decoratedRow['target_site']) && is_string($decoratedRow['target_site']) ? $decoratedRow['target_site'] : null,
+                'target_locale' => isset($decoratedRow['target_locale']) && is_string($decoratedRow['target_locale']) ? $decoratedRow['target_locale'] : null,
+                'target_site_label' => isset($decoratedRow['target_site_label']) && is_string($decoratedRow['target_site_label']) ? $decoratedRow['target_site_label'] : null,
+                'saved_entry' => null,
                 'status' => 'pending',
                 'token_length' => 0,
                 'stream_buffer' => '',
@@ -583,6 +592,36 @@ class EntryGenerationBatchService
     }
 
     /**
+     * The localization was saved on the target site. The card must not offer
+     * "Save as draft", which would create a new entry on the current site.
+     *
+     * @param  array{entry_id: string, edit_url: ?string, title: string, warnings?: array<int, string>}  $saved
+     */
+    public function markEntrySaved(string $sessionId, string $entryId, array $saved): void
+    {
+        $this->update($sessionId, function (array $session) use ($entryId, $saved): array {
+            if (! isset($session['entries'][$entryId])) {
+                return $session;
+            }
+            $session['entries'][$entryId]['status'] = 'saved';
+            $session['entries'][$entryId]['saved_entry'] = [
+                'entry_id' => (string) ($saved['entry_id'] ?? ''),
+                'edit_url' => isset($saved['edit_url']) && is_string($saved['edit_url']) ? $saved['edit_url'] : null,
+                'title' => (string) ($saved['title'] ?? ''),
+            ];
+            $session['entries'][$entryId]['warnings'] = is_array($saved['warnings'] ?? null) ? array_values($saved['warnings']) : [];
+            $session['entries'][$entryId]['error'] = null;
+            $session['entries'][$entryId]['completed_at'] = now()->toIso8601String();
+            $session['entries'][$entryId]['stream_buffer'] = '';
+            $session['counts'] = $this->recount($session);
+
+            return $session;
+        });
+
+        $this->markCompletedIfDone($sessionId);
+    }
+
+    /**
      * @param  array{data: array<string, mixed>, displayData: array<string, mixed>, warnings: array<int, string>}  $result
      */
     public function markEntrySuccess(string $sessionId, string $entryId, array $result): void
@@ -675,6 +714,9 @@ class EntryGenerationBatchService
                     'blueprint_title' => (string) ($row['blueprint_title'] ?? ''),
                     'entry_id' => $row['entry_id'] ?? null,
                     'operation' => (string) ($row['operation'] ?? 'create'),
+                    'target_site' => $row['target_site'] ?? null,
+                    'target_site_label' => $row['target_site_label'] ?? null,
+                    'saved_entry' => $row['saved_entry'] ?? null,
                     'status' => (string) ($row['status'] ?? 'pending'),
                     'token_length' => (int) ($row['token_length'] ?? 0),
                     'stream_delta' => $delta,
@@ -754,7 +796,7 @@ class EntryGenerationBatchService
             match ($st) {
                 'pending' => $counts['pending']++,
                 'generating' => $counts['running']++,
-                'ready' => $counts['completed']++,
+                'ready', 'saved' => $counts['completed']++,
                 'failed' => $counts['failed']++,
                 default => $counts['pending']++,
             };

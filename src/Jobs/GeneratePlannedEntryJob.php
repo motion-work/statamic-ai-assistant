@@ -4,6 +4,8 @@ namespace MotionWork\StatamicAiAssistant\Jobs;
 
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use Statamic\Facades\Entry;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -33,8 +35,11 @@ class GeneratePlannedEntryJob implements ShouldQueue
         $this->tries = (int) ($batch['job_tries'] ?? 2);
     }
 
-    public function handle(EntryGenerationBatchService $batch, EntryGeneratorService $generator): void
-    {
+    public function handle(
+        EntryGenerationBatchService $batch,
+        EntryGeneratorService $generator,
+        ?TranslationService $translations = null,
+    ): void {
         if ($batch->isCancelled($this->sessionId)) {
             $batch->markEntryFailed($this->sessionId, $this->entryId, (string) __('Cancelled.'));
 
@@ -53,7 +58,7 @@ class GeneratePlannedEntryJob implements ShouldQueue
 
         $row = $session['entries'][$this->entryId];
         $entryStatus = (string) ($row['status'] ?? 'pending');
-        if ($entryStatus === 'ready' || $entryStatus === 'failed') {
+        if ($entryStatus === 'ready' || $entryStatus === 'failed' || $entryStatus === 'saved') {
             return;
         }
 
@@ -66,6 +71,12 @@ class GeneratePlannedEntryJob implements ShouldQueue
 
         if ($batch->isCancelled($this->sessionId)) {
             $batch->markEntryFailed($this->sessionId, $this->entryId, (string) __('Cancelled.'));
+
+            return;
+        }
+
+        if ((string) ($row['operation'] ?? '') === 'localize') {
+            $this->localizeEntry($batch, $translations ?? app(TranslationService::class), $row);
 
             return;
         }
@@ -137,5 +148,79 @@ class GeneratePlannedEntryJob implements ShouldQueue
 
             $batch->markEntryFailed($this->sessionId, $this->entryId, $message);
         }
+    }
+
+    /**
+     * Localize the source entry onto the target site and translate it there.
+     * The localization keeps the source as its origin. It is saved immediately,
+     * so the CP card never offers "save as draft" on the current site.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function localizeEntry(EntryGenerationBatchService $batch, TranslationService $translations, array $row): void
+    {
+        $sourceId = isset($row['entry_id']) && is_string($row['entry_id']) ? $row['entry_id'] : '';
+        $source = $sourceId !== '' ? Entry::find($sourceId) : null;
+        $targetLocale = isset($row['target_locale']) && is_string($row['target_locale']) ? $row['target_locale'] : '';
+
+        if (! $source || $targetLocale === '') {
+            $batch->markEntryFailed($this->sessionId, $this->entryId, (string) __('Source entry was not found.'));
+
+            return;
+        }
+
+        try {
+            $result = $translations->translateEntry(
+                $source,
+                (string) $source->site()->locale(),
+                $targetLocale,
+                true,
+            );
+        } catch (\Throwable $e) {
+            Log::warning('GeneratePlannedEntryJob localization failed', [
+                'session_id' => $this->sessionId,
+                'entry_id' => $this->entryId,
+                'source_entry_id' => $sourceId,
+                'target_locale' => $targetLocale,
+                'error' => $e->getMessage(),
+            ]);
+
+            $batch->markEntryFailed(
+                $this->sessionId,
+                $this->entryId,
+                $e instanceof \RuntimeException ? $e->getMessage() : (string) __('Translation failed.'),
+            );
+
+            return;
+        }
+
+        if (($result['success'] ?? false) !== true) {
+            $batch->markEntryFailed(
+                $this->sessionId,
+                $this->entryId,
+                (string) ($result['error'] ?? __('Translation failed.')),
+            );
+
+            return;
+        }
+
+        $warnings = [];
+        $untranslated = is_array($result['untranslated_fields'] ?? null) ? $result['untranslated_fields'] : [];
+        if ($untranslated !== []) {
+            $warnings[] = (string) __('Left in the source language: :fields', [
+                'fields' => implode(', ', $untranslated),
+            ]);
+        }
+        $unresolved = is_array($result['unresolved_references'] ?? null) ? $result['unresolved_references'] : [];
+        if ($unresolved !== []) {
+            $warnings[] = (string) __('Some links still point at the source-language entry.');
+        }
+
+        $batch->markEntrySaved($this->sessionId, $this->entryId, [
+            'entry_id' => (string) ($result['entry_id'] ?? ''),
+            'edit_url' => isset($result['edit_url']) && is_string($result['edit_url']) ? $result['edit_url'] : null,
+            'title' => (string) ($result['target_title'] ?? $result['title'] ?? ''),
+            'warnings' => $warnings,
+        ]);
     }
 }
