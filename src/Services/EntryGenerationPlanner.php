@@ -309,7 +309,7 @@ class EntryGenerationPlanner
             ."9. When you have done everything the newest user message asked for (or hit the cap), end your turn with a short plain-text summary (1-3 sentences, no JSON, no tool calls) naming CONCRETELY what you did: which entries, which fields/languages, which assets or structures. Example: `Updated the alt text of martina-seiler.jpg in DE, FR, EN and IT based on the image content.` Never reply with just `Done` or a bare action count.\n"
             ."10. If the request is impossible, end your turn with a short plain-text explanation starting with `Cannot proceed:`. But NEVER give up on an update target without first checking the shortlist AND calling find_entries — a bare title is not a reason to stop.";
 
-        // Editor-maintained site-wide instructions (AI agent settings) —
+        // Editor-maintained site-wide instructions (AI instructions page) —
         // the site-level analog of a coding agent's project memory file.
         $siteInstructions = (new SetHintsService)->siteInstructions();
         if ($siteInstructions !== '') {

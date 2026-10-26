@@ -1145,7 +1145,7 @@ class EntryGeneratorService
             $entry['required'] = true;
         }
 
-        // Field hints (AI agent settings): editors can describe what a field
+        // Field hints (AI instructions page): editors can describe what a field
         // like `hero_title` or `lead` is for and add writing guidelines. Hints
         // match by handle wherever the field appears (top level, groups, sets).
         $hint = $this->setHints->forField((string) $field->handle());
@@ -2375,7 +2375,7 @@ class EntryGeneratorService
     }
 
     /**
-     * Editor-maintained site-wide instructions (AI agent settings), appended
+     * Editor-maintained site-wide instructions (AI instructions page), appended
      * to every generation prompt. Length-capped so a very long document cannot
      * crowd out the field schema.
      */

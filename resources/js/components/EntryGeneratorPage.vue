@@ -522,7 +522,7 @@
       <!-- Action buttons -->
       <div class="eg-chat__actions">
         <template v-if="renderedStep === 2 && !canGenerate">
-          <span class="eg-chat__actions-hint">{{ __('Type at least 10 characters…') }}</span>
+          <span class="eg-chat__actions-hint">{{ __('Type at least 3 characters…') }}</span>
         </template>
         <template v-else-if="store.generating">
           <span class="eg-chat__actions-status">
@@ -921,8 +921,14 @@ export default {
       return this.selectedCollection && this.selectedBlueprint;
     },
 
+    /** A reply in an ongoing chat ("ja", "ok") may be short; a first request needs a few characters. */
+    isReply() {
+      return this.drawer && (this.store.chatSessionId || this.store.transcript.length > 0);
+    },
+
     canGenerate() {
-      return (this.store.pendingPrompt || '').trim().length >= 10;
+      const length = (this.store.pendingPrompt || '').trim().length;
+      return this.isReply ? length >= 1 : length >= 3;
     },
 
     /**
@@ -1741,7 +1747,7 @@ export default {
 
       // An ongoing chat continues — even when restored from history with an
       // expired server session (continueGeneration reseeds it transparently).
-      if (this.drawer && (this.store.chatSessionId || this.store.transcript.length > 0)) {
+      if (this.isReply) {
         continueGeneration(this.store.pendingPrompt);
         this.chatStickToBottom = true;
         return;

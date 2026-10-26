@@ -42,8 +42,8 @@
       </div>
       <div class="translation-page__hero-text">
         <p class="translation-page__eyebrow">{{ __('Bulk translation') }}</p>
-        <h1 class="translation-page__title">{{ __('DeepL Translations') }}</h1>
-        <p class="translation-page__subtitle">{{ __('Translate your content across languages using DeepL') }}</p>
+        <h1 class="translation-page__title">{{ __('Bulk translations') }}</h1>
+        <p class="translation-page__subtitle">{{ __('Translate entries, navigations and taxonomy terms into your other site languages.') }}</p>
       </div>
     </header>
 
@@ -904,7 +904,7 @@ export default {
       if (!n || !this.normalizedDestinationLocales.length) {
         return this.__('Choose a source, entries, and target languages to see the estimate.');
       }
-      return this.__('Will translate :entries entries into :langs (:ops operations) using DeepL.', {
+      return this.__('Will translate :entries entries into :langs (:ops operations).', {
         entries: n,
         langs: langs,
         ops: this.totalOperations,

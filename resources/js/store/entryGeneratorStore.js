@@ -599,7 +599,7 @@ function scheduleGenerationBatchPoll() {
 export async function startGeneration({ prompt, useAutoTarget, collection, blueprint }) {
   if (state.generating) return;
   const text = (prompt || '').trim();
-  if (text.length < 10) return;
+  if (text.length < 3) return;
 
   const mentionTitles = mentionTitlesForPrompt(text);
   const files = pendingFilesForPrompt(text);
@@ -809,7 +809,7 @@ export function stopGeneration({ keepReady = false } = {}) {
  */
 export async function continueGeneration(prompt) {
   const text = (prompt || '').trim();
-  if (state.generating || text.length < 10) return;
+  if (state.generating || text.length < 1) return;
   if (!state.chatSessionId && state.transcript.length === 0) return;
 
   const files = pendingFilesForPrompt(text);

@@ -13,4 +13,22 @@ class AiText extends Fieldtype
 </svg>';
   public $categories = ['text'];
   protected $keywords = ['ai', 'ia', 'text'];
+
+  protected function configFieldItems(): array
+  {
+    return [
+      [
+        'display' => __('AI assistant'),
+        'fields' => [
+          'max_words' => [
+            'display' => __('Maximum words'),
+            'instructions' => __('AI suggestions for this field stay within this many words. Leave empty for no limit.'),
+            'type' => 'integer',
+            'default' => 12,
+            'width' => '50',
+          ],
+        ],
+      ],
+    ];
+  }
 }

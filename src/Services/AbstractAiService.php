@@ -239,16 +239,18 @@ abstract class AbstractAiService
     /**
      * Generate content using the provided prompt.
      */
-    public function generateContentFromPrompt(string $prompt): string
+    public function generateContentFromPrompt(string $prompt, array $context = []): string
     {
         $currentLocale = optional(Site::selected())->locale() ?: 'en';
         $promptAdded = 'if not specified YOU NEED to write this article in this language: '.$currentLocale;
 
         $messages = [];
-        if (config('statamic-ai-assistant.prompt_preface')) {
+        $system = trim((config('statamic-ai-assistant.prompt_preface') ? config('statamic-ai-assistant.prompt_preface').$promptAdded : '')
+            ."\n\n".$this->fieldContextInstructions($context));
+        if ($system !== '') {
             $messages[] = [
                 'role' => 'system',
-                'content' => config('statamic-ai-assistant.prompt_preface').$promptAdded,
+                'content' => $system,
             ];
         }
 
@@ -265,13 +267,14 @@ abstract class AbstractAiService
     /**
      * Generate refactored content using the provided text and instructions.
      */
-    public function generateRefactorFromPrompt(string $textToRefactor, string $prompt): string
+    public function generateRefactorFromPrompt(string $textToRefactor, string $prompt, array $context = []): string
     {
         $messages = [];
-        if (config('statamic-ai-assistant.prompt_refactor_preface')) {
+        $system = trim((string) config('statamic-ai-assistant.prompt_refactor_preface')."\n\n".$this->fieldContextInstructions($context));
+        if ($system !== '') {
             $messages[] = [
                 'role' => 'system',
-                'content' => config('statamic-ai-assistant.prompt_refactor_preface'),
+                'content' => $system,
             ];
         }
 
@@ -292,13 +295,14 @@ abstract class AbstractAiService
     /**
      * Generate HTML refactored content using the provided text and instructions.
      */
-    public function generateHtmlRefactorFromPrompt(string $textToRefactor, string $prompt): string
+    public function generateHtmlRefactorFromPrompt(string $textToRefactor, string $prompt, array $context = []): string
     {
         $messages = [];
-        if (config('statamic-ai-assistant.prompt_html_refactor_preface')) {
+        $system = trim((string) config('statamic-ai-assistant.prompt_html_refactor_preface')."\n\n".$this->fieldContextInstructions($context));
+        if ($system !== '') {
             $messages[] = [
                 'role' => 'system',
-                'content' => config('statamic-ai-assistant.prompt_html_refactor_preface'),
+                'content' => $system,
             ];
         }
 
@@ -314,6 +318,54 @@ abstract class AbstractAiService
         $content = $this->withoutThinking(fn () => $this->callApi($messages));
 
         return $this->cleanResult($content);
+    }
+
+    /**
+     * Instructions describing where the text goes, so a field-level request
+     * doesn't need the editor to repeat the context: the field (label + the
+     * editor-written field hint from the AI instructions page), the entry it
+     * belongs to, the site-wide instructions, and an optional word limit.
+     *
+     * @param  array{field_label?: string, field_handle?: string, entry_title?: string, max_words?: int|string|null}  $context
+     */
+    protected function fieldContextInstructions(array $context): string
+    {
+        $lines = [];
+
+        $label = trim((string) ($context['field_label'] ?? ''));
+        if ($label !== '') {
+            $lines[] = "You are writing the content of the field \"{$label}\".";
+        }
+
+        $handle = trim((string) ($context['field_handle'] ?? ''));
+        if ($handle !== '') {
+            $hint = app(SetHintsService::class)->forField($handle);
+            if ($hint !== null) {
+                if (($hint['ai_description'] ?? '') !== '') {
+                    $lines[] = 'What belongs in this field: '.$hint['ai_description'];
+                }
+                if (($hint['when_to_use'] ?? []) !== []) {
+                    $lines[] = "Writing guidelines for this field:\n- ".implode("\n- ", $hint['when_to_use']);
+                }
+            }
+        }
+
+        $title = trim((string) ($context['entry_title'] ?? ''));
+        if ($title !== '' && $title !== $label) {
+            $lines[] = "It belongs to the page \"{$title}\". Stay on that topic.";
+        }
+
+        $site = app(SetHintsService::class)->siteInstructions();
+        if ($site !== '') {
+            $lines[] = "Site-wide instructions (always follow):\n{$site}";
+        }
+
+        $maxWords = (int) ($context['max_words'] ?? 0);
+        if ($maxWords > 0) {
+            $lines[] = "Keep the result to at most {$maxWords} words.";
+        }
+
+        return implode("\n\n", $lines);
     }
 
     /**

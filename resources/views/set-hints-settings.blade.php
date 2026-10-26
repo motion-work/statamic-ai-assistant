@@ -1,6 +1,6 @@
 @extends('statamic::layout')
 
-@section('title', __('AI agent settings'))
+@section('title', __('AI instructions'))
 
 @section('content')
     @if(session('success'))

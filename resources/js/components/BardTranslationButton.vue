@@ -1,36 +1,20 @@
 <template>
     <div>
-        <div
+        <AiTranslateMenu
             v-show="languages.length > 0"
-            ref="translationContainer"
-            :class="!bardHasTranslatableContent ? 'opacity-50' : ''"
             class="ai-bard-btn-wrapper"
-        >
-            <button
-                type="button"
-                class="ai-bard-translate-trigger"
-                :disabled="!bardHasTranslatableContent"
-                :aria-label="__('DeepL Translation')"
-                @click="toggleTranslateDropdown"
-            >
-                <Translation class="h-4 w-4 text-green-600" />
-            </button>
-
-            <div v-if="showTranslateDropdown" class="ai-translate-dropdown">
-                <div
-                    v-for="lang in languages"
-                    :key="lang.code"
-                    class="ai-translate-dropdown__item"
-                    @click="translateTo(lang.code)"
-                >
-                    {{ lang.label }}
-                </div>
-            </div>
-        </div>
+            trigger-class="ai-bard-translate-trigger"
+            :languages="languages"
+            :disabled="!hasContent"
+            :disabled-reason="__('The field is empty.')"
+            @select="translateTo"
+        />
         <div
             ref="loadingBard"
             :style="{ display: loadingTranslation ? 'flex' : 'none' }"
             class="absolute inset-0 z-10 flex items-center justify-center"
+            role="status"
+            :aria-label="__('Translating…')"
         >
             <ui-icon name="loading" class="z-10 size-6 text-gray-600" />
             <div class="absolute inset-0 rounded bg-white/75 dark:bg-gray-850/75"></div>
@@ -39,36 +23,15 @@
 </template>
 
 <script>
-import axios from 'axios';
-import { showTranslationNotice } from '../utils/showTranslationNotice.js';
-import Translation from './icons/TranslationIcon.vue';
+import AiTranslateMenu from './AiTranslateMenu.vue';
 import aiTranslationMixin from '../mixins/aiTranslationMixin';
-
-/** True when Bard HTML has no meaningful text (matches empty-field UX for ai_text translation). */
-function isBardHtmlEffectivelyEmpty(html) {
-    if (html == null || typeof html !== 'string') {
-        return true;
-    }
-    const t = html.trim();
-    if (t === '') {
-        return true;
-    }
-    if (t === '<br class="ProseMirror-trailingBreak">') {
-        return true;
-    }
-    const text = t
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/\u00a0/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return text === '';
-}
+import fieldContextMixin from '../mixins/fieldContextMixin';
+import { applyToBard, bardSnapshot, snapshotTexts } from '../utils/bardAi';
 
 export default {
-    mixins: [aiTranslationMixin],
+    mixins: [aiTranslationMixin, fieldContextMixin],
     name: 'BardAiTranslation',
-    components: { Translation },
+    components: { AiTranslateMenu },
     props: {
         editor: Object,
         bard: Object,
@@ -79,12 +42,8 @@ export default {
     },
     data() {
         return {
-            value: null,
-            loadingTranslation: false,
-            showTranslateDropdown: false,
-            selectedLanguage: 'en',
-            languages: [],
-            bardHasTranslatableContent: false,
+            hasContent: false,
+            snapshot: null,
         };
     },
     mounted() {
@@ -93,11 +52,9 @@ export default {
             if (groupNode && this.$refs.loadingBard) {
                 groupNode.appendChild(this.$refs.loadingBard);
             }
-            this.syncBardTranslatableContent();
+            this.syncHasContent();
             if (this.editor && typeof this.editor.on === 'function') {
-                this._onBardEditorUpdate = () => {
-                    this.syncBardTranslatableContent();
-                };
+                this._onBardEditorUpdate = () => this.syncHasContent();
                 this.editor.on('update', this._onBardEditorUpdate);
             }
         });
@@ -108,53 +65,21 @@ export default {
         }
     },
     methods: {
-        syncBardTranslatableContent() {
-            let html = '';
-            try {
-                html = this.editor?.commands?.getBardContent?.() ?? '';
-            } catch (e) {
-                html = '';
-            }
-            this.bardHasTranslatableContent = !isBardHtmlEffectivelyEmpty(html);
+        /** Text outside of sets (set nodes are atoms, so they add no text). */
+        syncHasContent() {
+            this.hasContent = (this.editor?.state?.doc?.textContent ?? '').trim() !== '';
         },
-        toggleTranslateDropdown() {
-            if (!this.bardHasTranslatableContent) {
-                return;
-            }
-            const result = this.editor.commands.getBardContent();
-            if (result && result !== '') {
-                this.value = result;
-            }
-            this.showTranslateDropdown = !this.showTranslateDropdown;
+
+        /** The whole field; with sets, only the text runs between them. */
+        translatableContent() {
+            this.snapshot = bardSnapshot(this.editor, { ignoreSelection: true });
+            return this.snapshot.mode === 'runs'
+                ? { texts: snapshotTexts(this.snapshot), html: true }
+                : { text: this.snapshot.html, html: true };
         },
-        async translateTo(lang) {
-            this.selectedLanguage = lang;
-            this.showTranslateDropdown = false;
-            this.loadingTranslation = true;
 
-            try {
-                const response = await axios.post('/cp/ai-translations/field', {
-                    text: this.value,
-                    target_locale: lang,
-                    html: true,
-                });
-
-                if (!response?.data?.translated || response.data.translated === '') {
-                    throw new Error('Empty response from DeepL. Verify your API key.');
-                }
-
-                this.result = response.data.translated;
-                this.editor.commands.WriteInBard(this.result);
-                Statamic.$toast.success(__('Your content has been translated.'));
-                showTranslationNotice(response.data.notice);
-            } catch (error) {
-                Statamic.$toast.error(
-                    error?.response?.data?.error || error.message || __('Translation failed.'),
-                    { duration: 10000 },
-                );
-            } finally {
-                this.loadingTranslation = false;
-            }
+        applyTranslation(data) {
+            return applyToBard(this.editor, this.snapshot, data.translations ?? data.translated);
         },
     },
 };

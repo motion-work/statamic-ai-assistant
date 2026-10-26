@@ -85,7 +85,7 @@ class FigmaContentFetcher
             return $this->augmentationCache[$cacheKey] = [
                 'appendix' => '',
                 'warnings' => [
-                    __('A Figma link was detected, but Figma is not connected. Connect it in AI agent settings.'),
+                    __('A Figma link was detected, but Figma is not connected. Connect it under AI instructions.'),
                 ],
             ];
         }

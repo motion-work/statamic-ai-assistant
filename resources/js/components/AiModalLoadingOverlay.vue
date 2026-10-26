@@ -14,6 +14,14 @@
       >
         <span class="ai-modal-loading__spinner" aria-hidden="true" />
         <span class="ai-modal-loading__label">{{ label }}</span>
+        <button
+          v-if="cancellable"
+          type="button"
+          class="ai-modal-loading__cancel"
+          @click="$emit('cancel')"
+        >
+          {{ cancelLabel }}
+        </button>
       </div>
     </div>
   </Transition>
@@ -36,6 +44,16 @@ export default {
       type: Boolean,
       default: false,
     },
+    /** Show a cancel button that emits `cancel` (the caller aborts the request). */
+    cancellable: {
+      type: Boolean,
+      default: false,
+    },
+    cancelLabel: {
+      type: String,
+      default: 'Cancel',
+    },
   },
+  emits: ['cancel'],
 };
 </script>

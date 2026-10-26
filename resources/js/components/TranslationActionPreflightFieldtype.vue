@@ -190,7 +190,7 @@ export default {
       if (!n || !this.destinationLocales.length) {
         return this.__('Choose sources and targets to see the estimate.');
       }
-      return this.__('Will translate :entries entries into :langs (:ops operations) using DeepL.', {
+      return this.__('Will translate :entries entries into :langs (:ops operations).', {
         entries: n,
         langs: langs,
         ops: this.totalOperations,

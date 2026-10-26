@@ -184,7 +184,10 @@ class TranslationController
     public function translateField(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'text' => 'required|string',
+            'text' => 'required_without:texts|string',
+            /** Several texts in one call: the text runs between Bard sets, so sets are never sent to the translator. */
+            'texts' => 'required_without:text|array|min:1|max:200',
+            'texts.*' => 'nullable|string',
             'source_locale' => 'nullable|string',
             'target_locale' => 'required|string',
             /** When true, text is HTML (e.g. Bard) and DeepL preserves structure via tag_handling=html. Plain text must omit this or send false — otherwise apostrophes become entities (e.g. &#x27;). */
@@ -200,6 +203,21 @@ class TranslationController
         try {
             /** @var DeeplService $deepl */
             $deepl = app(DeeplService::class);
+
+            if (isset($data['texts'])) {
+                $translations = $deepl->translateBatch(
+                    array_map(fn ($t) => (string) $t, array_values($data['texts'])),
+                    $sourceLocale,
+                    $data['target_locale'],
+                    $deeplOptions,
+                );
+
+                return response()->json([
+                    'translations' => array_map(fn ($t) => TrimAiOutput::normalize($t), $translations),
+                    'notice' => $deepl->llmFallbackNotice(),
+                ]);
+            }
+
             $translated = $deepl->translateText(
                 $data['text'],
                 $sourceLocale,

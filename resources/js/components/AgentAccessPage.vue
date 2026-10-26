@@ -151,7 +151,7 @@ export default {
       return [
         { key: 'agent', label: this.__('AI agent'), description: this.__('Generate and chat with the agent to create or update entries.') },
         { key: 'bulk_translations', label: this.__('Bulk translations'), description: this.__('Translate many entries at once from the Bulk translations tool.') },
-        { key: 'agent_settings', label: this.__('AI agent settings'), description: this.__('Edit the block and field hints on the AI agent settings page.') },
+        { key: 'agent_settings', label: this.__('AI instructions'), description: this.__('Edit the site instructions and the block and field hints on the AI instructions page.') },
         { key: 'advanced_tools', label: this.__('Advanced structure tools'), description: this.__('Let the agent create and modify collections, blueprints and taxonomies. Structural changes are applied immediately — grant with care.') },
       ];
     },

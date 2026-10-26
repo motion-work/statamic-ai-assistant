@@ -1,5 +1,5 @@
 <template>
-  <AiInputWrapper :value="value" :inputType="'textarea'" @update:value="update"  />
+  <AiInputWrapper :value="value" :inputType="'textarea'" :config="config" :handle="handle" @update:value="update" />
 </template>
 <script>
 import { FieldtypeMixin as StatamicFieldtypeMixin } from '@statamic/cms';

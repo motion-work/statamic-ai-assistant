@@ -10,10 +10,10 @@
           </svg>
         </div>
         <div class="translation-page__hero-text">
-          <p class="translation-page__eyebrow">{{ __('DeepL translations') }}</p>
+          <p class="translation-page__eyebrow">{{ __('Translations') }}</p>
           <h1 class="translation-page__title">{{ __('Glossary & style rules') }}</h1>
           <p class="translation-page__subtitle">
-            {{ __('Fixed translations for your key terms and a writing style per language. Applied automatically to every DeepL translation — pages, bulk runs, single fields and Bard content.') }}
+            {{ __('Fixed translations for your key terms and a writing style per language. Applied automatically to every translation — pages, bulk runs, single fields and Bard content.') }}
           </p>
         </div>
       </div>
@@ -28,10 +28,14 @@
           <svg v-if="saving" class="gp-spinner" viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="12" r="9" stroke-width="3" fill="none" stroke-linecap="round" />
           </svg>
-          <span>{{ saving ? __('Saving…') : __('Save & sync to DeepL') }}</span>
+          <span>{{ saving ? __('Saving…') : (deeplConfigured ? __('Save & sync to DeepL') : __('Save')) }}</span>
         </button>
       </div>
     </header>
+
+    <p v-if="!loading && !deeplConfigured" class="gp-engine-note" role="status">
+      {{ __('DeepL is not configured, so translations run on the AI model. Glossary terms and style rules are passed to it as instructions.') }}
+    </p>
 
     <div class="gp-body">
       <!-- Loading -->
@@ -84,10 +88,10 @@
             <div>
               <h2 class="translation-page__panel-title">{{ __('Glossary terms') }}</h2>
               <p class="gp-panel__intro">
-                {{ __('One row per term, one column per language. DeepL will always use exactly these translations. A row is used for a language pair as soon as both cells are filled.') }}
+                {{ __('One row per term, one column per language. Translations always use exactly these terms. A row is used for a language pair as soon as both cells are filled.') }}
               </p>
             </div>
-            <span v-if="glossarySynced" class="gp-sync-badge" :title="__('The glossary is active on DeepL.')">
+            <span v-if="deeplConfigured && glossarySynced" class="gp-sync-badge" :title="__('The glossary is active on DeepL.')">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
               {{ __('Synced with DeepL') }}
             </span>
@@ -164,7 +168,7 @@
             <div>
               <h2 class="translation-page__panel-title">{{ __('Style rules per language') }}</h2>
               <p class="gp-panel__intro">
-                {{ __('Describe how DeepL should write in each language: tone, formality, spelling preferences, wording to avoid. Rules apply whenever content is translated INTO that language.') }}
+                {{ __('Describe how translations should read in each language: tone, formality, spelling preferences, wording to avoid. Rules apply whenever content is translated INTO that language.') }}
               </p>
               <p class="gp-panel__intro gp-panel__intro--muted">
                 {{ __('Glossary terms take priority: text that contains a glossary term is translated with the term enforced, so a style rule may not apply to those specific sentences.') }}
@@ -178,7 +182,7 @@
                 <h3>{{ languageLabel(lang) }}</h3>
                 <code class="gp-table__code">{{ lang }}</code>
                 <span
-                  v-if="styles[lang] && styles[lang].synced && !dirty"
+                  v-if="deeplConfigured && styles[lang] && styles[lang].synced && !dirty"
                   class="gp-sync-badge"
                   :title="__('This style rule is active on DeepL.')"
                 >
@@ -243,6 +247,7 @@ export default {
       styleDraft: {},
       originalStyleDraft: {},
       glossarySynced: false,
+      deeplConfigured: true,
       syncWarnings: [],
       dirty: false,
       search: "",
@@ -329,6 +334,7 @@ export default {
       this.styleDraft = styleDraft;
       this.originalStyleDraft = JSON.parse(JSON.stringify(styleDraft));
       this.glossarySynced = !!data.glossary_synced;
+      this.deeplConfigured = data.deepl_configured !== false;
       this.dirty = false;
     },
 
@@ -461,7 +467,9 @@ export default {
         this.applyServerState(data);
         this.syncWarnings = data.warnings || [];
 
-        if (this.syncWarnings.length === 0) {
+        if (!this.deeplConfigured) {
+          this.$toast.success(this.__("Glossary & style rules saved."));
+        } else if (this.syncWarnings.length === 0) {
           this.$toast.success(this.__("Glossary & style rules saved and synced to DeepL."));
         } else {
           this.$toast.error(this.__("Saved, but the DeepL sync reported problems."));

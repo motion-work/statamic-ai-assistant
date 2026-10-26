@@ -1,11 +1,11 @@
 {
   "resources/css/app.css": {
-    "file": "assets/app-rSD4lBJ_.css",
+    "file": "assets/app-Dvx079q6.css",
     "src": "resources/css/app.css",
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-mLS0MdHX.js",
+    "file": "assets/app-xRLvXpBu.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -13,11 +13,11 @@
       "resources/js/components/AgentComposerInput.vue"
     ],
     "css": [
-      "assets/app-CRFbbnhB.css"
+      "assets/app-BWYoNDhf.css"
     ]
   },
   "resources/js/components/AgentComposerInput.vue": {
-    "file": "assets/AgentComposerInput-D5Yb90GI.js",
+    "file": "assets/AgentComposerInput-WXGMqR9F.js",
     "name": "AgentComposerInput",
     "src": "resources/js/components/AgentComposerInput.vue",
     "isDynamicEntry": true,

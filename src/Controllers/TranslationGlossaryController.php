@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Controllers;
 
+use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class TranslationGlossaryController
     public function __construct(
         private TranslationGlossaryService $glossary,
         private TranslationStyleRulesService $styleRules,
+        private DeeplService $deepl,
     ) {}
 
     public function data(): JsonResponse
@@ -44,12 +46,16 @@ class TranslationGlossaryController
         try {
             if ($request->has('entries')) {
                 $this->glossary->save($data['entries'] ?? []);
-                $warnings = array_merge($warnings, $this->glossary->sync());
+                if ($this->deepl->isConfigured()) {
+                    $warnings = array_merge($warnings, $this->glossary->sync());
+                }
             }
 
             if ($request->has('styles')) {
                 $this->styleRules->save($data['styles'] ?? []);
-                $warnings = array_merge($warnings, $this->styleRules->sync());
+                if ($this->deepl->isConfigured()) {
+                    $warnings = array_merge($warnings, $this->styleRules->sync());
+                }
             }
         } catch (\Throwable $e) {
             Log::error('Failed to save translation glossary / style rules', ['error' => $e->getMessage()]);
@@ -82,6 +88,9 @@ class TranslationGlossaryController
             'entries' => $this->glossary->entries(),
             'glossary_synced' => $this->glossary->glossaryId() !== null,
             'styles' => $styles,
+            // Without a DeepL key there is nothing to sync: the AI translation
+            // fallback reads these rules straight from the saved file.
+            'deepl_configured' => $this->deepl->isConfigured(),
         ];
     }
 }

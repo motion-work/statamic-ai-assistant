@@ -1,44 +1,14 @@
-import axios from "axios";
-import { applyBardWriteContent } from "./utils/applyBardWriteContent";
-import { normalizeAiOutput } from "./utils/normalizeAiOutput";
+import { setBardTiptap } from "./utils/bardAi";
 
+/**
+ * Bard extension for the AI and translate toolbar buttons. Its only job is to
+ * hand Statamic's tiptap bundle to utils/bardAi.js, which reads and writes
+ * the Bard document (selection, text runs around sets, undo).
+ */
 export const AiBardService = ({ tiptap }) => {
-  const { Extension } = tiptap.core;
+  setBardTiptap(tiptap);
 
-  return Extension.create({
+  return tiptap.core.Extension.create({
     name: "BardManagement",
-
-    addCommands() {
-      return {
-        refactorHTMLWithAi: (attrs) => async () => {
-          const initialHTMLText = attrs.text;
-
-          try {
-            const response = await axios.post("/cp/promptHtmlrefactor", {
-              text: initialHTMLText,
-              prompt: attrs.refactorPrompt,
-            });
-
-            return normalizeAiOutput(response.data.content ?? "");
-          } catch (error) {
-            console.error("Error refactoring combined content:", error);
-            return initialHTMLText;
-          }
-        },
-
-        WriteInBard: (content) => ({ editor }) => {
-          const html =
-            typeof content === "string" ? normalizeAiOutput(content) : content;
-          applyBardWriteContent(editor, () => {
-            editor.chain().focus().setContent(html).run();
-          });
-          return true;
-        },
-
-        getBardContent: () => ({ editor }) => {
-          return normalizeAiOutput(editor.getHTML());
-        },
-      };
-    },
   });
 };

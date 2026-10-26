@@ -7,7 +7,7 @@ use Statamic\Facades\Collection;
 use Statamic\Facades\YAML;
 
 /**
- * Stores and retrieves AI agent settings for replicator / components sets
+ * Stores and retrieves the AI instructions for replicator / components sets
  * (block hints) and for regular blueprint fields (field hints — hero, lead, …).
  *
  * For each set or field handle the author can configure:
@@ -256,7 +256,7 @@ class SetHintsService
 
     /**
      * Free-form site-wide agent instructions (brand voice, terminology,
-     * do/don'ts) maintained by editors on the AI agent settings page and
+     * do/don'ts) maintained by editors on the AI instructions page and
      * injected into the planner + generator prompts — the site-level analog
      * of a coding agent's project memory file.
      */

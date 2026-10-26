@@ -300,7 +300,7 @@ class EntryGeneratorController
         $data = $request->validate([
             'collection' => 'nullable|string',
             'blueprint' => 'nullable|string',
-            'prompt' => 'required|string|min:10',
+            'prompt' => 'required|string|min:3',
             'attachment' => 'nullable|file|mimes:pdf,txt|max:10240',
             'attachments' => 'nullable|array|max:6',
             'attachments.*' => 'file|mimes:pdf,txt|max:10240',
@@ -374,7 +374,7 @@ class EntryGeneratorController
         $data = $request->validate([
             'collection' => 'nullable|string',
             'blueprint' => 'nullable|string',
-            'prompt' => 'required|string|min:10',
+            'prompt' => 'required|string|min:3',
             'attachment' => 'nullable|file|mimes:pdf,txt|max:10240',
             'attachments' => 'nullable|array|max:6',
             'attachments.*' => 'file|mimes:pdf,txt|max:10240',
@@ -575,7 +575,7 @@ class EntryGeneratorController
     public function generateContinue(Request $request, string $sessionId): JsonResponse
     {
         $data = $request->validate([
-            'prompt' => 'required|string|min:10',
+            'prompt' => 'required|string|min:1',
             'attachment' => 'nullable|file|mimes:pdf,txt|max:10240',
             'attachments' => 'nullable|array|max:6',
             'attachments.*' => 'file|mimes:pdf,txt|max:10240',
@@ -619,7 +619,7 @@ class EntryGeneratorController
     public function generateResume(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'prompt' => 'required|string|min:10',
+            'prompt' => 'required|string|min:1',
             'transcript' => 'required|array|min:1|max:80',
             'transcript.*.role' => 'required|string|in:user,assistant',
             'transcript.*.text' => 'required|string|max:20000',

@@ -250,7 +250,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | AI agent settings (set hints)
+    | AI instructions (site instructions, set and field hints)
     |--------------------------------------------------------------------------
     |
     | YAML file path for per-block AI hints (replicator / components sets).
@@ -289,7 +289,7 @@ return [
     | YAML file storing which roles / users may use each gated capability
     | (AI agent, bulk translations, agent settings) plus the per-role /
     | per-user entry-generation limits. Managed by super admins from the
-    | "Who has access" tab in the AI agent settings. Default under content/
+    | "Who has access" page in the AI assistant nav section. Default under content/
     | so it can be versioned in git.
     |
     */
@@ -323,7 +323,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Create an app at https://www.figma.com/developers/apps and register the
-    | redirect URL shown in AI agent settings. Store credentials only in .env
+    | redirect URL shown on the AI instructions page. Store credentials only in .env
     | (never commit). Run `php artisan config:clear` after changing .env.
     |
     | Legacy: credentials were stored in storage/app/statamic-ai-assistant/figma-app.yaml
@@ -351,7 +351,7 @@ return [
     'entry_generator' => (bool) env('STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR', true),
 
     /*
-    | Show the "AI agent settings" entry in the CP Settings sidebar
+    | Show the "AI instructions" entry in the CP nav (AI assistant section)
     |--------------------------------------------------------------------------
     |
     | Independent from `entry_generator`: set this to false to keep the agent

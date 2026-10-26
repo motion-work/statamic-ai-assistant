@@ -251,10 +251,15 @@ class ServiceProvider extends AddonServiceProvider
             Route::get('/getLocalizations', [PromptController::class, 'getLocalizations']);
         });
 
+        // Everything this addon adds to the CP nav lives in one "AI assistant"
+        // section instead of being spread across Tools and Settings.
+        $section = fn () => __('AI assistant');
+
         if (config('statamic-ai-assistant.translations', true)
             && config('statamic-ai-assistant.bulk_translations', true)) {
-            Nav::extend(function ($nav) {
-                $nav->tools(__('Bulk translations'))
+            Nav::extend(function ($nav) use ($section) {
+                $nav->create(__('Bulk translations'))
+                    ->section($section())
                     ->route('statamic-ai-assistant.translations')
                     ->icon('globe-world-wide-web')
                     ->can(AgentAccess::gateAbility('bulk_translations'));
@@ -262,29 +267,34 @@ class ServiceProvider extends AddonServiceProvider
         }
 
         // Glossary & style rules: visible to EVERY CP user — editors own the
-        // terminology and tone that DeepL applies across all translation paths.
+        // terminology and tone applied across all translation paths.
         if (config('statamic-ai-assistant.translations', true)) {
-            Nav::extend(function ($nav) {
-                $nav->tools(__('Glossary & style rules'))
+            Nav::extend(function ($nav) use ($section) {
+                $nav->create(__('Glossary & style rules'))
+                    ->section($section())
                     ->route('statamic-ai-assistant.glossary.page')
                     ->icon('dictionary-language-book');
             });
         }
 
+        // Site instructions, block and field hints, Figma: used by the AI agent
+        // and by the AI buttons on fields.
         if (config('statamic-ai-assistant.entry_generator', true)
             && config('statamic-ai-assistant.agent_settings_nav', true)) {
-            Nav::extend(function ($nav) {
-                $nav->settings(__('AI agent settings'))
+            Nav::extend(function ($nav) use ($section) {
+                $nav->create(__('AI instructions'))
+                    ->section($section())
                     ->route('statamic-ai-assistant.block-hints.page')
                     ->icon('layers-stacks')
                     ->can(AgentAccess::gateAbility('agent_settings'));
             });
         }
 
-        // "AI agent access" — a separate settings screen, super-admins only.
+        // "AI agent access" — super-admins only.
         if (config('statamic-ai-assistant.entry_generator', true)) {
-            Nav::extend(function ($nav) {
-                $nav->settings(__('AI agent access'))
+            Nav::extend(function ($nav) use ($section) {
+                $nav->create(__('AI agent access'))
+                    ->section($section())
                     ->route('statamic-ai-assistant.access.page')
                     ->icon('permissions')
                     ->can(AgentAccess::manageGateAbility());

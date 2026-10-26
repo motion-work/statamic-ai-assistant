@@ -1,41 +1,27 @@
 <template>
     <div class="ai-statamic-assistant">
       <div ref="aiContainer" class="ai-assistant-wrapper">
-        <!-- AI Icon Button -->
         <div class="ai-icon-wrapper">
-          <button type="button" @click="openModal(() => internalValue)">
+          <button
+            type="button"
+            :title="__('AI assistant')"
+            :aria-label="__('AI assistant')"
+            @click="openAssistant"
+          >
             <AiIcon class="size-4 text-blue" />
           </button>
         </div>
 
-        <!-- Translation Button & Dropdown -->
-        <div
-          ref="translationContainer"
+        <AiTranslateMenu
           v-show="languages.length > 0"
-          :class="!internalValue ? 'opacity-50' : ''"
           class="translation-wrapper"
-        >
-          <button
-            :disabled="!internalValue"
-            type="button"
-            @click="toggleTranslateDropdown"
-          >
-            <Translation class="w-4 h-4 text-green-600" />
-          </button>
-          <div v-if="showTranslateDropdown" class="ai-translate-dropdown">
-            <div
-              v-for="lang in languages"
-              :key="lang.code"
-              class="ai-translate-dropdown__item"
-              @click="translateTo(lang.code)"
-            >
-              {{ lang.label }}
-            </div>
-          </div>
-        </div>
+          :languages="languages"
+          :disabled="!internalValue"
+          :disabled-reason="__('The field is empty.')"
+          @select="translateTo"
+        />
       </div>
 
-      <!-- Main editor (textarea vs. input) -->
       <div class="relative">
         <ui-input
           v-if="inputType === 'input'"
@@ -56,143 +42,37 @@
         <AiModalLoadingOverlay
           :show="loadingTranslation"
           compact
-          :label="transWithFallback('translating', 'Translating…')"
+          :label="__('Translating…')"
         />
       </div>
 
-      <!-- AI Prompt/Result/Refactor Modal -->
-      <ui-modal
-        ref="aiModal"
+      <AiPromptModal
         v-model:open="showModal"
-        @dismissed="onModalDismissed"
-        :title="modalTitle"
-        blur
-      >
-        <div
-          class="ai-modal-body"
-          :class="{ 'ai-modal-body--busy': loading }"
-          @keyup.enter.ctrl="handleEnter()"
-          @keyup.enter.meta="handleEnter()"
-        >
-          <AiModalLoadingOverlay
-            :show="loading"
-            :label="transWithFallback('generating', 'Generating…')"
-          />
-
-          <!-- Prompt mode -->
-          <div v-if="modalMode === 'prompt'" class="space-y-4">
-            <ui-description :text="transWithFallback('prompt_placeholder', 'Describe the article you want to generate')" />
-            <ui-textarea
-              v-model="prompt"
-              :rows="4"
-              :focus="true"
-              :placeholder="transWithFallback('prompt_textarea_placeholder', 'Enter your prompt...')"
-            />
-          </div>
-
-          <!-- Result mode -->
-          <div v-else-if="modalMode === 'result'" class="space-y-4">
-            <ui-description :text="transWithFallback('result_description', 'Review the generated content below.')" />
-            <ui-textarea
-              v-model="result"
-              :rows="6"
-              ref="resulteditor"
-              :read-only="hadInitialValue"
-            />
-          </div>
-
-          <!-- Refactor mode -->
-          <div v-else-if="modalMode === 'refactor'" class="space-y-4">
-            <ui-field :label="transWithFallback('current_text', 'Current text')">
-              <ui-textarea
-                :model-value="result"
-                :rows="4"
-                read-only
-              />
-            </ui-field>
-            <ui-field
-              :label="transWithFallback('edit', 'Describe your adjustment')"
-              :instructions="transWithFallback('refactor_description', 'Enter an instruction to update the current text.')"
-            >
-              <ui-textarea
-                ref="refactorPromptInput"
-                v-model="refactorPrompt"
-                :rows="3"
-                :placeholder="transWithFallback('refactor_placeholder', 'Describe your adjustment')"
-              />
-            </ui-field>
-          </div>
-        </div>
-
-        <template #footer>
-          <div class="flex items-center pt-3 pb-1" :class="modalMode === 'prompt' ? 'justify-end' : 'justify-between'">
-            <!-- Prompt -->
-            <template v-if="modalMode === 'prompt'">
-              <ui-button
-                :text="transWithFallback('go', 'Generate')"
-                variant="primary"
-                icon="ai-sparks"
-                :loading="loading"
-                :disabled="loading || prompt === ''"
-                @click="submitPrompt()"
-              />
-            </template>
-
-            <!-- Result -->
-            <template v-else-if="modalMode === 'result'">
-              <ui-button
-                :text="transWithFallback('new_prompt', 'New')"
-                variant="ghost"
-                @click="resetToPrompt()"
-              />
-              <div class="flex items-center space-x-3">
-                <ui-button
-                  :text="transWithFallback('refactor', 'Refactor')"
-                  @click="setRefactorMode()"
-                />
-                <ui-button
-                  :text="transWithFallback('apply_changes', 'Apply')"
-                  variant="primary"
-                  @click="validateResult()"
-                />
-              </div>
-            </template>
-
-            <!-- Refactor -->
-            <template v-else-if="modalMode === 'refactor'">
-              <ui-button
-                :text="transWithFallback('new_prompt', 'New')"
-                variant="ghost"
-                @click="cancelRefactor()"
-              />
-              <ui-button
-                :text="transWithFallback('apply_refactor', 'Apply Refactor')"
-                variant="primary"
-                :loading="loading"
-                :disabled="loading || refactorPrompt === ''"
-                @click="submitRefactor()"
-              />
-            </template>
-          </div>
-        </template>
-      </ui-modal>
+        :field-label="aiFieldLabel"
+        :single-line="inputType === 'input'"
+        :source="modalSource"
+        :context="aiContext"
+        :max-words="aiMaxWords"
+        @apply="onApply"
+      />
     </div>
   </template>
 
   <script>
-  import axios from "axios";
-  import { normalizeAiPlainTextOutput, normalizeAiOutput } from "../utils/normalizeAiOutput";
   import { FieldtypeMixin as StatamicFieldtypeMixin } from '@statamic/cms';
-  import aiModalMixin from "../mixins/aiModalMixin";
   import aiTranslationMixin from "../mixins/aiTranslationMixin";
-  import Translation from "./icons/TranslationIcon.vue";
+  import fieldContextMixin from "../mixins/fieldContextMixin";
   import AiIcon from "./icons/AiIcon.vue";
   import AiModalLoadingOverlay from "./AiModalLoadingOverlay.vue";
+  import AiPromptModal from "./AiPromptModal.vue";
+  import AiTranslateMenu from "./AiTranslateMenu.vue";
+  import { normalizeAiPlainTextOutput } from "../utils/normalizeAiOutput";
+  import { showUndoToast } from "../utils/undoToast";
 
   export default {
     name: "AiInputWrapper",
-    mixins: [StatamicFieldtypeMixin, aiModalMixin, aiTranslationMixin],
-    components: { Translation, AiIcon, AiModalLoadingOverlay },
+    mixins: [StatamicFieldtypeMixin, aiTranslationMixin, fieldContextMixin],
+    components: { AiIcon, AiModalLoadingOverlay, AiPromptModal, AiTranslateMenu },
 
     props: {
       value: { type: String, default: "" },
@@ -202,15 +82,9 @@
     data() {
       return {
         internalValue: this.value,
+        showModal: false,
+        modalSource: { mode: 'all', text: '' },
       };
-    },
-
-    computed: {
-      modalTitle() {
-        if (this.modalMode === 'result') return this.transWithFallback('result_title', 'Generated content');
-        if (this.modalMode === 'refactor') return this.transWithFallback('refactor_title', 'Refactor content');
-        return this.transWithFallback('title', 'AI assistant');
-      },
     },
 
     watch: {
@@ -225,7 +99,6 @@
     },
 
     mounted() {
-      this.getLocalizations();
       this.$nextTick(() => {
         const group = this.$el.closest('.grid-cell') || this.$el.closest('.form-group');
         if (!group) return;
@@ -240,99 +113,43 @@
           }
         }
       });
-
-      this.editor = {
-        commands: { focus: () => this.focusStatamicFieldRef('editor') },
-        setEditable: () => {},
-      };
-      this.resulteditor = {
-        commands: { focus: () => this.focusStatamicFieldRef('resulteditor') },
-      };
     },
 
     methods: {
-      /**
-       * ai_text / ai_textarea: plain text (no HTML). Bard fieldtypes override via missing normalizeAiFieldValue.
-       */
-      normalizeAiFieldValue(value) {
-        if (this.inputType === "textarea") {
-          return normalizeAiPlainTextOutput(value);
-        }
-        if (this.inputType === "input") {
-          const plain = normalizeAiPlainTextOutput(value);
-          return typeof plain === "string" ? plain.replace(/\s+/g, " ").trim() : plain;
-        }
-        return normalizeAiOutput(value);
+      openAssistant() {
+        this.modalSource = { mode: 'all', text: this.internalValue || '' };
+        this.showModal = true;
       },
 
-      async submitPrompt() {
-        if (!this.prompt) return;
-        this.loading = true;
-        try {
-          let prompt = this.prompt;
-          if(this.inputType === 'input'){
-            prompt = "generate MAXIMUM 12 words! " + prompt;
-          }
-          const { data } = await axios.post("/cp/prompt", { title: prompt });
-          if (!data.content || String(data.content).trim() === "") {
-            throw new Error("Empty response from API. Verify your API key");
-          }
-          const normalized = this.normalizeAiFieldValue(data.content);
-          if (!normalized || String(normalized).trim() === "") {
-            throw new Error("Empty response from API. Verify your API key");
-          }
-          this.result = normalized;
-          Statamic.$toast.success(__('Your content has been generated.'));
-          this.modalMode = "result";
-        } catch (err) {
-          Statamic.$toast.error(err.response?.data.error || err.message, { duration: 10000 });
-        } finally {
-          this.loading = false;
-        }
+      /** Write the AI result into the field, with undo. */
+      onApply({ value }) {
+        const previous = this.internalValue;
+        this.internalValue = value;
+        this.focusField();
+        showUndoToast(__('Text applied.'), () => {
+          this.internalValue = previous;
+        });
       },
 
-      async submitRefactor() {
-        if (!this.refactorPrompt) return;
-        this.loading = true;
-        try {
-          let refactorPrompt = this.refactorPrompt;
-          if(this.inputType === 'input'){
-            refactorPrompt = "generate MAXIMUM 12 words!" + refactorPrompt;
-          }
-          const { data } = await axios.post("/cp/promptrefactor", {
-            text: this.result,
-            prompt: refactorPrompt,
-          });
-          if (!data.content || String(data.content).trim() === "") {
-            throw new Error("Empty response from API. Verify your API key");
-          }
-          const normalized = this.normalizeAiFieldValue(data.content);
-          if (!normalized || String(normalized).trim() === "") {
-            throw new Error("Empty response from API. Verify your API key");
-          }
-          this.result = normalized;
-          Statamic.$toast.success(__('Your content has been refactored.'));
-          this.modalMode = "result";
-        } catch (err) {
-          Statamic.$toast.error(err.response?.data.error || err.message, { duration: 10000 });
-        } finally {
-          this.loading = false;
-        }
+      translatableContent() {
+        return { text: this.internalValue };
       },
 
-      validateResult() {
-        try {
-          this.update(this.normalizeAiFieldValue(this.result));
-        } finally {
-          if (this.showModal) {
-            this.closeModal();
-          }
+      applyTranslation(data) {
+        const previous = this.internalValue;
+        let text = normalizeAiPlainTextOutput(data.translated);
+        if (this.inputType === 'input' && typeof text === 'string') {
+          text = text.replace(/\s+/g, ' ').trim();
         }
-        // After the modal tears down (when it was open), focus the field — avoids CP focus trap and
-        // ui-textarea ref.focus being a boolean prop, not a function.
+        this.internalValue = text;
+        return () => {
+          this.internalValue = previous;
+        };
+      },
+
+      focusField() {
         this.$nextTick(() => {
-          this.editor.commands.focus();
-          this.editor.setEditable(true);
+          this.$refs.editor?.$el?.querySelector?.('input, textarea')?.focus();
         });
       },
     },

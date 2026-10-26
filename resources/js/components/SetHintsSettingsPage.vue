@@ -11,8 +11,8 @@
           </svg>
         </div>
         <div class="translation-page__hero-text">
-          <p class="translation-page__eyebrow">{{ __('AI agent') }}</p>
-          <h1 class="translation-page__title">{{ __('AI agent settings') }}</h1>
+          <p class="translation-page__eyebrow">{{ __('AI assistant') }}</p>
+          <h1 class="translation-page__title">{{ __('AI instructions') }}</h1>
           <p class="translation-page__subtitle">
             {{ __('Tell the AI what each page-builder block and blueprint field is for and when to use it. Hints are passed to the model whenever content is generated.') }}
           </p>
@@ -700,7 +700,7 @@ export default {
           site_instructions: this.siteInstructions,
         });
         this.applyServerState(data.sets || this.sets, data.fields || this.fields, data.site_instructions || "");
-        this.$toast.success(this.__("AI agent settings saved."));
+        this.$toast.success(this.__("AI instructions saved."));
       } catch (e) {
         const msg =
           (e && e.response && e.response.data && e.response.data.error) ||
