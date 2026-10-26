@@ -151,6 +151,21 @@ class FindEntriesShortlistTest extends TestCase
         $this->assertCount(3, array_unique($ids));
     }
 
+    public function test_entry_mention_resolves_the_open_entry_by_id(): void
+    {
+        $this->makeEntry('Geschichte', 'geschichte');
+        $id = (string) Entry::query()->where('collection', 'packages')->where('slug', 'geschichte')->first()->id();
+
+        $mention = $this->service()->entryMention($id);
+
+        $this->assertSame($id, $mention['id']);
+        $this->assertSame('Geschichte', $mention['title']);
+        $this->assertSame('packages', $mention['collection']);
+        $this->assertSame('Packages', $mention['collection_title']);
+        $this->assertNull($this->service()->entryMention('create'));
+        $this->assertNull($this->service()->entryMention('does-not-exist'));
+    }
+
     public function test_result_rows_carry_the_published_state(): void
     {
         $this->makeEntry('Salt & Stone', 'salt-stone');

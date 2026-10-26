@@ -783,6 +783,43 @@ import {
 import { formatChatMessageHtml } from '../formatChatUrls.js';
 import { formatFileSize } from '../composer/promptTokens.js';
 
+/** Entry id from a Statamic CP publish URL, or null on listings and create screens. */
+function entryIdFromCpPath(pathname) {
+  const match = String(pathname || '').match(/\/collections\/[^/]+\/entries\/([^/?#]+)/);
+  if (!match) return null;
+  let id = match[1];
+  try { id = decodeURIComponent(id); } catch { /* keep the raw segment */ }
+  if (id === '' || id === 'create') return null;
+  return id;
+}
+
+const cpLocationListeners = new Set();
+let cpHistoryPatched = false;
+
+function ensureCpHistoryPatch() {
+  if (cpHistoryPatched || typeof history === 'undefined') return;
+  cpHistoryPatched = true;
+  for (const name of ['pushState', 'replaceState']) {
+    const original = history[name];
+    history[name] = function historyWithCpLocation(...args) {
+      const result = original.apply(this, args);
+      cpLocationListeners.forEach((fn) => fn());
+      return result;
+    };
+  }
+}
+
+/** Fires on SPA navigations and browser back/forward. Returns an unsubscribe. */
+function watchCpLocation(fn) {
+  ensureCpHistoryPatch();
+  cpLocationListeners.add(fn);
+  window.addEventListener('popstate', fn);
+  return () => {
+    cpLocationListeners.delete(fn);
+    window.removeEventListener('popstate', fn);
+  };
+}
+
 export default {
   name: 'EntryGeneratorPage',
   components: { Button, AiModalLoadingOverlay, EntryGeneratorEntryCard, AgentAssetSelectorStack, EntryGeneratorChatHistory, AgentComposerInput, PromptTemplateForm },
@@ -877,6 +914,14 @@ export default {
 
       // Expose the reactive store to the template.
       store: state,
+
+      // Entry open in the CP, inserted as the composer's default @mention.
+      // suppressed: the editor removed that chip from the current draft.
+      contextEntry: null,
+      _entryMentionCache: {},
+      _contextSeq: 0,
+      _applyingContext: false,
+      _offCpLocation: null,
     };
   },
 
@@ -1121,9 +1166,33 @@ export default {
         setActive(now);
         if (now) {
           this.chatStickToBottom = true;
+          this.seedOpenEntry();
           this.$nextTick(() => this.scrollChatToBottom(true));
         }
       },
+    },
+    'store.pendingPrompt'(prompt, previous) {
+      if (this._applyingContext || !this.drawer) return;
+      const ctx = this.contextEntry;
+      if (!ctx?.title) return;
+      const token = `@${ctx.title}`;
+      const text = String(prompt ?? '');
+      if (text.includes(token)) return;
+
+      // The chip was removed but the draft continues: leave it out.
+      if (text.trim() !== '') {
+        this.contextEntry = { ...ctx, suppressed: true };
+        return;
+      }
+
+      // The draft was only the chip and they deleted it.
+      if (String(previous ?? '').trim() === token) {
+        this.contextEntry = { ...ctx, suppressed: true };
+        return;
+      }
+
+      // Composer cleared after a send. The next message still starts from the open entry.
+      this.seedOpenEntry({ force: true });
     },
   },
 
@@ -1139,11 +1208,16 @@ export default {
       this.startPlanningHints();
     }
     window.addEventListener('keydown', this.onAssetPreviewKeydown);
+    if (this.drawer) {
+      this._offCpLocation = watchCpLocation(() => this.seedOpenEntry());
+    }
   },
 
   beforeUnmount() {
     this.stopPlanTicker();
     this.stopPlanningHints();
+    this._offCpLocation?.();
+    this._offCpLocation = null;
     clearTimeout(this.mention._debounce);
     clearTimeout(this.mention._blurTimer);
     window.removeEventListener('keydown', this.onAssetPreviewKeydown);
@@ -1551,6 +1625,64 @@ export default {
       this.activeTemplate = null;
       this.templatesOpen = false;
       this.chatStickToBottom = true;
+      this.seedOpenEntry({ force: true });
+    },
+
+    /**
+     * Put the entry open in the Control Panel into the composer as an @mention,
+     * so "this page" already names it. No-op away from an entry edit screen.
+     */
+    async seedOpenEntry({ force = false } = {}) {
+      if (!this.drawer || !this.active) return;
+      const id = entryIdFromCpPath(window.location.pathname);
+      if (!id) return;
+
+      const known = this.contextEntry;
+      const prompt = this.store.pendingPrompt || '';
+      if (!force && known?.id === id) {
+        if (known.suppressed) return;
+        if (known.title && prompt.includes(`@${known.title}`)) return;
+      }
+
+      const seq = ++this._contextSeq;
+      let entry = this._entryMentionCache[id];
+      if (!entry) {
+        try {
+          const { data } = await axios.get('/cp/ai-generate/open-entry', { params: { id } });
+          entry = data?.entry || null;
+        } catch {
+          entry = null;
+        }
+        if (entry?.title) this._entryMentionCache[id] = entry;
+      }
+      if (seq !== this._contextSeq) return;
+      if (entryIdFromCpPath(window.location.pathname) !== id || !entry?.title) return;
+      if (!force && this.contextEntry?.id === id && this.contextEntry.suppressed) return;
+
+      this.applyOpenEntryMention(entry);
+    },
+
+    applyOpenEntryMention(entry) {
+      const title = String(entry.title || '').trim();
+      if (!title) return;
+
+      registerMention(title);
+      const token = `@${title}`;
+      let prompt = this.store.pendingPrompt || '';
+      const prev = this.contextEntry;
+      if (prev && prev.id !== String(entry.id) && prev.title && prompt.startsWith(`@${prev.title}`)) {
+        prompt = prompt.slice(`@${prev.title}`.length).replace(/^ /, '');
+      }
+      if (!prompt.includes(token)) {
+        prompt = prompt.trim() === '' ? `${token} ` : `${token} ${prompt.replace(/^\s+/, '')}`;
+      }
+
+      this._applyingContext = true;
+      this.contextEntry = { id: String(entry.id), title, suppressed: false };
+      if (prompt !== this.store.pendingPrompt) {
+        this.store.pendingPrompt = prompt;
+      }
+      this.$nextTick(() => { this._applyingContext = false; });
     },
 
     // ── Chat history (drawer) ──

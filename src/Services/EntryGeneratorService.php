@@ -576,6 +576,47 @@ class EntryGeneratorService
     }
 
     /**
+     * The entry open in the Control Panel, as an "@" mention.
+     * Title is the localization of the site selected in the CP, then any
+     * localization, so the chip names an entry the planner can resolve.
+     *
+     * @return array{id: string, title: string, slug: string, collection: string, collection_title: string}|null
+     */
+    public function entryMention(string $id): ?array
+    {
+        $id = trim($id);
+        if ($id === '' || $id === 'create') {
+            return null;
+        }
+
+        $site = Site::selected()?->handle() ?? Site::default()->handle();
+        $entry = Entry::query()->where('id', $id)->where('site', $site)->first()
+            ?? Entry::query()->where('id', $id)->first();
+
+        if ($entry === null) {
+            return null;
+        }
+
+        $title = trim((string) ($entry->value('title') ?? ''));
+        if ($title === '') {
+            $title = trim((string) ($entry->slug() ?? ''));
+        }
+        if ($title === '') {
+            return null;
+        }
+
+        $collection = $entry->collection();
+
+        return [
+            'id' => (string) $entry->id(),
+            'title' => $title,
+            'slug' => (string) ($entry->slug() ?? ''),
+            'collection' => $collection ? (string) $collection->handle() : '',
+            'collection_title' => $collection ? (string) $collection->title() : '',
+        ];
+    }
+
+    /**
      * Search entries by title/slug for the agentic planner's `find_entries` tool.
      * Kept in this service so it can reuse the same query path as the catalog shortlist.
      *

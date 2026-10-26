@@ -18,6 +18,7 @@ Route::prefix('ai-generate')->name('statamic-ai-assistant.generate.')
 
     Route::get('/collections', [EntryGeneratorController::class, 'collections'])->name('collections');
     Route::get('/entry-search', [EntryGeneratorController::class, 'entrySearch'])->name('entry-search');
+    Route::get('/open-entry', [EntryGeneratorController::class, 'openEntry'])->name('open-entry');
     Route::get('/asset-preview', [EntryGeneratorController::class, 'assetPreview'])->name('asset-preview');
     Route::get('/asset-browser', [EntryGeneratorController::class, 'assetBrowser'])->name('asset-browser');
     Route::get('/blueprint-fields', [EntryGeneratorController::class, 'blueprintFields'])->name('blueprint-fields');

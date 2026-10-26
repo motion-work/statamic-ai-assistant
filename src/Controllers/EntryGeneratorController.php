@@ -92,6 +92,21 @@ class EntryGeneratorController
     }
 
     /**
+     * The entry currently open in the Control Panel, so the composer can
+     * mention it without the editor searching for it.
+     */
+    public function openEntry(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'id' => 'required|string|max:80',
+        ]);
+
+        return response()->json([
+            'entry' => $this->generator->entryMention($data['id']),
+        ]);
+    }
+
+    /**
      * Filename/folder-name matches across all asset containers, as mention rows.
      *
      * @return array<int, array<string, string>>
