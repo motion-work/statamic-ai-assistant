@@ -1,0 +1,47 @@
+{
+    "name": "bold-web/statamic-ai-assistant",
+    "description": "Statamic 6 addon: AI text generation and refactoring in the Control Panel (Ai Text, Bard, DeepL translations). Requires statamic/cms ^6.5.",
+    "keywords": ["statamic", "statamic-6", "ai", "bard", "deepl"],
+    "autoload": {
+        "psr-4": {
+            "BoldWeb\\StatamicAiAssistant\\": "src"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "BoldWeb\\StatamicAiAssistant\\Tests\\": "tests"
+        }
+    },
+    "require": {
+        "statamic/cms": "^6.5",
+        "lucianotonet/groq-laravel": "^0.0.10",
+        "deeplcom/deepl-php": "^1.9",
+        "smalot/pdfparser": "^2.0",
+        "league/html-to-markdown": "^5.1"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^10.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "pixelfear/composer-dist-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "3.x-dev"
+        },
+        "statamic": {
+            "name": "Statamic AI Assistant",
+            "description": "AI-assisted writing and DeepL translations for Statamic 6.5+ (custom fieldtypes and Bard)."
+        },
+        "laravel": {
+            "providers": [
+                "BoldWeb\\StatamicAiAssistant\\ServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

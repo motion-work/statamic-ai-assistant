@@ -1,0 +1,11 @@
+node_modules
+vendor
+
+# Vite dev server — never commit; forces CP to load built assets instead of localhost:5173
+resources/dist/hot
+composer.lock
+.phpunit.result.cache
+.DS_Store
+.idea/
+# pnpm content-addressable store — never commit
+.pnpm-store
