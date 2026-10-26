@@ -792,7 +792,7 @@
   "One row per term, one column per language. Translations always use exactly these terms. A row is used for a language pair as soon as both cells are filled.": "Eine Zeile pro Begriff, eine Spalte pro Sprache. Übersetzungen verwenden immer genau diese Begriffe. Eine Zeile gilt für ein Sprachpaar, sobald beide Zellen ausgefüllt sind.",
   "Optimise for SEO": "Für SEO optimieren",
   "Or describe your adjustment": "Oder beschreibe deine Anpassung",
-  "Quick actions": "Schnellaktionen",
+  "Quick actions": "Quick-Actions",
   "Replace": "Ersetzen",
   "Replace with an AI draft": "Durch einen KI-Entwurf ersetzen",
   "Replaces the current content of this field.": "Ersetzt den aktuellen Inhalt dieses Feldes.",

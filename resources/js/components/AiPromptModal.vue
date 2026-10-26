@@ -157,29 +157,34 @@
 
         <div class="ai-prompt__footer-actions">
           <template v-if="stage === 'input'">
-            <span class="ai-prompt__shortcut" aria-hidden="true">{{ shortcutLabel }}</span>
             <ui-button
               v-if="tab === 'rewrite'"
               variant="primary"
               icon="ai-sparks"
-              :text="__('Rewrite')"
               :disabled="loading || instruction.trim() === ''"
               @click="rewrite(instruction)"
-            />
+            >
+              {{ __('Rewrite') }}
+              <span class="ai-prompt__shortcut" aria-hidden="true">{{ shortcutLabel }}</span>
+            </ui-button>
             <ui-button
               v-else
               variant="primary"
               icon="ai-sparks"
-              :text="__('Generate')"
               :disabled="loading || prompt.trim() === ''"
               @click="write"
-            />
+            >
+              {{ __('Generate') }}
+              <span class="ai-prompt__shortcut" aria-hidden="true">{{ shortcutLabel }}</span>
+            </ui-button>
           </template>
           <template v-else>
             <ui-button variant="ghost" :text="__('new_prompt')" @click="startOver" />
             <ui-button :text="__('Keep refining')" @click="keepRefining" />
-            <span class="ai-prompt__shortcut" aria-hidden="true">{{ shortcutLabel }}</span>
-            <ui-button variant="primary" :text="__('apply_changes')" @click="apply" />
+            <ui-button variant="primary" @click="apply">
+              {{ __('apply_changes') }}
+              <span class="ai-prompt__shortcut" aria-hidden="true">{{ shortcutLabel }}</span>
+            </ui-button>
           </template>
         </div>
       </div>
