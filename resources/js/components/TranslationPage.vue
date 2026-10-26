@@ -53,6 +53,10 @@
         <div class="translation-page__usage-loading-shimmer"></div>
         <p class="translation-page__usage-loading-text">{{ __('Loading usage…') }}</p>
       </div>
+      <div v-else-if="deeplUsage && deeplUsage.engine === 'llm'" class="translation-page__usage-card translation-page__usage-card--info" role="status">
+        <p class="translation-page__usage-info-title">{{ __('Translating with the AI model') }}</p>
+        <p class="translation-page__usage-error-detail">{{ deeplUsage.notice }}</p>
+      </div>
       <div v-else-if="deeplUsage && deeplUsage.error" class="translation-page__usage-card translation-page__usage-card--error">
         <div class="translation-page__usage-error-row">
           <span class="translation-page__usage-error-text">{{ __('Could not load DeepL usage.') }}</span>

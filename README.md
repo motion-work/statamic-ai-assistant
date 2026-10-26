@@ -46,7 +46,7 @@ The plugin use per default Infomaniak API, a  Swiss solution🇨🇭 respecting 
 
 ### Translations (DeepL)
 
-> **Breaking change:** Translation features (Bard DeepL actions, bulk translation, and related Control Panel tools) **require a DeepL API key**. Add `DEEPL_API_KEY` to your `.env` as described below. If you upgrade from an older release, configure DeepL or turn translations off with `STATAMIC_AI_ASSISTANT_TRANSLATIONS=false`.
+> Translation features (Bard translate, the Translate entry action, bulk translation, terms and navigation) use **DeepL** when `DEEPL_API_KEY` is set. **Without a key they fall back to the configured AI model** (Infomaniak or Groq), and the Control Panel tells editors each time. Glossary terms and style rules still apply. To require DeepL instead, set `STATAMIC_AI_ASSISTANT_TRANSLATION_LLM_FALLBACK=false`. To turn translations off, set `STATAMIC_AI_ASSISTANT_TRANSLATIONS=false`.
 
 Bulk translation, Bard field translation, and related CP tools use **DeepL** (not the LLM provider above).
 
@@ -105,7 +105,7 @@ Higher values increase DeepL usage and runtime (more entries may be created in o
 - You can override MAX_TOKENS
 - Reasoning ("thinking") models such as Kimi K2.6 or Qwen3.5 answer quick tasks (Ai Text / Bard generate and refactor, alt text, image analysis) without thinking first, which is much faster. Set `STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING=false` to keep thinking everywhere. The AI agent always keeps thinking on. Infomaniak only.
 - You can disable the AI agent for **editors only** with `ENABLE_AGENT_FOR_EDITORS=false` (super admins always keep access). The master switch `STATAMIC_AI_ASSISTANT_ENTRY_GENERATOR=false` disables the agent for everyone.
-- DeepL translation requires `DEEPL_API_KEY` in `.env` (see **Translations (DeepL)** above)
+- DeepL translation uses `DEEPL_API_KEY` in `.env`; without it, translations run on the AI model (see **Translations (DeepL)** above)
 
 ## Issues & ideas
 If you run into problems or have ideas for improvements, please open an issue at [github.com/motion-work/statamic-ai-assistant/issues](https://github.com/motion-work/statamic-ai-assistant/issues). 

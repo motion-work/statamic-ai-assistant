@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Actions;
 
 use MotionWork\StatamicAiAssistant\Services\CpTranslationBatchRunner;
+use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use Statamic\Actions\Action;
 use Statamic\Contracts\Entries\Entry;
@@ -12,7 +13,9 @@ class TranslateEntry extends Action
 {
     public static function title()
     {
-        return __('Translate (DeepL)');
+        return app(DeeplService::class)->usesLlmFallback()
+            ? __('Translate (AI)')
+            : __('Translate (DeepL)');
     }
 
     protected static $separator = true;
@@ -165,6 +168,7 @@ class TranslateEntry extends Action
 
         if ($result['mode'] === 'async') {
             $message = __('Translation queued message', ['count' => $result['total']]);
+            $message = $this->withLlmFallbackNotice($message);
 
             return [
                 'callback' => [
@@ -175,7 +179,7 @@ class TranslateEntry extends Action
             ];
         }
 
-        $message = $this->buildSyncSummaryMessage($result);
+        $message = $this->withLlmFallbackNotice($this->buildSyncSummaryMessage($result));
         $editUrl = $this->resolveSuccessEditUrl($entries, $result);
 
         return [
@@ -202,6 +206,16 @@ class TranslateEntry extends Action
         }
 
         return $fallback;
+    }
+
+    /**
+     * Append the "translated by the AI model" notice when DeepL is not configured.
+     */
+    protected function withLlmFallbackNotice(string $message): string
+    {
+        $notice = app(DeeplService::class)->llmFallbackNotice();
+
+        return $notice !== null ? $message.' '.$notice : $message;
     }
 
     /**

@@ -207,7 +207,10 @@ class TranslationController
                 $deeplOptions,
             );
 
-            return response()->json(['translated' => TrimAiOutput::normalize($translated)]);
+            return response()->json([
+                'translated' => TrimAiOutput::normalize($translated),
+                'notice' => $deepl->llmFallbackNotice(),
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => __('Translation failed: :error', ['error' => $e->getMessage()]),
@@ -227,6 +230,14 @@ class TranslationController
         try {
             /** @var DeeplService $deepl */
             $deepl = app(DeeplService::class);
+
+            if ($deepl->usesLlmFallback()) {
+                return response()->json([
+                    'enabled' => true,
+                    'engine' => 'llm',
+                    'notice' => $deepl->llmFallbackNotice(),
+                ]);
+            }
 
             return response()->json(array_merge(
                 ['enabled' => true],

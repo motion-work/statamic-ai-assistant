@@ -455,6 +455,18 @@ html.dark .translation-page {
     background: var(--tp-danger-bg);
 }
 
+.translation-page__usage-card--info {
+    border-color: var(--tp-accent-ring);
+    background: var(--tp-accent-soft);
+}
+
+.translation-page__usage-info-title {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--tp-accent);
+}
+
 .translation-page__usage-error-row {
     display: flex;
     flex-wrap: wrap;

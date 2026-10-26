@@ -50,6 +50,31 @@ class DeeplService
         return $this->client;
     }
 
+    public function isConfigured(): bool
+    {
+        return ! empty(config('deepl.api_key'));
+    }
+
+    /**
+     * Whether translations go to the LLM instead: no DeepL key, and the
+     * translation_llm_fallback switch is on.
+     */
+    public function usesLlmFallback(): bool
+    {
+        return ! $this->isConfigured() && (bool) config('statamic-ai-assistant.translation_llm_fallback', true);
+    }
+
+    /**
+     * CP notice shown whenever a translation ran on the LLM fallback, or null
+     * when DeepL handles translations.
+     */
+    public function llmFallbackNotice(): ?string
+    {
+        return $this->usesLlmFallback()
+            ? __('DeepL is not configured (DEEPL_API_KEY is missing), so the AI model translated instead.')
+            : null;
+    }
+
     /**
      * Translate an array of texts in a single API call.
      * Empty strings are preserved and not sent to the API.
@@ -77,6 +102,22 @@ class DeeplService
 
         if (empty($nonEmptyTexts)) {
             return $texts;
+        }
+
+        if ($this->usesLlmFallback()) {
+            $results = app(LlmTranslator::class)->translate(
+                $nonEmptyTexts,
+                $sourceLang !== null ? $this->resolveStatamicLocale($sourceLang) : null,
+                $targetLang,
+                ($options[TranslateTextOptions::TAG_HANDLING] ?? null) === 'html',
+            );
+
+            $translated = $texts;
+            foreach ($results as $i => $result) {
+                $translated[$indexMap[$i]] = $result;
+            }
+
+            return $translated;
         }
 
         // Glossary + style rules configured via the CP apply to EVERY translation

@@ -49,7 +49,8 @@ Flow: `EntryGeneratorController::generateStream` → `EntryGenerationBatchServic
 - Tool calling: `src/Tools/` — each `ChatTool` is a self-contained class (name, OpenAI-style definition, handler, `maxCalls`), dispatched by `ChatToolRunner` with a shared `ToolContext`. Both the generator loop and the planner use the same runner.
 - Context sources: `PromptUrlFetcher` (Jina reader, `prompt_url_fetch` config) + `HtmlReadableExtractor`, `FigmaContentFetcher` (Figma OAuth, tokens in `FigmaTokenStore`), `RemoteImageFetcher`/`AssetImageDownloader`, and editor-authored hints from `SetHintsService` (YAML at `set_hints_path`).
 
-### Translations (DeepL, not the LLM)
+### Translations (DeepL; LLM only as fallback)
+- Every translation path funnels through `DeeplService::translateBatch()`. Without `DEEPL_API_KEY` (and `translation_llm_fallback` on) it hands the batch to `LlmTranslator` (JSON-in/JSON-out prompt with glossary hits + style rules, per-text retry on a malformed batch). `DeeplService::llmFallbackNotice()` is what controllers/actions surface to editors.
 - `DeeplService` wraps `deeplcom/deepl-php`; `EntryTranslator` + `Concerns/TranslatesFields` walk field data (Bard, replicator, grids); `EntryReferenceResolver` remaps linked entry IDs and may recursively translate linked entries up to `linked_entries_max_depth` (0–5, default 1).
 - `CpTranslationBatchRunner` picks sync vs queued (`TranslateEntryJob` on the `translations` queue) by `translation_mode` / `translation_sync_threshold`. `NavigationTreeSyncService` syncs nav trees across sites.
 - Glossary and style rules are YAML files under `content/statamic-ai-assistant/` (`TranslationGlossaryService`, `TranslationStyleRulesService`), synced to DeepL v3 and namespaced by `APP_NAME` — shared DeepL accounts need a unique `APP_NAME` per site. Style rules are arrays per language (legacy single strings are normalized on read); `prefer_glossary_over_style` splits segments so glossary terms stay enforced.

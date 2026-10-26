@@ -35,6 +35,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | LLM fallback when DeepL is not configured
+    |--------------------------------------------------------------------------
+    |
+    | Without DEEPL_API_KEY, translations (field, Bard, entry, bulk, terms,
+    | navigation) run on the configured AI model instead of failing. The CP
+    | tells editors each time. Glossary terms and style rules from the CP still
+    | apply (sent as instructions in the prompt). DeepL is used again as soon
+    | as a key is set.
+    |
+    | Disable with your .env file (translations then fail without a key):
+    | STATAMIC_AI_ASSISTANT_TRANSLATION_LLM_FALLBACK=false
+    |
+    */
+
+    'translation_llm_fallback' => (bool) env('STATAMIC_AI_ASSISTANT_TRANSLATION_LLM_FALLBACK', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Bulk (mass) translation tool
     |--------------------------------------------------------------------------
     |

@@ -516,5 +516,9 @@
   "Which page should I check?": "Quelle page dois-je vérifier ?",
   "Which images should I process?": "Quelles images dois-je traiter ?",
   "Only images missing alt text": "Uniquement les images sans texte alt",
-  "All images (overwrite existing alt)": "Toutes les images (écraser les textes alt existants)"
+  "All images (overwrite existing alt)": "Toutes les images (écraser les textes alt existants)",
+  "Translate (AI)": "Traduire (IA)",
+  "DeepL is not configured (DEEPL_API_KEY is missing), so the AI model translated instead.": "DeepL n’est pas configuré (DEEPL_API_KEY manquante) : la traduction a été faite par le modèle d’IA.",
+  "Translating with the AI model": "Traduction avec le modèle d’IA",
+  "The AI model returned no usable translation.": "Le modèle d’IA n’a renvoyé aucune traduction exploitable."
 }

@@ -425,5 +425,9 @@
   "Which page should I check?": "Which page should I check?",
   "Which images should I process?": "Which images should I process?",
   "Only images missing alt text": "Only images missing alt text",
-  "All images (overwrite existing alt)": "All images (overwrite existing alt)"
+  "All images (overwrite existing alt)": "All images (overwrite existing alt)",
+  "Translate (AI)": "Translate (AI)",
+  "DeepL is not configured (DEEPL_API_KEY is missing), so the AI model translated instead.": "DeepL is not configured (DEEPL_API_KEY is missing), so the AI model translated instead.",
+  "Translating with the AI model": "Translating with the AI model",
+  "The AI model returned no usable translation.": "The AI model returned no usable translation."
 }

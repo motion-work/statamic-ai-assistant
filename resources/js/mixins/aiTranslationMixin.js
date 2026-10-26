@@ -1,4 +1,5 @@
 import axios from "axios";
+import { showTranslationNotice } from '../utils/showTranslationNotice.js';
 import { normalizeAiOutput } from "../utils/normalizeAiOutput";
 
 export default {
@@ -70,6 +71,7 @@ export default {
         }
 
         Statamic.$toast.success(__('Your content has been translated.'));
+        showTranslationNotice(response.data.notice);
       } catch (error) {
         Statamic.$toast.error(
           error?.response?.data?.error || error.message || __('Translation failed.'),

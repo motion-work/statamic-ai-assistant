@@ -4,6 +4,10 @@ All notable changes to **motion-work/statamic-ai-assistant** are documented here
 
 ## Unreleased
 
+### Added
+
+- **AI translation fallback:** without `DEEPL_API_KEY`, every translation path (field/Bard, Translate entry action, bulk, terms, navigation) runs on the configured AI model instead of failing with "DeepL API key is not configured". Editors are told each time: an info toast after field/Bard translations, a note in the entry action message (whose label becomes "Translate (AI)"), and an info card on the bulk translations page. Glossary terms that occur in the text and per-language style rules are passed to the model; HTML (Bard) markup is preserved; Swiss German targets use "ss" instead of "ß". New config `translation_llm_fallback` (`STATAMIC_AI_ASSISTANT_TRANSLATION_LLM_FALLBACK`, default `true`).
+
 ### Changed
 
 - **Quick tasks skip reasoning:** Ai Text / Bard generate and refactor, alt text, image analysis and fast-tier helpers now ask Infomaniak reasoning models (Kimi K2.6, Qwen3.5/3.8) to answer without thinking first (≈0.5–3s instead of ≈13–16s, and no more empty replies when `max_tokens` runs out during thinking). The AI agent's planning and entry generation keep thinking on. New config `quick_tasks_without_thinking` (`STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING`, default `true`). Mistral models are skipped automatically, since they reject the switch.

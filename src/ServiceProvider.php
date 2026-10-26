@@ -24,6 +24,7 @@ use MotionWork\StatamicAiAssistant\Services\FigmaOAuthService;
 use MotionWork\StatamicAiAssistant\Services\FigmaTokenStore;
 use MotionWork\StatamicAiAssistant\Services\GroqService;
 use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
+use MotionWork\StatamicAiAssistant\Services\LlmTranslator;
 use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
 use MotionWork\StatamicAiAssistant\Services\AssetImageDownloader;
 use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
@@ -104,6 +105,14 @@ class ServiceProvider extends AddonServiceProvider
 
         $this->app->singleton(TranslationStyleRulesService::class, function ($app) {
             return new TranslationStyleRulesService($app->make(DeeplService::class));
+        });
+
+        $this->app->singleton(LlmTranslator::class, function ($app) {
+            return new LlmTranslator(
+                $app->make(AbstractAiService::class),
+                $app->make(TranslationGlossaryService::class),
+                $app->make(TranslationStyleRulesService::class),
+            );
         });
 
         $this->app->singleton(EntryGeneratorAssetResolver::class, function () {

@@ -40,6 +40,7 @@
 
 <script>
 import axios from 'axios';
+import { showTranslationNotice } from '../utils/showTranslationNotice.js';
 import Translation from './icons/TranslationIcon.vue';
 import aiTranslationMixin from '../mixins/aiTranslationMixin';
 
@@ -145,6 +146,7 @@ export default {
                 this.result = response.data.translated;
                 this.editor.commands.WriteInBard(this.result);
                 Statamic.$toast.success(__('Your content has been translated.'));
+                showTranslationNotice(response.data.notice);
             } catch (error) {
                 Statamic.$toast.error(
                     error?.response?.data?.error || error.message || __('Translation failed.'),
