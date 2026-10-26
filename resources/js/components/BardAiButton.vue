@@ -87,7 +87,7 @@
                     <!-- Result -->
                     <template v-else-if="modalMode === 'result'">
                         <ui-button
-                            :text="transWithFallback('back', 'Back')"
+                            :text="transWithFallback('new_prompt', 'New')"
                             variant="ghost"
                             @click="resetToPrompt()"
                         />
@@ -107,7 +107,7 @@
                     <!-- Refactor -->
                     <template v-else-if="modalMode === 'refactor'">
                         <ui-button
-                            :text="transWithFallback('back', 'Back')"
+                            :text="transWithFallback('new_prompt', 'New')"
                             variant="ghost"
                             @click="cancelRefactor()"
                         />
