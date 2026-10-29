@@ -495,11 +495,115 @@ class EntryGeneratorService
     /**
      * For a model that writes the entry itself (the Claude connector): the
      * same field schema, block hints, site instructions, glossary and style
-     * rules the agent's own prompt carries, as one brief.
+     * rules the agent's own prompt carries, as one brief. Block fields are
+     * listed only for $blocksWithFields; the catalog still describes every
+     * block, and {@see blockSchemas()} returns the fields of the ones chosen.
+     * Descriptions repeated across fields are written once, as notes.
+     *
+     * @param  array<int, string>  $blocksWithFields
      */
-    public function compositionBrief(Blueprint $blueprint, string $siteHandle): string
+    public function compositionBrief(Blueprint $blueprint, string $siteHandle, array $blocksWithFields = []): string
     {
-        return $this->buildSystemMessage($this->buildFieldSchema($blueprint, $siteHandle), $siteHandle);
+        $schema = $this->buildFieldSchema($blueprint, $siteHandle);
+        foreach ($schema as &$field) {
+            if (is_array($field['sets'] ?? null)) {
+                $field['sets'] = array_intersect_key($field['sets'], array_flip($blocksWithFields));
+                $field['sets_note'] = 'set_layout_catalog describes every block. "sets" lists the fields only of blocks already requested; call get_block_schemas for the fields of the blocks you choose.';
+            }
+        }
+        unset($field);
+
+        [$schema, $notes] = $this->hoistRepeatedDescriptions($this->stripSchemaNoise($schema));
+
+        return $this->buildSystemMessage($schema, $siteHandle).$this->fieldNotesBlock($notes);
+    }
+
+    /**
+     * The fields of the named blocks, per replicator/components field.
+     *
+     * @param  array<int, string>  $handles
+     * @return array{blocks: array<string, array<string, mixed>>, notes: array<int, string>, unknown: array<int, string>}
+     */
+    public function blockSchemas(Blueprint $blueprint, string $siteHandle, array $handles): array
+    {
+        $blocks = [];
+        $found = [];
+        foreach ($this->buildFieldSchema($blueprint, $siteHandle) as $fieldHandle => $field) {
+            foreach ($handles as $handle) {
+                if (isset($field['sets'][$handle])) {
+                    $blocks[$fieldHandle][$handle] = $field['sets'][$handle];
+                    $found[] = $handle;
+                }
+            }
+        }
+
+        [$blocks, $notes] = $this->hoistRepeatedDescriptions($this->stripSchemaNoise($blocks));
+
+        return [
+            'blocks' => $blocks,
+            'notes' => $notes,
+            'unknown' => array_values(array_diff($handles, $found)),
+        ];
+    }
+
+    /**
+     * A field description used more than once (the HTML rule, grid rows, an
+     * editor's anchor-id hint …) becomes one numbered note, and each field
+     * says "see note N" instead. Nothing is dropped.
+     *
+     * @param  array<int|string, mixed>  $schema
+     * @return array{0: array<int|string, mixed>, 1: array<int, string>}
+     */
+    private function hoistRepeatedDescriptions(array $schema): array
+    {
+        $counts = [];
+        array_walk_recursive($schema, function ($value, $key) use (&$counts) {
+            if ($key === 'description' && is_string($value) && mb_strlen($value) >= 30) {
+                $counts[$value] = ($counts[$value] ?? 0) + 1;
+            }
+        });
+
+        $notes = [];
+        foreach ($counts as $text => $count) {
+            if ($count > 1) {
+                $notes[count($notes) + 1] = $text;
+            }
+        }
+        if ($notes === []) {
+            return [$schema, []];
+        }
+
+        $numbers = array_flip($notes);
+        $replace = function (array $node) use (&$replace, $numbers): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'description' && is_string($value) && isset($numbers[$value])) {
+                    $node[$key] = 'See note '.$numbers[$value].'.';
+                } elseif (is_array($value)) {
+                    $node[$key] = $replace($value);
+                }
+            }
+
+            return $node;
+        };
+
+        return [$replace($schema), $notes];
+    }
+
+    /**
+     * @param  array<int, string>  $notes
+     */
+    private function fieldNotesBlock(array $notes): string
+    {
+        if ($notes === []) {
+            return '';
+        }
+
+        $lines = ["\n\nFIELD NOTES (a field description \"See note N.\" means this text):"];
+        foreach ($notes as $number => $text) {
+            $lines[] = $number.'. '.$text;
+        }
+
+        return implode("\n", $lines);
     }
 
     /**

@@ -91,6 +91,12 @@ class ClaudeComposeEntryMcpTest extends TestCase
         $brief = $this->tool($server, 'get_content_model', ['collection' => 'mcp_compose'])['brief'];
         $this->assertStringContainsString('Grosses Zitat einer Kundin.', $brief, 'The editors\' block hints are in the brief.');
         $this->assertStringContainsString('Social Proof nach den Argumenten', $brief);
+        $this->assertStringNotContainsString('"author"', $brief, 'Block fields come in a second step.');
+
+        $schemas = $this->tool($server, 'get_block_schemas', ['collection' => 'mcp_compose', 'blocks' => ['quote', 'nope']]);
+        $this->assertArrayHasKey('author', $schemas['blocks']['blocks']['quote']);
+        $this->assertArrayNotHasKey('teaser', $schemas['blocks']['blocks']);
+        $this->assertSame(['nope'], $schemas['unknown']);
 
         $invalid = $this->tool($server, 'preview_compose_entry', ['collection' => 'mcp_compose', 'data' => ['body' => '<p>Ohne Titel</p>']]);
         $this->assertSame('invalid_entry', $invalid['error']);
@@ -130,6 +136,7 @@ class ClaudeComposeEntryMcpTest extends TestCase
 
         $model = $this->tool($server, 'get_content_model', ['entry_id' => $page->id()]);
         $this->assertStringContainsString('"id":"q1"', $model['current_content']);
+        $this->assertStringContainsString('"author"', $model['brief'], 'A refactor gets the fields of the blocks already on the page.');
 
         $blocks = [
             ['id' => 't1', 'type' => 'teaser', 'title' => 'Neu'],

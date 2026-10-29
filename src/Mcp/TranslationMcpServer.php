@@ -121,7 +121,7 @@ class TranslationMcpServer
                 'name' => 'statamic-ai-assistant-translations',
                 'version' => '3.x',
             ],
-            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. To build a new entry from a goal, or restructure an existing one, call get_content_model first and follow its brief (block descriptions, when-to-use rules, site instructions, glossary, style rules), then preview_compose_entry and save_compose_entry. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
+            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. To build a new entry from a goal, or restructure an existing one, call get_content_model first and follow its brief (block descriptions, when-to-use rules, site instructions, glossary, style rules), get the fields of the chosen blocks with get_block_schemas, then preview_compose_entry and save_compose_entry. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
         ];
     }
 
@@ -173,6 +173,13 @@ class TranslationMcpServer
                 isset($arguments['site']) ? (string) $arguments['site'] : null,
                 isset($arguments['entry_id']) ? (string) $arguments['entry_id'] : null,
             ),
+            'get_block_schemas' => $this->bridge->blockSchemas(
+                isset($arguments['collection']) ? (string) $arguments['collection'] : null,
+                isset($arguments['blueprint']) ? (string) $arguments['blueprint'] : null,
+                isset($arguments['site']) ? (string) $arguments['site'] : null,
+                isset($arguments['entry_id']) ? (string) $arguments['entry_id'] : null,
+                is_array($arguments['blocks'] ?? null) ? $arguments['blocks'] : [],
+            ),
             'preview_compose_entry' => $this->bridge->previewComposeEntry(
                 is_array($arguments['data'] ?? null) ? $arguments['data'] : [],
                 isset($arguments['collection']) ? (string) $arguments['collection'] : null,
@@ -202,7 +209,8 @@ class TranslationMcpServer
         return [
             'content' => [[
                 'type' => 'text',
-                'text' => json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT),
+                // Compact: only the model reads it, and indentation costs tokens.
+                'text' => json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]],
             'isError' => isset($result['error']),
         ];
@@ -290,7 +298,7 @@ class TranslationMcpServer
                 ],
                 'required' => ['entry_id', 'published'],
             ]),
-            $this->tool('get_content_model', 'Learn how entries are built before composing or refactoring one. Without arguments: the collections, blueprints and sites the user may create entries in. With collection (and optionally blueprint, site): the brief for composing an entry there: every field and content block with its editor-written description and when-to-use rules, site instructions, glossary and style rules. With entry_id: the same brief for that entry\'s blueprint plus its current content, for refactoring it.', [
+            $this->tool('get_content_model', 'Learn how entries are built before composing or refactoring one. Without arguments: the collections, blueprints and sites the user may create entries in. With collection (and optionally blueprint, site): the brief for composing an entry there: the entry\'s own fields, a catalog of every content block with its editor-written description and when-to-use rules, site instructions, glossary and style rules. Choose blocks from the catalog, then get their fields with get_block_schemas. With entry_id: the same brief for that entry\'s blueprint, including the fields of the blocks already on it, plus its current content, for refactoring it.', [
                 'type' => 'object',
                 'properties' => [
                     'collection' => ['type' => 'string'],
@@ -298,6 +306,17 @@ class TranslationMcpServer
                     'site' => ['type' => 'string', 'description' => 'Site handle, such as de. Defaults to the collection\'s first site.'],
                     'entry_id' => ['type' => 'string', 'description' => 'An entry to refactor.'],
                 ],
+            ]),
+            $this->tool('get_block_schemas', 'The fields of the content blocks you chose from get_content_model\'s catalog, for the same collection (or entry_id). Call it once with every block you plan to use; ask again if you add another.', [
+                'type' => 'object',
+                'properties' => [
+                    'blocks' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Block handles (type_handle) from set_layout_catalog.'],
+                    'collection' => ['type' => 'string'],
+                    'blueprint' => ['type' => 'string'],
+                    'site' => ['type' => 'string'],
+                    'entry_id' => ['type' => 'string'],
+                ],
+                'required' => ['blocks'],
             ]),
             $this->tool('preview_compose_entry', 'Check a composed entry and describe what would be saved: a new unpublished entry (collection, blueprint, site, optional parent_entry_id), or, with entry_id, a refactor of an existing entry either in place (mode "in_place") or as a new unpublished copy (mode "copy"); ask the user which. data is one JSON object in the format of get_content_model\'s brief. Returns an outline, warnings and a confirmation_token, or the validation problems to fix. Writes nothing.', [
                 'type' => 'object',
