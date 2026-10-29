@@ -35,9 +35,15 @@ class EntryStructureSerializer
      *                                                     was truncated or omitted (the LLM never saw the full
      *                                                     content). Callers that let the LLM REPLACE such fields
      *                                                     wholesale should treat that as a data-loss risk.
+     * @param  bool  $capped  False for a model with room for the whole entry
+     *                        (the Claude connector): nothing is shortened.
      */
-    public function serialize(StatamicEntry $entry, Blueprint $blueprint, ?array &$incompleteFields = null): string
+    public function serialize(StatamicEntry $entry, Blueprint $blueprint, ?array &$incompleteFields = null, bool $capped = true): string
     {
+        $totalCap = $capped ? self::TOTAL_CAP : PHP_INT_MAX;
+        $fieldCap = $capped ? self::PER_FIELD_CAP : PHP_INT_MAX;
+        $textCap = $capped ? self::TEXT_CAP : PHP_INT_MAX;
+
         $raw = is_array($entry->data()->all()) ? $entry->data()->all() : [];
 
         $usedTotal = 0;
@@ -51,8 +57,8 @@ class EntryStructureSerializer
             $lines[] = $line;
         };
 
-        $encode = function ($value, int $cap) use (&$usedTotal): ?string {
-            if ($usedTotal >= self::TOTAL_CAP) {
+        $encode = function ($value, int $cap) use (&$usedTotal, $totalCap): ?string {
+            if ($usedTotal >= $totalCap) {
                 return null;
             }
             $json = json_encode($value, JSON_UNESCAPED_UNICODE);
@@ -88,7 +94,7 @@ class EntryStructureSerializer
             }
 
             if (is_string($value)) {
-                $append("{$handle}: ".json_encode(Str::limit($value, self::TEXT_CAP), JSON_UNESCAPED_UNICODE));
+                $append("{$handle}: ".json_encode(Str::limit($value, $textCap), JSON_UNESCAPED_UNICODE));
 
                 continue;
             }
@@ -110,7 +116,7 @@ class EntryStructureSerializer
                 $label = $isList
                     ? 'list — '.count($value).' item(s)'
                     : 'object';
-                $encoded = $encode($value, self::PER_FIELD_CAP);
+                $encoded = $encode($value, $fieldCap);
                 if ($encoded === null || str_ends_with($encoded, '/* truncated */')) {
                     $incompleteFields[] = $handle;
                 }
@@ -122,7 +128,7 @@ class EntryStructureSerializer
                 continue;
             }
 
-            $encoded = $encode($value, self::PER_FIELD_CAP);
+            $encoded = $encode($value, $fieldCap);
             if ($encoded === null || str_ends_with($encoded, '/* truncated */')) {
                 $incompleteFields[] = $handle;
             }

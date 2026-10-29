@@ -2,6 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Mcp;
 
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\EntryStructureSerializer;
 use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
@@ -14,6 +16,7 @@ use Statamic\Actions\DuplicateEntry;
 use Statamic\Contracts\Auth\User as UserContract;
 use Statamic\Contracts\Entries\Entry;
 use Statamic\Facades\Entry as EntryFacade;
+use Statamic\Facades\Collection;
 use Statamic\Facades\Site;
 
 /**
@@ -599,6 +602,258 @@ class ClaudeTranslationBridge
     }
 
     /**
+     * Without arguments, the collections the account can see. With a
+     * collection (or an entry to refactor), the brief for composing one: the
+     * agent's field schema with block hints, site instructions, glossary and
+     * style rules, plus the entry's current content when refactoring.
+     *
+     * @return array<string, mixed>
+     */
+    public function contentModel(?string $collectionHandle, ?string $blueprintHandle, ?string $siteHandle, ?string $entryId): array
+    {
+        if ($entryId !== null && $entryId !== '') {
+            $entry = $this->findEntry($entryId);
+            if (is_array($entry)) {
+                return $entry;
+            }
+            if (($denied = $this->refuse('view', $entry)) !== null) {
+                return $denied;
+            }
+            $snapshot = app(EntryStructureSerializer::class)->serialize($entry, $entry->blueprint(), $incomplete, false);
+
+            return array_merge($this->entrySummary($entry), [
+                'blueprint' => $entry->blueprint()->handle(),
+                'brief' => $this->generator()->compositionBrief($entry->blueprint(), (string) $entry->locale()),
+                'current_content' => $snapshot,
+                'message' => 'current_content is the entry as stored, one field per line. Compose the refactored entry as one JSON object and pass it as data to preview_compose_entry with this entry_id. Fields you leave out stay as they are; a field you include replaces it whole, so include every block you want to keep. Refer to a block you keep by its id: send it back with its id (and any fields you change) and it is kept exactly as stored, including images and links you did not touch. Blocks without an id are new and follow the brief\'s format. Ask the user whether to change this entry in place or save the result as an unpublished copy, and pass mode accordingly.',
+            ]);
+        }
+
+        if ($collectionHandle === null || $collectionHandle === '') {
+            $collections = [];
+            foreach (Collection::all() as $collection) {
+                $blueprints = $collection->entryBlueprints()->reject->hidden()->map(fn ($b) => ['handle' => $b->handle(), 'title' => $b->title()])->values()->all();
+                $sites = $collection->sites()->filter(fn ($site) => $this->actor === null || $this->actor->can('create', [Entry::class, $collection, Site::get($site)]))->values()->all();
+                if ($blueprints === [] || $sites === []) {
+                    continue;
+                }
+                $collections[] = ['handle' => $collection->handle(), 'title' => $collection->title(), 'blueprints' => $blueprints, 'sites' => $sites];
+            }
+
+            return [
+                'collections' => $collections,
+                'message' => 'Call get_content_model again with a collection (and optionally blueprint and site) for the brief to compose an entry.',
+            ];
+        }
+
+        $resolved = $this->resolveTarget($collectionHandle, $blueprintHandle, $siteHandle);
+        if (isset($resolved['error'])) {
+            return $resolved;
+        }
+
+        return [
+            'collection' => $resolved['collection']->handle(),
+            'blueprint' => $resolved['blueprint']->handle(),
+            'site' => $resolved['site']->handle(),
+            'brief' => $this->generator()->compositionBrief($resolved['blueprint'], $resolved['site']->handle()),
+            'message' => 'Compose the entry as one JSON object in the brief\'s format, from the user\'s goal and content, and pass it as data to preview_compose_entry. Follow the block hints, site instructions, glossary and style rules in the brief.',
+        ];
+    }
+
+    /**
+     * Map the composed JSON as the agent would and describe the result:
+     * a new entry, an unpublished copy of an existing one, or the existing
+     * entry changed in place. Writes nothing.
+     *
+     * @param  array<string, mixed>  $composed
+     * @return array<string, mixed>
+     */
+    public function previewComposeEntry(array $composed, ?string $collectionHandle, ?string $blueprintHandle, ?string $siteHandle, ?string $entryId, ?string $mode, ?string $parentId): array
+    {
+        if ($composed === []) {
+            return ['saved' => false, 'error' => 'missing_data', 'message' => 'Pass the composed entry as data. Call get_content_model for its format.'];
+        }
+
+        $source = null;
+        if ($entryId !== null && $entryId !== '') {
+            $source = $this->findEntry($entryId);
+            if (is_array($source)) {
+                return $source;
+            }
+            if (! in_array($mode, ['in_place', 'copy'], true)) {
+                return ['saved' => false, 'error' => 'mode_required', 'message' => 'Ask the user whether to change this entry in place or save the result as an unpublished copy, then pass mode "in_place" or "copy".'];
+            }
+            $denied = $mode === 'in_place' ? $this->refuseEdit($source) : $this->refuseCreate($source);
+            if ($denied !== null) {
+                return $denied;
+            }
+            $collection = $source->collection();
+            $blueprint = $source->blueprint();
+            $site = $source->site();
+        } else {
+            $mode = 'create';
+            $resolved = $this->resolveTarget((string) $collectionHandle, $blueprintHandle, $siteHandle);
+            if (isset($resolved['error'])) {
+                return $resolved;
+            }
+            ['collection' => $collection, 'blueprint' => $blueprint, 'site' => $site] = $resolved;
+            if ($this->actor === null) {
+                return ['saved' => false, 'error' => 'not_signed_in', 'message' => 'Creating entries needs a signed-in Control Panel account.'];
+            }
+            if (! $this->actor->can('create', [Entry::class, $collection, $site])) {
+                return ['saved' => false, 'error' => 'forbidden', 'message' => 'Your Control Panel role cannot create '.$collection->handle().' entries on the '.$site->handle().' site. Nothing was saved.'];
+            }
+        }
+
+        $slots = [];
+        if ($source !== null) {
+            [$composed, $slots] = $this->splitKeptBlocks($composed, $source->data()->all());
+        }
+        $mapped = $this->generator()->mapComposedData($composed, $blueprint, $site->handle(), $source !== null);
+        $warnings = $mapped['warnings'];
+        $data = $source !== null
+            ? $this->generator()->mergeComposedData($source->data()->all(), $this->reassembleBlocks($mapped['data'], $slots, $warnings))
+            : $mapped['data'];
+
+        // A dated collection keeps the date on the entry, not in its data.
+        $date = null;
+        if ($collection->dated()) {
+            $date = $source?->date() ?? $this->parseDate($data['date'] ?? null) ?? now();
+            unset($data['date']);
+        }
+
+        $problems = $this->validationProblems($blueprint, $date ? $data + ['date' => $date->format('Y-m-d H:i')] : $data);
+        if ($problems !== []) {
+            return [
+                'saved' => false,
+                'error' => 'invalid_entry',
+                'problems' => $problems,
+                'warnings' => $warnings,
+                'message' => 'The composed entry does not pass the blueprint\'s validation. Fix these fields and preview again. Nothing was saved.',
+            ];
+        }
+
+        $parent = null;
+        if ($mode === 'create' && $parentId !== null && $parentId !== '') {
+            $parent = EntryFacade::find($parentId);
+            if (! $parent || $parent->collectionHandle() !== $collection->handle() || $parent->locale() !== $site->handle()) {
+                return ['saved' => false, 'error' => 'invalid_parent', 'message' => 'The parent must be an entry of the same collection and site. Nothing was saved.'];
+            }
+        }
+
+        $title = is_string($data['title'] ?? null) && $data['title'] !== '' ? $data['title'] : ($source ? EntryLabel::for($source) : 'Untitled');
+        $slug = $mode === 'in_place' ? (string) $source->slug() : $this->freeSlug($collection->handle(), $site, $title);
+
+        $token = (string) Str::uuid();
+        Cache::put($this->composeTokenKey($token), [
+            'mode' => $mode,
+            'user_id' => $this->actor !== null ? (string) $this->actor->id() : null,
+            'collection' => $collection->handle(),
+            'blueprint' => $blueprint->handle(),
+            'site' => $site->handle(),
+            'entry_id' => $source ? (string) $source->id() : null,
+            'parent_id' => $parent ? (string) $parent->id() : null,
+            'slug' => $slug,
+            'data' => $data,
+            'date' => $date?->format('Y-m-d H:i'),
+            'fingerprint' => $source ? hash('sha256', (string) json_encode($source->data()->all())) : null,
+        ], now()->addMinutes(self::TOKEN_TTL_MINUTES));
+
+        $what = match ($mode) {
+            'in_place' => 'change "'.EntryLabel::for($source).'" in place'.($source->published() ? '; it is published, so the live page changes right away' : ''),
+            'copy' => 'save the result as a new unpublished copy of "'.EntryLabel::for($source).'" next to it in the page tree; the original stays as it is',
+            default => 'create a new unpublished '.$collection->handle().' entry'.($parent ? ' under "'.EntryLabel::for($parent).'"' : ''),
+        };
+
+        return [
+            'saved' => false,
+            'confirmation_token' => $token,
+            'expires_in_minutes' => self::TOKEN_TTL_MINUTES,
+            'mode' => $mode,
+            'title' => $title,
+            'slug' => $slug,
+            'site' => $site->handle(),
+            'outline' => $this->outline($blueprint, $data),
+            'warnings' => array_values($warnings),
+            'message' => 'This will '.$what.' (site '.$site->handle().'). Show the outline and any warnings to the user. Nothing is saved until save_compose_entry is called with this confirmation_token and confirmed true, after they agree.',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function saveComposeEntry(string $token, bool $confirmed): array
+    {
+        if (! $confirmed) {
+            return ['saved' => false, 'error' => 'not_confirmed', 'message' => 'Nothing was saved. Show the outline to the user and call save_compose_entry again with confirmed true only after they agree.'];
+        }
+
+        $plan = Cache::get($this->composeTokenKey($token));
+        if (! is_array($plan) || $plan['user_id'] !== ($this->actor !== null ? (string) $this->actor->id() : null)) {
+            return ['saved' => false, 'error' => 'preview_required', 'message' => 'Call preview_compose_entry first and reuse its confirmation_token. Nothing was saved.'];
+        }
+
+        $collection = Collection::findByHandle($plan['collection']);
+        $site = Site::get($plan['site']);
+        $source = $plan['entry_id'] ? EntryFacade::find($plan['entry_id']) : null;
+        if (! $collection || ! $site || ($plan['entry_id'] && ! $source)) {
+            return ['saved' => false, 'error' => 'missing_entry', 'message' => 'The collection or entry from the preview no longer exists. Nothing was saved.'];
+        }
+
+        if ($plan['mode'] === 'in_place') {
+            if (($denied = $this->refuseEdit($source)) !== null) {
+                return $denied;
+            }
+            if (hash('sha256', (string) json_encode($source->data()->all())) !== $plan['fingerprint']) {
+                Cache::forget($this->composeTokenKey($token));
+
+                return ['saved' => false, 'error' => 'entry_changed', 'message' => 'Someone changed this entry after the preview. Read it again and compose anew. Nothing was saved.'];
+            }
+            $source->data($plan['data']);
+            $source->updateLastModified($this->actor);
+            $source->save();
+            Cache::forget($this->composeTokenKey($token));
+
+            return array_merge($this->entrySummary($source), ['saved' => true, 'mode' => 'in_place']);
+        }
+
+        if (! $this->actor || ! $this->actor->can('create', [Entry::class, $collection, $site])) {
+            return ['saved' => false, 'error' => 'forbidden', 'message' => 'Your Control Panel role cannot create '.$collection->handle().' entries on the '.$site->handle().' site. Nothing was saved.'];
+        }
+
+        $entry = EntryFacade::make()
+            ->collection($collection)
+            ->blueprint($plan['blueprint'])
+            ->locale($site->handle())
+            ->published(false)
+            ->data($plan['data']);
+        if ($collection->requiresSlugs()) {
+            $entry->slug(EntryFacade::query()->where('collection', $collection->handle())->where('site', $site->handle())->where('slug', $plan['slug'])->count() > 0
+                ? $this->freeSlug($collection->handle(), $site, $plan['slug'])
+                : $plan['slug']);
+        }
+        if ($collection->dated()) {
+            $entry->date($plan['date'] ? \Illuminate\Support\Carbon::parse($plan['date']) : now());
+        }
+        $entry->updateLastModified($this->actor);
+        $entry->save();
+
+        if ($collection->hasStructure()) {
+            $tree = $collection->structure()->in($site->handle());
+            $parentId = $plan['mode'] === 'copy' ? $this->parentInTree($source) : $plan['parent_id'];
+            $parentId ? $tree->appendTo($parentId, $entry) : $tree->append($entry);
+            $tree->save();
+        }
+        Cache::forget($this->composeTokenKey($token));
+
+        return array_merge($this->entrySummary($entry), [
+            'saved' => true,
+            'mode' => $plan['mode'],
+            'message' => 'Saved unpublished. Review it in the Control Panel (edit_url), then publish it with set_published when the user agrees.',
+        ]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function readGlossary(): array
@@ -761,6 +1016,247 @@ class ClaudeTranslationBridge
         return $this->refuse('edit', $entry);
     }
 
+    private function generator(): EntryGeneratorService
+    {
+        return app(EntryGeneratorService::class);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveTarget(string $collectionHandle, ?string $blueprintHandle, ?string $siteHandle): array
+    {
+        $collection = Collection::findByHandle($collectionHandle);
+        if (! $collection) {
+            return ['saved' => false, 'error' => 'missing_collection', 'message' => 'No collection has the handle '.$collectionHandle.'. Call get_content_model without arguments to list them.'];
+        }
+
+        $blueprints = $collection->entryBlueprints()->reject->hidden();
+        $blueprint = $blueprintHandle ? $blueprints->first(fn ($b) => $b->handle() === $blueprintHandle) : $blueprints->first();
+        if (! $blueprint) {
+            return ['saved' => false, 'error' => 'missing_blueprint', 'message' => 'The '.$collectionHandle.' collection has no blueprint '.$blueprintHandle.'.'];
+        }
+
+        $site = $siteHandle ? Site::get($siteHandle) : Site::get($collection->sites()->first());
+        if (! $site || ! $collection->sites()->contains($site->handle())) {
+            return ['saved' => false, 'error' => 'missing_site', 'message' => 'The '.$collectionHandle.' collection is not available on site '.$siteHandle.'.'];
+        }
+
+        return ['collection' => $collection, 'blueprint' => $blueprint, 'site' => $site];
+    }
+
+    /**
+     * Blocks the model sends back with their stored id are kept as stored;
+     * only the fields it changed go through the mapper and are laid over
+     * them. Running a stored block through the mapper would lose what it
+     * does not round-trip (images, entry references, a disabled state).
+     * New blocks are mapped whole.
+     *
+     * @param  array<string, mixed>  $composed
+     * @param  array<string, mixed>  $existing
+     * @return array{0: array<string, mixed>, 1: array<string, array<int, array<string, mixed>>>}
+     */
+    private function splitKeptBlocks(array $composed, array $existing): array
+    {
+        $slots = [];
+        foreach ($composed as $handle => $list) {
+            $stored = $existing[$handle] ?? null;
+            if (! is_array($list) || ! array_is_list($list) || ! is_array($stored)) {
+                continue;
+            }
+            $byId = [];
+            foreach ($stored as $block) {
+                if (is_array($block) && isset($block['id'], $block['type'])) {
+                    $byId[(string) $block['id']] = $block;
+                }
+            }
+            if ($byId === []) {
+                continue;
+            }
+
+            $send = [];
+            $fieldSlots = [];
+            foreach ($list as $item) {
+                $block = is_array($item) && isset($item['id']) ? ($byId[(string) $item['id']] ?? null) : null;
+                if ($block === null || (isset($item['type']) && $item['type'] !== $block['type'])) {
+                    $fieldSlots[] = ['new' => count($send), 'enabled' => $item['enabled'] ?? null];
+                    $send[] = $item;
+
+                    continue;
+                }
+                $changed = [];
+                foreach ($item as $key => $value) {
+                    if (! in_array($key, ['id', 'type', 'enabled'], true) && (! array_key_exists($key, $block) || $block[$key] != $value)) {
+                        $changed[$key] = $value;
+                    }
+                }
+                $fieldSlots[] = [
+                    'stored' => $block,
+                    'enabled' => $item['enabled'] ?? null,
+                    'changed' => array_keys($changed),
+                    'mapped' => $changed === [] ? null : count($send),
+                ];
+                if ($changed !== []) {
+                    $send[] = ['type' => $block['type']] + $changed;
+                }
+            }
+
+            $slots[$handle] = $fieldSlots;
+            if ($send === []) {
+                unset($composed[$handle]);
+            } else {
+                $composed[$handle] = $send;
+            }
+        }
+
+        return [$composed, $slots];
+    }
+
+    /**
+     * @param  array<string, mixed>  $mapped
+     * @param  array<string, array<int, array<string, mixed>>>  $slots
+     * @param  array<int, string>  $warnings
+     * @return array<string, mixed>
+     */
+    private function reassembleBlocks(array $mapped, array $slots, array &$warnings): array
+    {
+        foreach ($slots as $handle => $fieldSlots) {
+            $mappedList = is_array($mapped[$handle] ?? null) ? array_values($mapped[$handle]) : [];
+            $blocks = [];
+            foreach ($fieldSlots as $slot) {
+                if (isset($slot['new'])) {
+                    $block = $mappedList[$slot['new']] ?? null;
+                    if ($block === null) {
+                        $warnings[] = 'A new block in "'.$handle.'" could not be used and was left out.';
+
+                        continue;
+                    }
+                } else {
+                    $block = $slot['stored'];
+                    $fresh = $slot['mapped'] !== null ? ($mappedList[$slot['mapped']] ?? []) : [];
+                    foreach ($slot['changed'] as $key) {
+                        if (array_key_exists($key, $fresh)) {
+                            $block[$key] = $fresh[$key];
+                        } else {
+                            $warnings[] = 'The new value for "'.$key.'" in the '.$block['type'].' block could not be used; the stored value was kept.';
+                        }
+                    }
+                }
+                if ($slot['enabled'] !== null) {
+                    $block['enabled'] = (bool) $slot['enabled'];
+                }
+                $blocks[] = $block;
+            }
+            $mapped[$handle] = $blocks;
+        }
+
+        return $mapped;
+    }
+
+    private function parseDate(mixed $value): ?\Illuminate\Support\Carbon
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+        try {
+            return \Illuminate\Support\Carbon::parse($value);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, string>
+     */
+    private function validationProblems(\Statamic\Fields\Blueprint $blueprint, array $data): array
+    {
+        // The Control Panel validates its form values, so validate the
+        // preprocessed values rather than the stored ones (dates differ).
+        try {
+            $blueprint->fields()->addValues($data)->preProcess()->validator()->validate();
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return array_map(fn ($messages) => implode(' ', $messages), $e->errors());
+        }
+
+        return [];
+    }
+
+    private function freeSlug(string $collectionHandle, \Statamic\Sites\Site $site, string $title): string
+    {
+        $base = Str::slug($title, '-', $site->lang()) ?: 'entry';
+        $slug = $base;
+        for ($n = 2; EntryFacade::query()->where('collection', $collectionHandle)->where('site', $site->handle())->where('slug', $slug)->count() > 0; $n++) {
+            $slug = $base.'-'.$n;
+        }
+
+        return $slug;
+    }
+
+    private function parentInTree(Entry $entry): ?string
+    {
+        $page = $entry->structure()?->in($entry->locale())->find($entry->id());
+        $parent = $page?->parent();
+        if (! $parent || ($entry->structure()->expectsRoot() && $entry->structure()->in($entry->locale())->root()['entry'] === $parent->id())) {
+            return null;
+        }
+
+        return (string) $parent->id();
+    }
+
+    /**
+     * Blocks and headlines of the composed entry, for the user to review.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, array<string, mixed>>
+     */
+    private function outline(\Statamic\Fields\Blueprint $blueprint, array $data): array
+    {
+        $outline = [];
+        foreach ($blueprint->fields()->all() as $field) {
+            $value = $data[$field->handle()] ?? null;
+            if ($value === null || $value === '' || $value === []) {
+                continue;
+            }
+            if (in_array($field->type(), ['replicator', 'components'], true) && is_array($value)) {
+                $blocks = [];
+                foreach ($value as $set) {
+                    if (is_array($set) && isset($set['type'])) {
+                        $headline = $this->headline($set);
+                        $blocks[] = $headline === '' ? $set['type'] : $set['type'].': '.$headline;
+                    }
+                }
+                $outline[] = ['field' => $field->display(), 'blocks' => $blocks];
+            } elseif (is_string($value)) {
+                $outline[] = ['field' => $field->display(), 'value' => Str::limit(strip_tags($value), 120)];
+            } elseif ($field->type() === 'bard' && is_array($value)) {
+                $text = [];
+                array_walk_recursive($value, function ($node, $key) use (&$text) {
+                    if ($key === 'text' && is_string($node)) {
+                        $text[] = $node;
+                    }
+                });
+                $outline[] = ['field' => $field->display(), 'value' => Str::limit(implode(' ', $text), 120)];
+            }
+        }
+
+        return $outline;
+    }
+
+    /**
+     * @param  array<string, mixed>  $set
+     */
+    private function headline(array $set): string
+    {
+        foreach (['title', 'label', 'subtitle'] as $key) {
+            if (is_string($set[$key] ?? null) && trim($set[$key]) !== '') {
+                return Str::limit(trim($set[$key]), 90);
+            }
+        }
+
+        return '';
+    }
+
     /**
      * Statamic's Duplicate check: the role may create entries in this
      * collection on this site.
@@ -912,5 +1408,10 @@ class ClaudeTranslationBridge
     private function editTokenKey(string $token): string
     {
         return 'statamic-ai-assistant:mcp-edit:'.$token;
+    }
+
+    private function composeTokenKey(string $token): string
+    {
+        return 'statamic-ai-assistant:mcp-compose:'.$token;
     }
 }

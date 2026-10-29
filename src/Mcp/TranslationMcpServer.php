@@ -121,7 +121,7 @@ class TranslationMcpServer
                 'name' => 'statamic-ai-assistant-translations',
                 'version' => '3.x',
             ],
-            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
+            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. To build a new entry from a goal, or restructure an existing one, call get_content_model first and follow its brief (block descriptions, when-to-use rules, site instructions, glossary, style rules), then preview_compose_entry and save_compose_entry. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
         ];
     }
 
@@ -165,6 +165,25 @@ class TranslationMcpServer
             'set_published' => $this->bridge->setPublished(
                 (string) ($arguments['entry_id'] ?? ''),
                 (bool) ($arguments['published'] ?? false),
+                (bool) ($arguments['confirmed'] ?? false),
+            ),
+            'get_content_model' => $this->bridge->contentModel(
+                isset($arguments['collection']) ? (string) $arguments['collection'] : null,
+                isset($arguments['blueprint']) ? (string) $arguments['blueprint'] : null,
+                isset($arguments['site']) ? (string) $arguments['site'] : null,
+                isset($arguments['entry_id']) ? (string) $arguments['entry_id'] : null,
+            ),
+            'preview_compose_entry' => $this->bridge->previewComposeEntry(
+                is_array($arguments['data'] ?? null) ? $arguments['data'] : [],
+                isset($arguments['collection']) ? (string) $arguments['collection'] : null,
+                isset($arguments['blueprint']) ? (string) $arguments['blueprint'] : null,
+                isset($arguments['site']) ? (string) $arguments['site'] : null,
+                isset($arguments['entry_id']) ? (string) $arguments['entry_id'] : null,
+                isset($arguments['mode']) ? (string) $arguments['mode'] : null,
+                isset($arguments['parent_entry_id']) ? (string) $arguments['parent_entry_id'] : null,
+            ),
+            'save_compose_entry' => $this->bridge->saveComposeEntry(
+                (string) ($arguments['confirmation_token'] ?? ''),
                 (bool) ($arguments['confirmed'] ?? false),
             ),
             'read_glossary' => $this->bridge->readGlossary(),
@@ -270,6 +289,36 @@ class TranslationMcpServer
                     'confirmed' => ['type' => 'boolean'],
                 ],
                 'required' => ['entry_id', 'published'],
+            ]),
+            $this->tool('get_content_model', 'Learn how entries are built before composing or refactoring one. Without arguments: the collections, blueprints and sites the user may create entries in. With collection (and optionally blueprint, site): the brief for composing an entry there: every field and content block with its editor-written description and when-to-use rules, site instructions, glossary and style rules. With entry_id: the same brief for that entry\'s blueprint plus its current content, for refactoring it.', [
+                'type' => 'object',
+                'properties' => [
+                    'collection' => ['type' => 'string'],
+                    'blueprint' => ['type' => 'string'],
+                    'site' => ['type' => 'string', 'description' => 'Site handle, such as de. Defaults to the collection\'s first site.'],
+                    'entry_id' => ['type' => 'string', 'description' => 'An entry to refactor.'],
+                ],
+            ]),
+            $this->tool('preview_compose_entry', 'Check a composed entry and describe what would be saved: a new unpublished entry (collection, blueprint, site, optional parent_entry_id), or, with entry_id, a refactor of an existing entry either in place (mode "in_place") or as a new unpublished copy (mode "copy"); ask the user which. data is one JSON object in the format of get_content_model\'s brief. Returns an outline, warnings and a confirmation_token, or the validation problems to fix. Writes nothing.', [
+                'type' => 'object',
+                'properties' => [
+                    'data' => ['type' => 'object', 'description' => 'The composed entry, keyed by field handle, in the brief\'s format.'],
+                    'collection' => ['type' => 'string'],
+                    'blueprint' => ['type' => 'string'],
+                    'site' => ['type' => 'string'],
+                    'parent_entry_id' => ['type' => 'string', 'description' => 'Optional parent page in the page tree for a new entry.'],
+                    'entry_id' => ['type' => 'string', 'description' => 'The entry to refactor.'],
+                    'mode' => ['type' => 'string', 'enum' => ['in_place', 'copy'], 'description' => 'Required with entry_id.'],
+                ],
+                'required' => ['data'],
+            ]),
+            $this->tool('save_compose_entry', 'Save the entry from preview_compose_entry. Requires its confirmation_token and confirmed true after the user agrees. New entries and copies are saved unpublished; publish them later with set_published.', [
+                'type' => 'object',
+                'properties' => [
+                    'confirmation_token' => ['type' => 'string'],
+                    'confirmed' => ['type' => 'boolean'],
+                ],
+                'required' => ['confirmation_token', 'confirmed'],
             ]),
             $this->tool('read_glossary', 'Read the glossary terms the translation should use. Not synced to DeepL by this connection.', [
                 'type' => 'object',

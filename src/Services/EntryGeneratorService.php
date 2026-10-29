@@ -493,6 +493,122 @@ class EntryGeneratorService
     }
 
     /**
+     * For a model that writes the entry itself (the Claude connector): the
+     * same field schema, block hints, site instructions, glossary and style
+     * rules the agent's own prompt carries, as one brief.
+     */
+    public function compositionBrief(Blueprint $blueprint, string $siteHandle): string
+    {
+        return $this->buildSystemMessage($this->buildFieldSchema($blueprint, $siteHandle), $siteHandle);
+    }
+
+    /**
+     * Map composed JSON onto stored field data, as for a generated entry.
+     * With $partial only the given fields are mapped and no image is filled in.
+     *
+     * @param  array<string, mixed>  $composed
+     * @return array{data: array<string, mixed>, displayData: array<string, mixed>, warnings: array<int, string>}
+     */
+    public function mapComposedData(array $composed, Blueprint $blueprint, string $siteHandle, bool $partial): array
+    {
+        $mapped = $this->mapToFieldData($composed, $blueprint, $siteHandle, '', null, true);
+        $mapped['data'] = $this->carryAssetPaths($composed, $mapped['data'], $blueprint->fields()->all());
+        if ($partial) {
+            return $mapped;
+        }
+
+        // Unlike a generated entry: a library image only fills a required
+        // image field left empty (an optional slot with a random picture
+        // changes how a block renders), empty links stay empty, and other
+        // required fields are not filled with placeholders but reported by
+        // validation, so the model writes them.
+        ['data' => $data, 'displayData' => $displayData, 'warnings' => $warnings] = $mapped;
+        foreach ($blueprint->fields()->all() as $field) {
+            $handle = $field->handle();
+            if ($field->type() === 'assets' && $field->isRequired() && empty($data[$handle])) {
+                $picked = $this->assetResolver->pickReplacementForField($field, $warnings);
+                if ($picked !== null) {
+                    $data[$handle] = $picked;
+                    $displayData[$handle] = $picked;
+                }
+            }
+        }
+
+        return ['data' => $data, 'displayData' => $displayData, 'warnings' => $warnings];
+    }
+
+    /**
+     * The mapper skips image fields, since the agent describes images rather
+     * than naming them. A model that names an existing file keeps it, at the
+     * top level, in a group, a set or a grid row, if the field may use it.
+     *
+     * @param  array<string, mixed>  $composed
+     * @param  array<string, mixed>  $mapped
+     * @param  iterable<Field>  $fields
+     * @return array<string, mixed>
+     */
+    private function carryAssetPaths(array $composed, array $mapped, iterable $fields): array
+    {
+        foreach ($fields as $field) {
+            $handle = $field->handle();
+            if (! array_key_exists($handle, $composed)) {
+                continue;
+            }
+            $value = $composed[$handle];
+            $type = $field->type();
+
+            if ($type === 'assets') {
+                $paths = [];
+                foreach ((array) $value as $path) {
+                    if (is_string($path) && $path !== '' && $this->assetResolver->fieldHasAssetPath($field, ltrim($path, '/'))) {
+                        $paths[] = ltrim($path, '/');
+                    }
+                }
+                if ($paths !== []) {
+                    $mapped[$handle] = (int) ($field->config()['max_files'] ?? 0) === 1 ? $paths[0] : $paths;
+                }
+
+                continue;
+            }
+
+            if (! is_array($value) || ! is_array($mapped[$handle] ?? null)) {
+                continue;
+            }
+
+            if (in_array($type, self::GEN_GROUP_TYPES, true)) {
+                $mapped[$handle] = $this->carryAssetPaths($value, $mapped[$handle], $field->fieldtype()->fields()->all());
+            } elseif ($type === 'grid') {
+                foreach ($value as $i => $row) {
+                    if (is_array($row) && is_array($mapped[$handle][$i] ?? null)) {
+                        $mapped[$handle][$i] = $this->carryAssetPaths($row, $mapped[$handle][$i], $field->fieldtype()->fields()->all());
+                    }
+                }
+            } elseif (in_array($type, ['replicator', 'components'], true)) {
+                foreach ($value as $i => $set) {
+                    if (is_array($set) && is_string($set['type'] ?? null) && ($mapped[$handle][$i]['type'] ?? null) === $set['type']) {
+                        $mapped[$handle][$i] = $this->carryAssetPaths($set, $mapped[$handle][$i], $field->fieldtype()->fields($set['type'])->all());
+                    }
+                }
+            }
+        }
+
+        return $mapped;
+    }
+
+    /**
+     * Lay mapped data over an entry's data the way the agent's updates do:
+     * objects merge, lists (blocks, grid rows) are replaced whole.
+     *
+     * @param  array<string, mixed>  $existing
+     * @param  array<string, mixed>  $mapped
+     * @return array<string, mixed>
+     */
+    public function mergeComposedData(array $existing, array $mapped): array
+    {
+        return $this->deepMergeReplacingLists($existing, $mapped);
+    }
+
+    /**
      * Save generated data as a new entry (draft).
      */
     public function saveEntry(
@@ -3108,6 +3224,12 @@ class EntryGeneratorService
         }
 
         if (str_starts_with($str, '/') && strlen($str) > 1) {
+            return $str;
+        }
+
+        // Anchors on the same page, e-mail and phone links: the link fieldtype
+        // stores them as typed, and editors use them (e.g. "#benefits").
+        if (preg_match('~^(#[\w-]+|mailto:\S+@\S+|tel:[+\d\s()/-]+)$~iu', $str)) {
             return $str;
         }
 

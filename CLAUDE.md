@@ -42,13 +42,16 @@ No linter/formatter is configured.
 ### Access rules
 - `entry_generator` is the master switch for the AI agent; `enable_agent_for_editors` only gates non-super users (super admins always have access). `EntryCreationPolicy` caps entries per request for editors (`editor_limit_entries`).
 - Bulk translations and AI agent settings nav are super-admin only; Glossary & style rules is visible to all CP users; changing it (CP page and Claude connector) needs the `edit translation glossary` permission (`Support/GlossaryAccess`), super admins always.
-- Claude connector (`/mcp`, `src/Mcp/`): any CP account signs in; each tool then follows Statamic's entry policy for that account (`view` to read, `edit` to edit in place or to write a localization, `create` to duplicate via Statamic's `DuplicateEntry` action, `publish` to publish/unpublish, checked on the unsaved localization so target-site access counts).
+- Claude connector (`/mcp`, `src/Mcp/`): any CP account signs in; each tool then follows Statamic's entry policy for that account (`view` to read, `edit` to edit in place or to write a localization, `create` to duplicate via Statamic's `DuplicateEntry` action or to compose a new entry, `publish` to publish/unpublish, checked on the unsaved localization so target-site access counts).
 
 ### AI agent (entry generation)
 Flow: `EntryGeneratorController::generateStream` → `EntryGenerationBatchService::initPlanningSession` → `PlanEntriesJob` → `EntryGenerationPlanner` (agentic mode: LLM calls a `create_entry_job` tool to append plan rows) → one `GeneratePlannedEntryJob` per entry → `EntryGeneratorService` (the large core: blueprint/field schema building, LLM generation, asset/link resolution).
 - Session state lives in the **cache** (not DB), mutated only through `EntryGenerationBatchService::update()` under a `Cache::lock`. The browser polls `generate-progress/{sessionId}`; streaming output is recorded as deltas into the session. A real queue worker and a lock-capable cache are required outside tests.
 - Tool calling: `src/Tools/` — each `ChatTool` is a self-contained class (name, OpenAI-style definition, handler, `maxCalls`), dispatched by `ChatToolRunner` with a shared `ToolContext`. Both the generator loop and the planner use the same runner.
 - Context sources: `PromptUrlFetcher` (Jina reader, `prompt_url_fetch` config) + `HtmlReadableExtractor`, `FigmaContentFetcher` (Figma OAuth, tokens in `FigmaTokenStore`), `RemoteImageFetcher`/`AssetImageDownloader`, and editor-authored hints from `SetHintsService` (YAML at `set_hints_path`).
+
+### Claude connector composing
+`get_content_model` / `preview_compose_entry` / `save_compose_entry` (in `ClaudeTranslationBridge`) reuse the agent: `EntryGeneratorService::compositionBrief()` (schema + block hints + rules), `mapComposedData()` and `mergeComposedData()`. Refactors keep blocks sent back by stored `id` verbatim and only map changed keys (`splitKeptBlocks`/`reassembleBlocks`), because the agent's mapper does not round-trip stored blocks (it drops asset paths and entry references and re-enables disabled sets).
 
 ### Translations (DeepL; LLM only as fallback)
 - Every translation path funnels through `DeeplService::translateBatch()`. Without `DEEPL_API_KEY` (and `translation_llm_fallback` on) it hands the batch to `LlmTranslator` (JSON-in/JSON-out prompt with glossary hits + style rules, per-text retry on a malformed batch). `DeeplService::llmFallbackNotice()` is what controllers/actions surface to editors.
