@@ -32,7 +32,9 @@ class McpController extends Controller
         if (! $this->oauth->requestIsAllowed($request)) {
             return response(json_encode([
                 'error' => 'unauthorized',
-                'message' => 'Sign in with a Control Panel account on the email domain configured for this site.',
+                'message' => $this->oauth->allowsAnyStatamicUser()
+                    ? 'Sign in with a Control Panel account.'
+                    : 'Sign in with a Control Panel account on the email domain configured for this site.',
             ]), 401, [
                 'Content-Type' => 'application/json',
                 'WWW-Authenticate' => 'Bearer resource_metadata="'.$this->oauth->metadataUrl().'"',

@@ -106,4 +106,35 @@ class McpHttpTest extends TestCase
         );
         $this->assertSame('Those credentials were not accepted, or this account cannot use translations.', $sameDomain['error']);
     }
+
+    public function test_any_control_panel_account_can_sign_in_when_the_domain_exception_is_on(): void
+    {
+        config([
+            'app.url' => 'https://cms.example',
+            'statamic-ai-assistant.mcp_email_domain' => 'homie.io',
+            'statamic-ai-assistant.mcp_allow_any_user' => true,
+        ]);
+
+        $open = $this->postJson('/mcp', [
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/list',
+        ]);
+        $open->assertUnauthorized();
+        $open->assertJsonPath('message', 'Sign in with a Control Panel account.');
+
+        $oauth = $this->app->make(McpOAuth::class);
+        $client = $oauth->registerClient(['https://claude.ai/api/mcp/auth_callback']);
+        $this->assertNotNull($client);
+
+        $otherDomain = $oauth->authorize(
+            $client['client_id'],
+            'https://claude.ai/api/mcp/auth_callback',
+            'challenge',
+            'person@woodkit.ch',
+            'secret',
+            null,
+        );
+        $this->assertSame('Those credentials were not accepted, or this account cannot use translations.', $otherDomain['error']);
+    }
 }

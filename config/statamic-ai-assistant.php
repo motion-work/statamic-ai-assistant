@@ -86,15 +86,21 @@ return [
     | domain below.
     | STATAMIC_AI_ASSISTANT_MCP_TOKEN=
     |
-    | Required. One email domain, without the @, in the CMS .env. The connector
-    | stays off until this is set. Empty means Claude cannot connect.
+    | One email domain, without the @, in the CMS .env. The connector stays off
+    | until this is set, unless every Control Panel account is allowed below.
     | STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN=example.com
+    |
+    | Set STATAMIC_AI_ASSISTANT_MCP_ALLOW_ANY_USER=true to let every Control
+    | Panel account sign in, whatever its email domain. The domain above is
+    | then ignored. The connector is on when either this flag or the domain is set.
     |
     */
 
     'mcp_token' => env('STATAMIC_AI_ASSISTANT_MCP_TOKEN'),
 
     'mcp_email_domain' => env('STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN'),
+
+    'mcp_allow_any_user' => filter_var(env('STATAMIC_AI_ASSISTANT_MCP_ALLOW_ANY_USER', false), FILTER_VALIDATE_BOOLEAN),
 
     /*
     |--------------------------------------------------------------------------

@@ -111,7 +111,7 @@ class McpOAuth
         $user = $this->userByEmail($email);
         $hash = $user ? (string) $user->password() : '';
         $passwordMatches = $hash !== '' && Hash::check($password, $hash);
-        if ($user === null || ! $passwordMatches || ! AgentAccess::allows('bulk_translations', $user)) {
+        if ($user === null || ! $passwordMatches || ! $this->userMayUseMcp($user)) {
             return ['error' => 'Those credentials were not accepted, or this account cannot use translations.'];
         }
 
@@ -167,7 +167,7 @@ class McpOAuth
         }
 
         $user = User::find($record['user_id'] ?? '');
-        if ($user === null || ! $this->emailOnAllowedDomain((string) $user->email()) || ! AgentAccess::allows('bulk_translations', $user)) {
+        if ($user === null || ! $this->userMayUseMcp($user)) {
             return null;
         }
 
@@ -176,7 +176,12 @@ class McpOAuth
 
     public function enabled(): bool
     {
-        return $this->requiredEmailDomain() !== '';
+        return $this->allowsAnyStatamicUser() || $this->requiredEmailDomain() !== '';
+    }
+
+    public function allowsAnyStatamicUser(): bool
+    {
+        return (bool) config('statamic-ai-assistant.mcp_allow_any_user');
     }
 
     public function requestIsAllowed(Request $request): bool
@@ -194,7 +199,7 @@ class McpOAuth
 
     private function staticTokenAccepted(Request $request): bool
     {
-        if ($this->requiredEmailDomain() !== '') {
+        if ($this->requiredEmailDomain() !== '' || $this->allowsAnyStatamicUser()) {
             return false;
         }
 
@@ -329,8 +334,22 @@ class McpOAuth
         return ltrim(strtolower(trim((string) config('statamic-ai-assistant.mcp_email_domain'))), '@');
     }
 
+    private function userMayUseMcp(UserContract $user): bool
+    {
+        if ($this->allowsAnyStatamicUser()) {
+            return true;
+        }
+
+        return $this->emailOnAllowedDomain((string) $user->email())
+            && AgentAccess::allows('bulk_translations', $user);
+    }
+
     private function emailOnAllowedDomain(string $email): bool
     {
+        if ($this->allowsAnyStatamicUser()) {
+            return true;
+        }
+
         $domain = $this->requiredEmailDomain();
         if ($domain === '') {
             return false;
