@@ -18,7 +18,7 @@ All notable changes to **motion-work/statamic-ai-assistant** are documented here
 
 ### Changed
 
-- **Glossary and style rules are changed by super admins only:** every Control Panel user can still read them, but the page is read-only for everyone else, and the Claude connector's `save_glossary` and `save_style_rules` refuse other accounts. They apply to every translation on the site.
+- **Changing the glossary and style rules needs a role permission:** new Statamic permission “Edit translation glossary and style rules” (`edit translation glossary`, under Users → Roles, group “AI Assistant”). Every Control Panel user can still read them; without the permission the page is read-only and the Claude connector's `save_glossary` and `save_style_rules` refuse. Super admins always may. Grant it to the roles that maintain terminology (for example Editor) after upgrading, since they apply to every translation on the site.
 
 - **German sidebar label:** “Massenübersetzungen” is now “Übersetzungen”.
 - **AI features need an Infomaniak token:** an empty `INFOMANIAK_API_TOKEN` hides the agent, field buttons, AI instructions and agent access. Translation UI stays only when `DEEPL_API_KEY` is set, or when the token is set and the LLM translation fallback is on.

@@ -3,7 +3,9 @@
 namespace MotionWork\StatamicAiAssistant\Tests\Http;
 
 use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
+use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use Statamic\Facades\Permission;
 use Statamic\Facades\Role;
 use Statamic\Facades\User;
 
@@ -37,7 +39,7 @@ class TranslationGlossaryAccessTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_only_a_super_admin_changes_the_glossary_in_the_control_panel(): void
+    public function test_the_role_permission_decides_who_changes_the_glossary_in_the_control_panel(): void
     {
         $editor = User::make()->id('glossary-editor')->email('editor@example.com')->assignRole('glossary_editor');
         $editor->save();
@@ -52,11 +54,20 @@ class TranslationGlossaryAccessTest extends TestCase
 
         $this->actingAs($super);
         $this->getJson('/cp/ai-translation-glossary/data')->assertJsonPath('can_edit', true);
+
+        Role::find('glossary_editor')->addPermission(GlossaryAccess::PERMISSION)->save();
+        $this->actingAs(User::find('glossary-editor'));
+        $this->getJson('/cp/ai-translation-glossary/data')->assertJsonPath('can_edit', true);
         $this->postJson('/cp/ai-translation-glossary/save', $payload)->assertOk();
         $this->assertFileExists($this->dir.'/style.yaml');
     }
 
-    public function test_only_a_super_admin_changes_the_glossary_from_claude(): void
+    public function test_the_permission_is_listed_for_roles(): void
+    {
+        $this->assertNotNull(Permission::boot()->get(GlossaryAccess::PERMISSION));
+    }
+
+    public function test_the_role_permission_decides_who_changes_the_glossary_from_claude(): void
     {
         $editor = User::make()->id('glossary-editor')->email('editor@example.com')->assignRole('glossary_editor');
         $editor->save();
@@ -82,5 +93,16 @@ class TranslationGlossaryAccessTest extends TestCase
             'params' => ['name' => 'read_glossary', 'arguments' => []],
         ]);
         $this->assertFalse($read['result']['isError'], 'Everyone can still read the glossary.');
+
+        Role::find('glossary_editor')->addPermission(GlossaryAccess::PERMISSION)->save();
+        $server->bridge()->setActor(User::find('glossary-editor'));
+        $saved = $server->dispatch([
+            'jsonrpc' => '2.0',
+            'id' => 3,
+            'method' => 'tools/call',
+            'params' => ['name' => 'save_style_rules', 'arguments' => ['rules' => ['de' => ['Formelle Anrede (Sie).']], 'confirmed' => true]],
+        ]);
+        $this->assertTrue(json_decode($saved['result']['content'][0]['text'], true)['saved']);
+        $this->assertFileExists($this->dir.'/style.yaml');
     }
 }

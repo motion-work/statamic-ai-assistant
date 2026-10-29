@@ -35,6 +35,7 @@ use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
+use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Statamic\Facades\CP\Nav;
@@ -236,6 +237,8 @@ class ServiceProvider extends AddonServiceProvider
         }
         // Managing the access config itself is always super-only.
         Gate::define(AgentAccess::manageGateAbility(), fn () => AgentAccess::canManage());
+
+        GlossaryAccess::register();
 
         // Legacy prompt routes
         $this->registerCpRoutes(function () {

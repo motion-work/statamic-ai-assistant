@@ -6,6 +6,7 @@ use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use MotionWork\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
 use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -545,20 +546,20 @@ class ClaudeTranslationBridge
 
     /**
      * The glossary and style rules apply to every translation on the site, so
-     * only super admins change them, as on the Control Panel page.
+     * changing them needs the role permission, as on the Control Panel page.
      *
      * @return array<string, mixed>|null
      */
     private function refuseGlossary(): ?array
     {
-        if ($this->actor === null || $this->actor->isSuper()) {
+        if ($this->actor === null || GlossaryAccess::canEdit($this->actor)) {
             return null;
         }
 
         return [
             'saved' => false,
             'error' => 'forbidden',
-            'message' => 'Only super admins can change the glossary and style rules. Nothing was saved.',
+            'message' => 'Your Control Panel role cannot change the glossary and style rules. A super admin can grant "Edit translation glossary and style rules" under Users, Roles. Nothing was saved.',
         ];
     }
 

@@ -39,7 +39,7 @@
     </p>
 
     <p v-if="!loading && !canEdit" class="gp-engine-note" role="status">
-      {{ __('Only super admins can change the glossary and style rules.') }}
+      {{ __('Your role cannot change the glossary and style rules.') }}
     </p>
 
     <div class="gp-body">

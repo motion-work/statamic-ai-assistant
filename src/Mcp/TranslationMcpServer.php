@@ -248,7 +248,7 @@ class TranslationMcpServer
                 'type' => 'object',
                 'properties' => new \stdClass,
             ]),
-            $this->tool('save_glossary', 'Replace the whole local glossary. Super admins only. Without confirmed true, nothing is written and the current and next tables are returned. Does not push to DeepL.', [
+            $this->tool('save_glossary', 'Replace the whole local glossary. Needs the role permission to edit the glossary. Without confirmed true, nothing is written and the current and next tables are returned. Does not push to DeepL.', [
                 'type' => 'object',
                 'properties' => [
                     'confirmed' => ['type' => 'boolean'],
@@ -270,7 +270,7 @@ class TranslationMcpServer
                 'type' => 'object',
                 'properties' => new \stdClass,
             ]),
-            $this->tool('save_style_rules', 'Replace the local style rules. Super admins only. Pass the complete set. Without confirmed true, nothing is written. Does not push to DeepL.', [
+            $this->tool('save_style_rules', 'Replace the local style rules. Needs the role permission to edit the glossary. Pass the complete set. Without confirmed true, nothing is written. Does not push to DeepL.', [
                 'type' => 'object',
                 'properties' => [
                     'confirmed' => ['type' => 'boolean'],
