@@ -6,10 +6,14 @@ All notable changes to **motion-work/statamic-ai-assistant** are documented here
 
 ### Added
 
+- **Claude app email domain:** `STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN` in the CMS `.env` is required. Until it is set, `/mcp` is not available. A shared MCP token cannot bypass the domain.
+- **Claude app connector:** every install exposes `{APP_URL}/mcp` once `STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN` is set. Translators add that URL in the Claude app and sign in with a Control Panel account on that domain that can run bulk translations. Claude translates with its own account. Saves are committed through Statamic git automation when that is enabled.
+- **Translations survive a deploy:** entry translations are saved quietly (so relationship sync does not rewrite the source), then queued for Statamic git when git automation is on. Linked localizations from the same run share that one commit.
 - **AI translation fallback:** without `DEEPL_API_KEY`, every translation path (field/Bard, Translate entry action, bulk, terms, navigation) runs on the configured AI model instead of failing with "DeepL API key is not configured". Editors are told each time: an info toast after field/Bard translations, a note in the entry action message (whose label becomes "Translate (AI)"), and an info card on the bulk translations page. Glossary terms that occur in the text and per-language style rules are passed to the model; HTML (Bard) markup is preserved; Swiss German targets use "ss" instead of "ß". New config `translation_llm_fallback` (`STATAMIC_AI_ASSISTANT_TRANSLATION_LLM_FALLBACK`, default `true`).
 
 ### Changed
 
+- **German sidebar label:** “Massenübersetzungen” is now “Übersetzungen”.
 - **AI features need an Infomaniak token:** an empty `INFOMANIAK_API_TOKEN` hides the agent, field buttons, AI instructions and agent access. Translation UI stays only when `DEEPL_API_KEY` is set, or when the token is set and the LLM translation fallback is on.
 - **AI agent localizes instead of duplicating:** asking the agent to translate an existing entry (for example “übersetze diese Seite auf English” / “erstelle den EN-Eintrag”) localizes that source entry onto the target site and translates it there. It no longer creates a separate entry on the site that is open in the Control Panel.
 - **Quick tasks skip reasoning:** Ai Text / Bard generate and refactor, alt text, image analysis and fast-tier helpers now ask Infomaniak reasoning models (Kimi K2.6, Qwen3.5/3.8) to answer without thinking first (≈0.5–3s instead of ≈13–16s, and no more empty replies when `max_tokens` runs out during thinking). The AI agent's planning and entry generation keep thinking on. New config `quick_tasks_without_thinking` (`STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING`, default `true`). Mistral models are skipped automatically, since they reject the switch.

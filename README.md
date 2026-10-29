@@ -32,6 +32,26 @@ Install with Composer. Current releases target **Statamic 6.5+** on the **`3.x`*
 composer require motion-work/statamic-ai-assistant:^3.0
 ```
 
+## Claude app
+
+Translators connect the Claude app (claude.ai, Claude Desktop, or the mobile app) to the site. Claude translates with their own Claude account. The site does not call DeepL or Infomaniak for this. It saves the translation as a localization of the original entry, and on a site with Statamic git automation it commits that save the same way the Control Panel does.
+
+The connector URL is `{APP_URL}/mcp`. `APP_URL` must be the public HTTPS address of that install, because Claude's servers call it. The same package path works on every Statamic site that installs it.
+
+In Claude, open **Customize → Connectors → Add custom connector**:
+
+1. URL: `https://your-site.example/mcp`
+2. Authentication: **Sign in when needed**
+3. OAuth client: **Register automatically**
+
+Each translator then signs in with a Control Panel account that is a super admin or has been granted bulk translations. Set `STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN` in that site's `.env` (for example `homie.io`). Until it is set, `/mcp` is not available. While it is set, only that domain can sign in. Claude shows a preview and writes only after they agree. For French, they ask Claude to localize onto the `fr` site.
+
+A developer can also run the same tools locally, without a public URL, from the Statamic site:
+
+```bash
+php vendor/motion-work/statamic-ai-assistant/bin/mcp
+```
+
 ## How to Use
 The plugin use per default Infomaniak API, a  Swiss solution🇨🇭 respecting the data of your users and the planet. However if you want to switch to a faster generation with a US based company this plugin also comes with Groq API support.
 

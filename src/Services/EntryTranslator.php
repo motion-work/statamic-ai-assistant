@@ -2,8 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
+use MotionWork\StatamicAiAssistant\Mcp\ContentCommitter;
 use MotionWork\StatamicAiAssistant\Services\Concerns\TranslatesFields;
 use MotionWork\StatamicAiAssistant\Support\EntryLabel;
+use Statamic\Facades\User;
 use DeepL\TranslateTextOptions;
 use Illuminate\Support\Str;
 use Statamic\Entries\Entry as StatamicEntry;
@@ -169,6 +171,7 @@ class EntryTranslator
         // which would otherwise sync bidirectional references and corrupt
         // the origin (source-language) entries.
         $targetEntry->saveQuietly();
+        $this->queueContentCommit($originEntry, $targetSite, $currentDepth);
 
         if ($currentDepth > 0) {
             $coll = Collection::findByHandle($targetEntry->collectionHandle());
@@ -213,6 +216,116 @@ class EntryTranslator
         $localizedEntry->saveQuietly();
 
         return true;
+    }
+
+    /**
+     * Texts Claude (or another external translator) should translate.
+     * Nothing is sent to DeepL or the configured AI provider.
+     *
+     * @return array<int, array{id: string, text: string, html: bool}>
+     */
+    public function externalSegments(mixed $entry): array
+    {
+        $this->resetCollector();
+        $this->sourceLang = (string) $entry->locale();
+        $blueprint = $entry->blueprint();
+        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
+        $this->collectFromEntryFields($entry->data()->toArray(), $fields, 0, 0);
+
+        $segments = [];
+        foreach ($this->collectedTexts as $index => $text) {
+            $segments[] = [
+                'id' => (string) $index,
+                'text' => $text,
+                'html' => isset($this->htmlTexts[$index]),
+            ];
+        }
+
+        return $segments;
+    }
+
+    /**
+     * Save a localization whose text was translated outside this addon.
+     * `$translationsById` is keyed by the ids from {@see externalSegments()}.
+     * DeepL and the configured AI provider are not called.
+     *
+     * `$textEntry` supplies the segments. `$originEntry` is the root the
+     * localization stays linked to; it defaults to `$textEntry`.
+     *
+     * @param  array<string, string>  $translationsById
+     */
+    public function saveExternalTranslation(mixed $textEntry, string $targetSite, array $translationsById, mixed $existingTarget = null, mixed $originEntry = null): StatamicEntry
+    {
+        $originEntry = $originEntry ?? $textEntry;
+        $this->linkedEntriesBuffer = [];
+        $this->skippedNonLocalizable = [];
+        $this->resetCollector();
+        $this->sourceLang = (string) $textEntry->locale();
+        $this->targetLang = $targetSite;
+
+        $blueprint = $textEntry->blueprint();
+        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
+        $dataWithPlaceholders = $this->collectFromEntryFields($textEntry->data()->toArray(), $fields, 0, 0);
+
+        $translated = [];
+        foreach ($this->collectedTexts as $index => $unused) {
+            $key = (string) $index;
+            if (! array_key_exists($key, $translationsById) || ! is_string($translationsById[$key])) {
+                throw new \InvalidArgumentException('Missing translation for segment '.$key.'.');
+            }
+            $translated[$index] = $translationsById[$key];
+        }
+
+        $translatedData = $this->replaceInFields($dataWithPlaceholders, $translated);
+        $translatedData = $this->resolveReferences($translatedData, $fields, $targetSite, 0, 0);
+
+        $translatedTitle = $translatedData['title'] ?? '';
+        $translatedSlug = is_string($translatedTitle) && $translatedTitle !== ''
+            ? Str::slug($translatedTitle)
+            : Str::slug((string) $textEntry->slug());
+
+        $targetEntry = $existingTarget;
+        if (! $targetEntry) {
+            $targetEntry = Entry::query()
+                ->where('origin', $originEntry->id())
+                ->where('site', $targetSite)
+                ->first();
+        }
+        if (! $targetEntry) {
+            $targetEntry = Entry::make()
+                ->collection($originEntry->collectionHandle())
+                ->blueprint($blueprint?->handle())
+                ->locale($targetSite)
+                ->origin($originEntry->id());
+        }
+
+        $targetEntry->slug($translatedSlug);
+        $targetEntry->data($translatedData);
+
+        if ($originEntry->published()) {
+            $targetEntry->published(true);
+        }
+
+        $targetEntry->saveQuietly();
+        $this->queueContentCommit($originEntry, $targetSite, 0);
+
+        return $targetEntry;
+    }
+
+    /**
+     * Quiet saves skip Statamic's git listener. One commit at the top of a
+     * translation covers the entry and any linked localizations already written.
+     */
+    private function queueContentCommit(mixed $originEntry, string $targetSite, int $currentDepth): void
+    {
+        if ($currentDepth !== 0) {
+            return;
+        }
+
+        app(ContentCommitter::class)->commit(
+            'Translate "'.EntryLabel::for($originEntry).'" into '.$targetSite,
+            User::current(),
+        );
     }
 
     /**

@@ -1,0 +1,36 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * MCP server for Claude, run from a Statamic site:
+ *
+ *   php vendor/motion-work/statamic-ai-assistant/bin/mcp
+ *
+ * Claude translates with its own account. This process reads entries and
+ * saves the strings Claude sends back. It does not call DeepL or Infomaniak.
+ */
+
+ini_set('display_errors', 'stderr');
+ini_set('log_errors', '1');
+
+set_error_handler(static function (int $severity, string $message): bool {
+    fwrite(STDERR, $message."\n");
+
+    return true;
+});
+
+$root = $argv[1] ?? (getenv('STATAMIC_SITE_ROOT') ?: getcwd() ?: '');
+$root = rtrim((string) $root, '/');
+
+if (! is_file($root.'/artisan') || ! is_file($root.'/vendor/autoload.php')) {
+    fwrite(STDERR, "Run this from the Statamic site (the directory that contains artisan).\n");
+    exit(1);
+}
+
+require $root.'/vendor/autoload.php';
+
+/** @var Illuminate\Foundation\Application $app */
+$app = require $root.'/bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+
+$app->make(MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer::class)->serve();

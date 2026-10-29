@@ -71,6 +71,33 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Claude app connector
+    |--------------------------------------------------------------------------
+    |
+    | The site exposes https://{APP_URL}/mcp for the Claude app (claude.ai,
+    | Claude Desktop, and the mobile app). Translators sign in with a Control
+    | Panel account that may use bulk translations. Claude translates the text
+    | itself. This addon only reads entries and saves what Claude sends back.
+    |
+    | An optional shared token lets an organization that uses request-header
+    | credentials connect without the sign-in screen. Leave it empty to require
+    | a Control Panel sign-in. Generate one with `openssl rand -hex 32`.
+    | The shared token cannot open the connector. Sign-in requires the email
+    | domain below.
+    | STATAMIC_AI_ASSISTANT_MCP_TOKEN=
+    |
+    | Required. One email domain, without the @, in the CMS .env. The connector
+    | stays off until this is set. Empty means Claude cannot connect.
+    | STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN=example.com
+    |
+    */
+
+    'mcp_token' => env('STATAMIC_AI_ASSISTANT_MCP_TOKEN'),
+
+    'mcp_email_domain' => env('STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN'),
+
+    /*
+    |--------------------------------------------------------------------------
     | INFOMANIAK product id
     |--------------------------------------------------------------------------
     |

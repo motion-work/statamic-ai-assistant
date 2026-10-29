@@ -208,6 +208,8 @@ class ServiceProvider extends AddonServiceProvider
 
     public function bootAddon()
     {
+        $this->registerWebRoutes(__DIR__.'/../routes/web.php');
+
         $this->loadJsonTranslationsFrom(__DIR__.'/../resources/lang');
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'statamic-ai-assistant');
 
