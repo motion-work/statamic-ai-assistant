@@ -15,11 +15,15 @@ use Statamic\Facades\Entry as EntryFacade;
 use Statamic\Facades\Site;
 
 /**
- * Translation operations for an external model (Claude).
+ * Translation and editing operations for an external model (Claude).
  *
- * The model translates the text with its own account. These methods only
- * read Statamic, describe the localization they would save, and write the
- * strings the model sends back. DeepL and Infomaniak are not called.
+ * The model writes the text with its own account. These methods only read
+ * Statamic, describe the change they would save, and write the strings the
+ * model sends back. DeepL and Infomaniak are not called.
+ *
+ * A signed-in account only sees entries its Control Panel role may view, and
+ * only writes where the role may edit. Without an account (the local stdio
+ * server) reads and translations are open, and in-place edits are refused.
  */
 class ClaudeTranslationBridge
 {
@@ -75,6 +79,9 @@ class ClaudeTranslationBridge
             if ($needle !== '' && ! str_contains($title, $needle) && ! str_contains($slug, $needle) && ! str_contains((string) $entry->id(), $needle)) {
                 continue;
             }
+            if ($this->actor !== null && ! $this->actor->can('view', $entry)) {
+                continue;
+            }
             $matches[] = $this->entrySummary($entry);
             if (count($matches) >= 20) {
                 break;
@@ -92,6 +99,9 @@ class ClaudeTranslationBridge
         $entry = $this->findEntry($entryId);
         if (isset($entry['error'])) {
             return $entry;
+        }
+        if (($denied = $this->refuse('view', $entry)) !== null) {
+            return $denied;
         }
 
         return array_merge($this->entrySummary($entry), [
@@ -117,6 +127,10 @@ class ClaudeTranslationBridge
         $root = $resolved['root'];
         $site = $resolved['site'];
         $existing = $resolved['existing'];
+        if (($denied = $this->refuseLocalization($source, $root, $site->handle())) !== null) {
+            return $denied;
+        }
+
         $segments = $this->translator->externalSegments($source);
         $token = (string) Str::uuid();
 
@@ -125,6 +139,7 @@ class ClaudeTranslationBridge
             'root_id' => (string) $root->id(),
             'target_site' => $site->handle(),
             'segment_ids' => array_column($segments, 'id'),
+            'user_id' => $this->actor !== null ? (string) $this->actor->id() : null,
         ], now()->addMinutes(self::TOKEN_TTL_MINUTES));
 
         $action = $existing ? 'update' : 'create';
@@ -167,7 +182,7 @@ class ClaudeTranslationBridge
         }
 
         $plan = Cache::get($this->tokenKey($token));
-        if (! is_array($plan)) {
+        if (! is_array($plan) || ($plan['user_id'] ?? null) !== ($this->actor !== null ? (string) $this->actor->id() : null)) {
             return [
                 'saved' => false,
                 'error' => 'preview_required',
@@ -179,6 +194,9 @@ class ClaudeTranslationBridge
         $root = EntryFacade::find($plan['root_id']);
         if (! $source || ! $root) {
             return ['saved' => false, 'error' => 'missing_entry', 'message' => 'The entry from the preview no longer exists. Nothing was saved.'];
+        }
+        if (($denied = $this->refuseLocalization($source, $root, $plan['target_site'])) !== null) {
+            return $denied;
         }
 
         $strings = [];
@@ -225,6 +243,130 @@ class ClaudeTranslationBridge
     }
 
     /**
+     * Without edits, list the entry's editable segments. With edits, describe
+     * the change and return a confirmation_token. Writes nothing.
+     *
+     * @param  array<string, mixed>  $edits
+     * @return array<string, mixed>
+     */
+    public function previewEntryEdit(string $entryId, array $edits): array
+    {
+        $entry = $this->findEntry($entryId);
+        if (is_array($entry)) {
+            return $entry;
+        }
+        if (($denied = $this->refuseEdit($entry)) !== null) {
+            return $denied;
+        }
+
+        $segments = $this->translator->editableSegments($entry);
+        if ($edits === []) {
+            return array_merge($this->entrySummary($entry), [
+                'saved' => false,
+                'segments' => $segments,
+                'message' => 'Call preview_entry_edit again with edits: a map of segment id to the new text. Only the segments you pass change. HTML segments must stay HTML.',
+            ]);
+        }
+
+        $byId = array_column($segments, null, 'id');
+        $changes = [];
+        $unknown = [];
+        foreach ($edits as $id => $text) {
+            $id = (string) $id;
+            if (! isset($byId[$id])) {
+                $unknown[] = $id;
+
+                continue;
+            }
+            if (is_string($text) && $text !== $byId[$id]['text']) {
+                $changes[$id] = ['id' => $id, 'before' => $byId[$id]['text'], 'after' => $text, 'html' => $byId[$id]['html']];
+            }
+        }
+
+        if ($unknown !== []) {
+            return [
+                'saved' => false,
+                'error' => 'unknown_segments',
+                'unknown' => $unknown,
+                'message' => 'These segment ids are not in the entry. Call preview_entry_edit without edits to list them. Nothing was saved.',
+            ];
+        }
+        if ($changes === []) {
+            return ['saved' => false, 'error' => 'no_changes', 'message' => 'The edits match the current text. Nothing would change.'];
+        }
+
+        $token = (string) Str::uuid();
+        Cache::put($this->editTokenKey($token), [
+            'entry_id' => (string) $entry->id(),
+            'user_id' => (string) $this->actor->id(),
+            'edits' => array_map(fn ($change) => $change['after'], $changes),
+            'fingerprint' => $this->fingerprint($segments),
+        ], now()->addMinutes(self::TOKEN_TTL_MINUTES));
+
+        return [
+            'saved' => false,
+            'confirmation_token' => $token,
+            'expires_in_minutes' => self::TOKEN_TTL_MINUTES,
+            'entry' => $this->entrySummary($entry),
+            'changes' => array_values($changes),
+            'message' => 'This will change '.count($changes).' segment(s) of "'.EntryLabel::for($entry).'" (site '.$entry->locale().') in place. '
+                .'Everything else stays as it is, including the slug and the published state. '
+                .'Show the changes to the user. Nothing is saved until save_entry_edit is called with this confirmation_token and confirmed true, after they agree.',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function saveEntryEdit(string $token, bool $confirmed): array
+    {
+        if (! $confirmed) {
+            return [
+                'saved' => false,
+                'error' => 'not_confirmed',
+                'message' => 'Nothing was saved. Show the changes to the user and call save_entry_edit again with confirmed true only after they agree.',
+            ];
+        }
+
+        $plan = Cache::get($this->editTokenKey($token));
+        if (! is_array($plan) || $this->actor === null || $plan['user_id'] !== (string) $this->actor->id()) {
+            return [
+                'saved' => false,
+                'error' => 'preview_required',
+                'message' => 'Call preview_entry_edit with your edits first and reuse its confirmation_token. Nothing was saved.',
+            ];
+        }
+
+        $entry = EntryFacade::find($plan['entry_id']);
+        if (! $entry) {
+            return ['saved' => false, 'error' => 'missing_entry', 'message' => 'The entry from the preview no longer exists. Nothing was saved.'];
+        }
+        if (($denied = $this->refuseEdit($entry)) !== null) {
+            return $denied;
+        }
+        if ($this->fingerprint($this->translator->editableSegments($entry)) !== $plan['fingerprint']) {
+            Cache::forget($this->editTokenKey($token));
+
+            return [
+                'saved' => false,
+                'error' => 'entry_changed',
+                'message' => 'Someone changed this entry after the preview. Read it again and preview the edit anew. Nothing was saved.',
+            ];
+        }
+
+        $this->translator->applySegmentEdits($entry, $plan['edits']);
+        $entry->set('updated_by', $this->actor->id());
+        $entry->set('updated_at', now()->timestamp);
+        $entry->save();
+        Cache::forget($this->editTokenKey($token));
+
+        return array_merge($this->entrySummary($entry), [
+            'saved' => true,
+            'changed_segments' => count($plan['edits']),
+        ]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function readGlossary(): array
@@ -243,6 +385,10 @@ class ClaudeTranslationBridge
      */
     public function saveGlossary(array $entries, bool $confirmed): array
     {
+        if (($denied = $this->refuseGlossary()) !== null) {
+            return $denied;
+        }
+
         if (! $confirmed) {
             return [
                 'saved' => false,
@@ -285,6 +431,10 @@ class ClaudeTranslationBridge
      */
     public function saveStyleRules(array $instructionsByLang, bool $confirmed): array
     {
+        if (($denied = $this->refuseGlossary()) !== null) {
+            return $denied;
+        }
+
         if (! $confirmed) {
             return [
                 'saved' => false,
@@ -365,6 +515,81 @@ class ClaudeTranslationBridge
     }
 
     /**
+     * In-place edits always need an account, so updated_by and the commit
+     * name a person.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function refuseEdit(Entry $entry): ?array
+    {
+        if ($this->actor === null) {
+            return ['saved' => false, 'error' => 'not_signed_in', 'message' => 'Editing needs a signed-in Control Panel account.'];
+        }
+
+        return $this->refuse('edit', $entry);
+    }
+
+    /**
+     * The role must be able to view the source and edit the localization. A
+     * localization that does not exist yet is checked unsaved, so access to
+     * the target site counts as well.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function refuseLocalization(Entry $source, Entry $root, string $targetSite): ?array
+    {
+        $target = $root->existsIn($targetSite) ? $root->in($targetSite) : $root->makeLocalization($targetSite);
+
+        return $this->refuse('view', $source) ?? $this->refuse('edit', $target);
+    }
+
+    /**
+     * The glossary and style rules apply to every translation on the site, so
+     * only super admins change them, as on the Control Panel page.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function refuseGlossary(): ?array
+    {
+        if ($this->actor === null || $this->actor->isSuper()) {
+            return null;
+        }
+
+        return [
+            'saved' => false,
+            'error' => 'forbidden',
+            'message' => 'Only super admins can change the glossary and style rules. Nothing was saved.',
+        ];
+    }
+
+    /**
+     * Statamic's entry policy, as in the Control Panel: the collection
+     * permission, access to the entry's site, and other authors' entries.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function refuse(string $ability, Entry $entry): ?array
+    {
+        if ($this->actor === null || $this->actor->can($ability, $entry)) {
+            return null;
+        }
+
+        return [
+            'saved' => false,
+            'error' => 'forbidden',
+            'message' => 'Your Control Panel role cannot '.$ability.' '.$entry->collectionHandle().' entries on the '.$entry->locale().' site. Nothing was saved.',
+        ];
+    }
+
+    /**
+     * @param  array<int, array{id: string, text: string, html: bool}>  $segments
+     */
+    private function fingerprint(array $segments): string
+    {
+        return hash('sha256', (string) json_encode($segments));
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function entrySummary(Entry $entry): array
@@ -417,5 +642,10 @@ class ClaudeTranslationBridge
     private function tokenKey(string $token): string
     {
         return 'statamic-ai-assistant:mcp-preview:'.$token;
+    }
+
+    private function editTokenKey(string $token): string
+    {
+        return 'statamic-ai-assistant:mcp-edit:'.$token;
     }
 }

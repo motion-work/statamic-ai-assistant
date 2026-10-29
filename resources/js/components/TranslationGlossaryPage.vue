@@ -20,6 +20,7 @@
       <div class="translation-page__hero-actions">
         <span v-if="dirty" class="gp-dirty-pill">{{ __('Unsaved changes') }}</span>
         <button
+          v-if="canEdit"
           type="button"
           class="gp-btn gp-btn--primary"
           :disabled="saving || !dirty"
@@ -35,6 +36,10 @@
 
     <p v-if="!loading && !deeplConfigured" class="gp-engine-note" role="status">
       {{ __('DeepL is not configured, so translations run on the AI model. Glossary terms and style rules are passed to it as instructions.') }}
+    </p>
+
+    <p v-if="!loading && !canEdit" class="gp-engine-note" role="status">
+      {{ __('Only super admins can change the glossary and style rules.') }}
     </p>
 
     <div class="gp-body">
@@ -110,7 +115,7 @@
                 :placeholder="__('Filter terms…')"
               />
             </div>
-            <button type="button" class="gp-btn gp-btn--add" @click="addRow">
+            <button v-if="canEdit" type="button" class="gp-btn gp-btn--add" @click="addRow">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke-width="2" stroke-linecap="round" /></svg>
               {{ __('Add term') }}
             </button>
@@ -118,7 +123,7 @@
 
           <div v-if="rows.length === 0" class="gp-state gp-state--inline">
             <p>{{ __('No glossary terms yet. Add your brand names, room categories, and recurring wording so every translation uses them consistently.') }}</p>
-            <button type="button" class="gp-btn gp-btn--primary" @click="addRow">{{ __('Add first term') }}</button>
+            <button v-if="canEdit" type="button" class="gp-btn gp-btn--primary" @click="addRow">{{ __('Add first term') }}</button>
           </div>
 
           <div v-else class="gp-table-wrap">
@@ -140,6 +145,7 @@
                     <input
                       type="text"
                       class="gp-cell-input"
+                      :readonly="!canEdit"
                       :value="row.terms[lang] || ''"
                       :placeholder="__('Term in :lang', { lang: languageLabel(lang) })"
                       @input="updateTerm(row, lang, $event.target.value)"
@@ -147,6 +153,7 @@
                   </td>
                   <td class="gp-table__actions-col">
                     <button
+                      v-if="canEdit"
                       type="button"
                       class="gp-row-remove"
                       :aria-label="__('Remove term')"
@@ -201,12 +208,14 @@
                   <textarea
                     class="gp-textarea gp-style-item__input"
                     rows="2"
+                    :readonly="!canEdit"
                     :value="rule"
                     :placeholder="stylePlaceholder(lang)"
                     @input="updateStyleInstruction(lang, idx, $event.target.value)"
                     @keydown.enter.exact.prevent="addStyleInstruction(lang, idx)"
                   ></textarea>
                   <button
+                    v-if="canEdit"
                     type="button"
                     class="gp-style-item__remove"
                     :aria-label="__('Remove instruction')"
@@ -217,7 +226,7 @@
                 </li>
               </ul>
 
-              <button type="button" class="gp-style-add" @click="addStyleInstruction(lang)">
+              <button v-if="canEdit" type="button" class="gp-style-add" @click="addStyleInstruction(lang)">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke-width="2" stroke-linecap="round" /></svg>
                 {{ (styleDraft[lang] || []).length === 0 ? __('Add instruction') : __('Add another instruction') }}
               </button>
@@ -262,6 +271,7 @@ export default {
       originalStyleDraft: {},
       glossarySynced: false,
       deeplConfigured: true,
+      canEdit: false,
       syncWarnings: [],
       dirty: false,
       search: "",
@@ -329,6 +339,7 @@ export default {
     },
 
     applyServerState(data) {
+      this.canEdit = data.can_edit === true;
       this.languages = data.languages || [];
       this.rows = (data.entries || []).map((e) => ({
         id: e.id,

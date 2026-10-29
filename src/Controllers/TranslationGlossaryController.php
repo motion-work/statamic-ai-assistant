@@ -8,10 +8,12 @@ use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Statamic\Facades\User;
 
 /**
- * CRUD endpoints for the DeepL glossary + style rules CP page. Deliberately
- * open to every CP user (not super-gated): editors own the terminology.
+ * CRUD endpoints for the DeepL glossary + style rules CP page. Every CP user
+ * can read them; only super admins can change them, because they apply to
+ * every translation on the site.
  */
 class TranslationGlossaryController
 {
@@ -28,6 +30,10 @@ class TranslationGlossaryController
 
     public function save(Request $request): JsonResponse
     {
+        if (! User::current()?->isSuper()) {
+            return response()->json(['error' => __('Only super admins can change the glossary and style rules.')], 403);
+        }
+
         $data = $request->validate([
             'entries' => 'sometimes|array',
             'entries.*' => 'array',
@@ -91,6 +97,7 @@ class TranslationGlossaryController
             // Without a DeepL key there is nothing to sync: the AI translation
             // fallback reads these rules straight from the saved file.
             'deepl_configured' => $this->deepl->isConfigured(),
+            'can_edit' => (bool) User::current()?->isSuper(),
         ];
     }
 }

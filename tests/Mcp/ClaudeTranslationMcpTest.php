@@ -29,6 +29,13 @@ class ClaudeTranslationMcpTest extends TestCase
             'tabs' => ['main' => ['sections' => [['fields' => [
                 ['handle' => 'title', 'field' => ['type' => 'text', 'localizable' => true]],
                 ['handle' => 'intro', 'field' => ['type' => 'textarea', 'localizable' => true]],
+                ['handle' => 'body', 'field' => ['type' => 'bard', 'localizable' => true]],
+                ['handle' => 'blocks', 'field' => ['type' => 'replicator', 'localizable' => true, 'sets' => [
+                    'main' => ['sets' => ['columns' => ['fields' => [
+                        ['handle' => 'label', 'field' => ['type' => 'text']],
+                        ['handle' => 'count', 'field' => ['type' => 'integer']],
+                    ]]]],
+                ]]],
             ]]]]],
         ])->save();
 
@@ -129,6 +136,50 @@ class ClaudeTranslationMcpTest extends TestCase
         $this->assertSame('A long story', $localized->value('intro'));
         $this->assertNotSame($originId, (string) $localized->id());
         $this->assertSame('Geschichte', Entry::find($originId)->value('title'));
+    }
+
+    public function test_numbers_in_the_entry_survive_a_translation(): void
+    {
+        $origin = Entry::make()
+            ->collection('mcp_stories')
+            ->blueprint('article')
+            ->locale('de')
+            ->slug('zahlen')
+            ->data([
+                'title' => 'Zahlen',
+                'intro' => 'Einleitung',
+                'body' => [
+                    ['type' => 'heading', 'attrs' => ['level' => 2], 'content' => [['type' => 'text', 'text' => 'Titel']]],
+                    ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Absatz']]],
+                ],
+                'blocks' => [
+                    ['id' => 'b1', 'type' => 'columns', 'enabled' => true, 'label' => 'Spalten', 'count' => 1],
+                ],
+            ]);
+        $origin->save();
+
+        $server = $this->app->make(TranslationMcpServer::class);
+        $preview = $this->tool($server, 'preview_localization', [
+            'entry_id' => (string) $origin->id(),
+            'target_site' => 'en',
+        ]);
+
+        $translations = [];
+        foreach ($preview['segments'] as $segment) {
+            $translations[$segment['id']] = 'EN '.$segment['text'];
+        }
+
+        $saved = $this->tool($server, 'save_localization', [
+            'confirmation_token' => $preview['confirmation_token'],
+            'confirmed' => true,
+            'translations' => $translations,
+        ]);
+        $this->assertTrue($saved['saved']);
+
+        $data = Entry::find($saved['entry_id'])->data()->all();
+        $this->assertSame(2, $data['body'][0]['attrs']['level']);
+        $this->assertSame(1, $data['blocks'][0]['count']);
+        $this->assertSame('EN Spalten', $data['blocks'][0]['label']);
     }
 
     /**

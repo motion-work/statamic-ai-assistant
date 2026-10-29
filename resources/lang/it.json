@@ -789,6 +789,7 @@
   "Compare": "Confronto",
   "Current text": "Testo attuale",
   "DeepL is not configured, so translations run on the AI model. Glossary terms and style rules are passed to it as instructions.": "DeepL non è configurato, quindi le traduzioni usano il modello di IA. Termini del glossario e regole di stile vengono passati come istruzioni.",
+  "Only super admins can change the glossary and style rules.": "Solo i super amministratori possono modificare il glossario e le regole di stile.",
   "Describe how translations should read in each language: tone, formality, spelling preferences, wording to avoid. Rules apply whenever content is translated INTO that language.": "Descrivi come devono suonare le traduzioni in ogni lingua: tono, formalità, preferenze ortografiche, formulazioni da evitare. Le regole valgono quando il contenuto viene tradotto in quella lingua.",
   "Edit the site instructions and the block and field hints on the AI instructions page.": "Modifica le istruzioni del sito e i suggerimenti per blocchi e campi nella pagina Istruzioni IA.",
   "Figma design context (frames, block names, text layers)": "Contesto di design Figma (frame, nomi dei blocchi, livelli di testo)",

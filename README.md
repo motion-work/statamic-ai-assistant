@@ -46,11 +46,17 @@ In Claude, open **Customize → Connectors → Add custom connector**:
 
 Each translator then signs in with a Control Panel account. The email domain does not matter. An address that is not a Control Panel account cannot connect. Claude shows a preview and writes only after they agree. For French, they ask Claude to localize onto the `fr` site.
 
+Claude can also change the text of an existing entry in place, in any language ("passe den Einleitungstext der Bankkaution-Seite an"). That follows the account's Control Panel role, as for editing in the Control Panel: the collection's edit permission, access to the entry's site, and edit other authors' entries where the blueprint has an author. Claude shows the before and after of each changed text and saves only after the user agrees. Text it was not asked to change stays exactly as it was, and so do the slug and the published state. The save fires Statamic's normal save events, so git automation and other listeners run as for a Control Panel save.
+
+Translating follows the role the same way. Claude only lists and reads entries the account may view, and only saves a localization the account may edit, which includes access to the target site. The glossary and style rules can be read by everyone, but only super admins can change them, in Claude and on the Control Panel page.
+
 A developer can also run the same tools locally, without a public URL, from the Statamic site:
 
 ```bash
 php vendor/motion-work/statamic-ai-assistant/bin/mcp
 ```
+
+The local server has no signed-in account and no role checks, so it can translate but not edit entries in place.
 
 ## How to Use
 The plugin use per default Infomaniak API, a  Swiss solution🇨🇭 respecting the data of your users and the planet. However if you want to switch to a faster generation with a US based company this plugin also comes with Groq API support.

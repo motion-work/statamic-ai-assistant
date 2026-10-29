@@ -41,7 +41,8 @@ No linter/formatter is configured.
 
 ### Access rules
 - `entry_generator` is the master switch for the AI agent; `enable_agent_for_editors` only gates non-super users (super admins always have access). `EntryCreationPolicy` caps entries per request for editors (`editor_limit_entries`).
-- Bulk translations and AI agent settings nav are super-admin only; Glossary & style rules is visible to all CP users.
+- Bulk translations and AI agent settings nav are super-admin only; Glossary & style rules is visible to all CP users, but only super admins can change it (CP page and Claude connector).
+- Claude connector (`/mcp`, `src/Mcp/`): any CP account signs in; each tool then follows Statamic's entry policy for that account (`view` to read, `edit` to edit in place or to write a localization, checked on the unsaved localization so target-site access counts).
 
 ### AI agent (entry generation)
 Flow: `EntryGeneratorController::generateStream` → `EntryGenerationBatchService::initPlanningSession` → `PlanEntriesJob` → `EntryGenerationPlanner` (agentic mode: LLM calls a `create_entry_job` tool to append plan rows) → one `GeneratePlannedEntryJob` per entry → `EntryGeneratorService` (the large core: blueprint/field schema building, LLM generation, asset/link resolution).

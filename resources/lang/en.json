@@ -789,6 +789,7 @@
   "Compare": "Compare",
   "Current text": "Current text",
   "DeepL is not configured, so translations run on the AI model. Glossary terms and style rules are passed to it as instructions.": "DeepL is not configured, so translations run on the AI model. Glossary terms and style rules are passed to it as instructions.",
+  "Only super admins can change the glossary and style rules.": "Only super admins can change the glossary and style rules.",
   "Describe how translations should read in each language: tone, formality, spelling preferences, wording to avoid. Rules apply whenever content is translated INTO that language.": "Describe how translations should read in each language: tone, formality, spelling preferences, wording to avoid. Rules apply whenever content is translated INTO that language.",
   "Edit the site instructions and the block and field hints on the AI instructions page.": "Edit the site instructions and the block and field hints on the AI instructions page.",
   "Figma design context (frames, block names, text layers)": "Figma design context (frames, block names, text layers)",

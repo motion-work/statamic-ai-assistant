@@ -232,6 +232,58 @@ class EntryTranslator
         $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
         $this->collectFromEntryFields($entry->data()->toArray(), $fields, 0, 0);
 
+        return $this->collectedSegments();
+    }
+
+    /**
+     * Every text the entry holds itself, for editing it in place. Unlike
+     * {@see externalSegments()}, fields marked localizable: false count too,
+     * because the edit writes back into the same entry.
+     *
+     * @return array<int, array{id: string, text: string, html: bool}>
+     */
+    public function editableSegments(mixed $entry): array
+    {
+        $this->resetCollector();
+        $blueprint = $entry->blueprint();
+        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
+        $this->collectFromEntryFields($entry->data()->toArray(), $fields, 0, 0, true);
+
+        return $this->collectedSegments();
+    }
+
+    /**
+     * Put edited text back into the same entry, keyed by the ids from
+     * {@see editableSegments()}. Segments left out keep their current value
+     * exactly. The entry is not saved.
+     *
+     * @param  array<string, string>  $editsById
+     */
+    public function applySegmentEdits(mixed $entry, array $editsById): StatamicEntry
+    {
+        $this->resetCollector();
+        $blueprint = $entry->blueprint();
+        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
+        $data = $entry->data()->toArray();
+        $withPlaceholders = $this->collectFromEntryFields($data, $fields, 0, 0, true);
+
+        $edits = [];
+        foreach ($editsById as $id => $text) {
+            if (isset($this->collectedTexts[(int) $id]) && is_string($text)) {
+                $edits[(int) $id] = $text;
+            }
+        }
+
+        $entry->data(array_merge($data, $this->replaceInFields($withPlaceholders, $edits)));
+
+        return $entry;
+    }
+
+    /**
+     * @return array<int, array{id: string, text: string, html: bool}>
+     */
+    private function collectedSegments(): array
+    {
         $segments = [];
         foreach ($this->collectedTexts as $index => $text) {
             $segments[] = [
@@ -362,7 +414,7 @@ class EntryTranslator
      * @param  array<string, array{type: string, localizable: bool, sets?: array, fields?: array}>  $fields
      * @return array<string, mixed>
      */
-    private function collectFromEntryFields(array $data, array $fields, int $currentDepth, int $maxDepth): array
+    private function collectFromEntryFields(array $data, array $fields, int $currentDepth, int $maxDepth, bool $everyField = false): array
     {
         $result = [];
 
@@ -385,7 +437,7 @@ class EntryTranslator
             $fieldType = $fieldDef['type'] ?? null;
             $isLocalizable = $fieldDef['localizable'] ?? true;
 
-            if (! $isLocalizable && ! $this->shouldForceTranslateField($handle, $fieldDef)) {
+            if (! $everyField && ! $isLocalizable && ! $this->shouldForceTranslateField($handle, $fieldDef)) {
                 continue;
             }
 

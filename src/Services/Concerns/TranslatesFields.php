@@ -155,7 +155,7 @@ trait TranslatesFields
         }
 
         if (in_array($fieldType, self::TRANSLATABLE_TYPES)) {
-            return is_string($value) ? $this->collectText($value) : $value;
+            return is_string($value) ? $this->placeholder($value) : $value;
         }
 
         if (in_array($fieldType, self::BARD_TYPES) && is_array($value)) {
@@ -185,7 +185,7 @@ trait TranslatesFields
                     $html = $this->bardContentToHtml($node['content']);
                     $placeholder = $this->collectText($html);
                     $this->htmlTexts[$placeholder] = true;
-                    $node['content'] = ['__bard_merged__' => $placeholder];
+                    $node['content'] = ['__bard_merged__' => $placeholder, '__original__' => $node['content']];
                 } else {
                     $node['content'] = $this->collectFromBard($node['content']);
                 }
@@ -194,7 +194,7 @@ trait TranslatesFields
             }
 
             if (($node['type'] ?? null) === 'text' && isset($node['text']) && trim($node['text']) !== '') {
-                $node['text'] = $this->collectText($node['text']);
+                $node['text'] = $this->placeholder($node['text']);
             }
         }
 
@@ -247,7 +247,7 @@ trait TranslatesFields
     {
         if (is_string($value) && ! $this->looksLikeEntryReference($value)
             && ! $this->looksLikeFilePath($value) && ! $this->looksLikeUrl($value)) {
-            return $this->collectText($value);
+            return $this->placeholder($value);
         }
 
         if (is_array($value)) {
@@ -270,6 +270,18 @@ trait TranslatesFields
         $this->textIndex++;
 
         return $index;
+    }
+
+    /**
+     * Marks where a collected text goes back. An array, not the bare index,
+     * so integers in the data (Bard heading levels, number fields) are never
+     * mistaken for a segment.
+     *
+     * @return array{__segment__: int}
+     */
+    private function placeholder(string $text): array
+    {
+        return ['__segment__' => $this->collectText($text)];
     }
 
     // ── Phase 3a: Replace placeholders ───────────────────────────────
@@ -295,15 +307,19 @@ trait TranslatesFields
      */
     private function replaceInValue(mixed $value, array $translations): mixed
     {
-        if (is_int($value) && isset($translations[$value])) {
-            return $translations[$value];
-        }
-
         if (is_array($value)) {
-            if (isset($value['__bard_merged__']) && is_int($value['__bard_merged__'])) {
-                $html = $translations[$value['__bard_merged__']] ?? '';
+            if (isset($value['__segment__']) && is_int($value['__segment__']) && count($value) === 1) {
+                return $translations[$value['__segment__']] ?? $this->collectedTexts[$value['__segment__']] ?? '';
+            }
 
-                return $this->htmlToBardContent($html);
+            if (isset($value['__bard_merged__']) && is_int($value['__bard_merged__'])) {
+                // A block with no replacement keeps its original nodes rather
+                // than a round trip through HTML.
+                if (! isset($translations[$value['__bard_merged__']]) && isset($value['__original__'])) {
+                    return $value['__original__'];
+                }
+
+                return $this->htmlToBardContent($translations[$value['__bard_merged__']] ?? '');
             }
 
             return array_map(fn ($v) => $this->replaceInValue($v, $translations), $value);

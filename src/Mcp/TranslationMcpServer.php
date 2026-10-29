@@ -5,8 +5,8 @@ namespace MotionWork\StatamicAiAssistant\Mcp;
 /**
  * Stdio MCP server (newline-delimited JSON-RPC) for Claude.
  *
- * Claude translates. Tool calls only read the CMS and save the strings
- * Claude sends back.
+ * Claude translates and edits. Tool calls only read the CMS and save the
+ * strings Claude sends back.
  */
 class TranslationMcpServer
 {
@@ -121,7 +121,7 @@ class TranslationMcpServer
                 'name' => 'statamic-ai-assistant-translations',
                 'version' => '3.x',
             ],
-            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin.',
+            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way; the user\'s Control Panel role decides which entries they may edit.',
         ];
     }
 
@@ -147,6 +147,14 @@ class TranslationMcpServer
             'save_localization' => $this->bridge->saveLocalization(
                 (string) ($arguments['confirmation_token'] ?? ''),
                 is_array($arguments['translations'] ?? null) ? $arguments['translations'] : [],
+                (bool) ($arguments['confirmed'] ?? false),
+            ),
+            'preview_entry_edit' => $this->bridge->previewEntryEdit(
+                (string) ($arguments['entry_id'] ?? ''),
+                is_array($arguments['edits'] ?? null) ? $arguments['edits'] : [],
+            ),
+            'save_entry_edit' => $this->bridge->saveEntryEdit(
+                (string) ($arguments['confirmation_token'] ?? ''),
                 (bool) ($arguments['confirmed'] ?? false),
             ),
             'read_glossary' => $this->bridge->readGlossary(),
@@ -216,11 +224,31 @@ class TranslationMcpServer
                 ],
                 'required' => ['confirmation_token', 'confirmed', 'translations'],
             ]),
+            $this->tool('preview_entry_edit', 'Change the text of an existing entry in place, in any language. Call it with only entry_id to list the entry\'s editable segments. Call it again with edits to get the before/after changes and a confirmation_token. Does not write anything. Refused when the user\'s Control Panel role cannot edit that entry.', [
+                'type' => 'object',
+                'properties' => [
+                    'entry_id' => ['type' => 'string'],
+                    'edits' => [
+                        'type' => 'object',
+                        'additionalProperties' => ['type' => 'string'],
+                        'description' => 'Map of segment id to the new text. Only these segments change. HTML segments must stay HTML.',
+                    ],
+                ],
+                'required' => ['entry_id'],
+            ]),
+            $this->tool('save_entry_edit', 'Save the edit from preview_entry_edit. Requires its confirmation_token and confirmed true after the user agrees. Refused if the entry changed since the preview.', [
+                'type' => 'object',
+                'properties' => [
+                    'confirmation_token' => ['type' => 'string'],
+                    'confirmed' => ['type' => 'boolean'],
+                ],
+                'required' => ['confirmation_token', 'confirmed'],
+            ]),
             $this->tool('read_glossary', 'Read the glossary terms the translation should use. Not synced to DeepL by this connection.', [
                 'type' => 'object',
                 'properties' => new \stdClass,
             ]),
-            $this->tool('save_glossary', 'Replace the whole local glossary. Without confirmed true, nothing is written and the current and next tables are returned. Does not push to DeepL.', [
+            $this->tool('save_glossary', 'Replace the whole local glossary. Super admins only. Without confirmed true, nothing is written and the current and next tables are returned. Does not push to DeepL.', [
                 'type' => 'object',
                 'properties' => [
                     'confirmed' => ['type' => 'boolean'],
@@ -242,7 +270,7 @@ class TranslationMcpServer
                 'type' => 'object',
                 'properties' => new \stdClass,
             ]),
-            $this->tool('save_style_rules', 'Replace the local style rules. Pass the complete set. Without confirmed true, nothing is written. Does not push to DeepL.', [
+            $this->tool('save_style_rules', 'Replace the local style rules. Super admins only. Pass the complete set. Without confirmed true, nothing is written. Does not push to DeepL.', [
                 'type' => 'object',
                 'properties' => [
                     'confirmed' => ['type' => 'boolean'],

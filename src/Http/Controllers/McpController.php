@@ -38,6 +38,9 @@ class McpController extends Controller
 
         $actor = $this->oauth->actor($request);
         if ($actor !== null) {
+            // For this request only, so policies, updated_by, and git
+            // commits see the signed-in account as in the Control Panel.
+            auth()->setUser($actor);
             $this->server->bridge()->setActor($actor);
         }
 

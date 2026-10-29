@@ -7,10 +7,18 @@ All notable changes to **motion-work/statamic-ai-assistant** are documented here
 ### Added
 
 - **Claude app connector:** every install exposes `{APP_URL}/mcp`. Any Control Panel account can sign in, whatever its email domain. An address that is not a Control Panel account is refused. Claude translates with its own account. Saves are committed through Statamic git automation when that is enabled.
+- **Edit entries from the Claude app:** two new connector tools, `preview_entry_edit` and `save_entry_edit`, change the text of an existing entry in place, in any language. The signed-in account's Control Panel role decides which entries it may edit (for example the Editor role). Claude shows each changed text before and after and saves only after the user agrees. Untouched text, the slug and the published state stay as they were. The save fires Statamic's normal events and records the account as `updated_by`. If the entry changed after the preview, nothing is saved.
+- **Claude connector follows the Control Panel role:** entries are listed and read only when the account may view them, and a localization is saved only when the account may edit it, including access to the target site. A preview can only be confirmed by the account that made it.
 - **Translations survive a deploy:** entry translations are saved quietly (so relationship sync does not rewrite the source), then queued for Statamic git when git automation is on. Linked localizations from the same run share that one commit.
 - **AI translation fallback:** without `DEEPL_API_KEY`, every translation path (field/Bard, Translate entry action, bulk, terms, navigation) runs on the configured AI model instead of failing with "DeepL API key is not configured". Editors are told each time: an info toast after field/Bard translations, a note in the entry action message (whose label becomes "Translate (AI)"), and an info card on the bulk translations page. Glossary terms that occur in the text and per-language style rules are passed to the model; HTML (Bard) markup is preserved; Swiss German targets use "ss" instead of "ß". New config `translation_llm_fallback` (`STATAMIC_AI_ASSISTANT_TRANSLATION_LLM_FALLBACK`, default `true`).
 
+### Fixed
+
+- **Numbers survive translations:** translating an entry no longer overwrites Bard heading levels and integer fields whose value matched a text's position (a level-2 heading could become the text of the second segment). This affected DeepL, the AI fallback and the Claude connector.
+
 ### Changed
+
+- **Glossary and style rules are changed by super admins only:** every Control Panel user can still read them, but the page is read-only for everyone else, and the Claude connector's `save_glossary` and `save_style_rules` refuse other accounts. They apply to every translation on the site.
 
 - **German sidebar label:** “Massenübersetzungen” is now “Übersetzungen”.
 - **AI features need an Infomaniak token:** an empty `INFOMANIAK_API_TOKEN` hides the agent, field buttons, AI instructions and agent access. Translation UI stays only when `DEEPL_API_KEY` is set, or when the token is set and the LLM translation fallback is on.
