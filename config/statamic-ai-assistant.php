@@ -75,32 +75,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | The site exposes https://{APP_URL}/mcp for the Claude app (claude.ai,
-    | Claude Desktop, and the mobile app). Translators sign in with a Control
-    | Panel account that may use bulk translations. Claude translates the text
-    | itself. This addon only reads entries and saves what Claude sends back.
-    |
-    | An optional shared token lets an organization that uses request-header
-    | credentials connect without the sign-in screen. Leave it empty to require
-    | a Control Panel sign-in. Generate one with `openssl rand -hex 32`.
-    | The shared token cannot open the connector. Sign-in requires the email
-    | domain below.
-    | STATAMIC_AI_ASSISTANT_MCP_TOKEN=
-    |
-    | One email domain, without the @, in the CMS .env. The connector stays off
-    | until this is set, unless every Control Panel account is allowed below.
-    | STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN=example.com
-    |
-    | Set STATAMIC_AI_ASSISTANT_MCP_ALLOW_ANY_USER=true to let every Control
-    | Panel account sign in, whatever its email domain. The domain above is
-    | then ignored. The connector is on when either this flag or the domain is set.
+    | Claude Desktop, and the mobile app). Any Control Panel account can sign
+    | in. An email that is not a Control Panel account is refused, including
+    | other addresses on the company domain. Claude translates the text itself.
+    | This addon only reads entries and saves what Claude sends back.
     |
     */
-
-    'mcp_token' => env('STATAMIC_AI_ASSISTANT_MCP_TOKEN'),
-
-    'mcp_email_domain' => env('STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN'),
-
-    'mcp_allow_any_user' => filter_var(env('STATAMIC_AI_ASSISTANT_MCP_ALLOW_ANY_USER', false), FILTER_VALIDATE_BOOLEAN),
 
     /*
     |--------------------------------------------------------------------------

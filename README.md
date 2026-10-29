@@ -44,7 +44,7 @@ In Claude, open **Customize → Connectors → Add custom connector**:
 2. Authentication: **Sign in when needed**
 3. OAuth client: **Register automatically**
 
-Each translator then signs in with a Control Panel account. Set `STATAMIC_AI_ASSISTANT_MCP_EMAIL_DOMAIN` in that site's `.env` (for example `homie.io`) to limit sign-in to one domain. Until a domain or the exception below is set, `/mcp` is not available. Set `STATAMIC_AI_ASSISTANT_MCP_ALLOW_ANY_USER=true` when every Control Panel account should be able to sign in, whatever its email domain. Without that exception, the account must be a super admin or have been granted bulk translations, and its email must be on the configured domain. Claude shows a preview and writes only after they agree. For French, they ask Claude to localize onto the `fr` site.
+Each translator then signs in with a Control Panel account. The email domain does not matter. An address that is not a Control Panel account cannot connect. Claude shows a preview and writes only after they agree. For French, they ask Claude to localize onto the `fr` site.
 
 A developer can also run the same tools locally, without a public URL, from the Statamic site:
 

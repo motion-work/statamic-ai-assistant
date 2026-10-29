@@ -4,35 +4,30 @@ namespace MotionWork\StatamicAiAssistant\Tests\Mcp;
 
 use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use Statamic\Facades\User;
 
 class McpHttpTest extends TestCase
 {
-    public function test_the_connector_is_absent_until_a_domain_is_configured(): void
+    public function test_a_shared_token_is_not_a_control_panel_account(): void
     {
         config([
             'app.url' => 'https://cms.example',
-            'statamic-ai-assistant.mcp_email_domain' => '',
             'statamic-ai-assistant.mcp_token' => 'site-token',
         ]);
 
-        $this->postJson('/mcp', [
+        $denied = $this->postJson('/mcp', [
             'jsonrpc' => '2.0',
             'id' => 1,
             'method' => 'tools/list',
-        ], ['Authorization' => 'Bearer site-token'])->assertNotFound();
+        ], ['Authorization' => 'Bearer site-token']);
 
-        $this->getJson('/.well-known/oauth-protected-resource/mcp')->assertNotFound();
-        $this->postJson('/mcp/oauth/register', [
-            'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
-        ])->assertNotFound();
+        $denied->assertUnauthorized();
+        $denied->assertJsonPath('message', 'Sign in with a Control Panel account.');
     }
 
     public function test_the_claude_app_must_authenticate_before_it_can_call_tools(): void
     {
-        config([
-            'app.url' => 'https://cms.example',
-            'statamic-ai-assistant.mcp_email_domain' => 'khamso.ch',
-        ]);
+        config(['app.url' => 'https://cms.example']);
 
         $denied = $this->postJson('/mcp', [
             'jsonrpc' => '2.0',
@@ -54,8 +49,6 @@ class McpHttpTest extends TestCase
 
     public function test_claude_can_register_and_the_sign_in_page_is_offered(): void
     {
-        config(['statamic-ai-assistant.mcp_email_domain' => 'khamso.ch']);
-
         $registered = $this->postJson('/mcp/oauth/register', [
             'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
         ]);
@@ -68,73 +61,51 @@ class McpHttpTest extends TestCase
         $page->assertSee('Connect Claude');
     }
 
-    public function test_sign_in_is_limited_to_the_configured_email_domain(): void
+    public function test_only_a_control_panel_account_can_sign_in(): void
     {
-        config([
-            'statamic-ai-assistant.mcp_email_domain' => 'khamso.ch',
-            'statamic-ai-assistant.mcp_token' => 'site-token',
-        ]);
+        $editor = User::make()
+            ->id('editor-woodkit')
+            ->email('editor@woodkit.ch');
+        $editor->password('correct-horse');
+        $editor->save();
 
-        $denied = $this->postJson('/mcp', [
-            'jsonrpc' => '2.0',
-            'id' => 1,
-            'method' => 'tools/list',
-        ], ['Authorization' => 'Bearer site-token']);
-        $denied->assertUnauthorized();
+        try {
+            $oauth = $this->app->make(McpOAuth::class);
+            $client = $oauth->registerClient(['https://claude.ai/api/mcp/auth_callback']);
+            $this->assertNotNull($client);
 
-        $oauth = $this->app->make(McpOAuth::class);
-        $client = $oauth->registerClient(['https://claude.ai/api/mcp/auth_callback']);
-        $this->assertNotNull($client);
+            $outsider = $oauth->authorize(
+                $client['client_id'],
+                'https://claude.ai/api/mcp/auth_callback',
+                'challenge',
+                'someone@homie.io',
+                'correct-horse',
+                null,
+            );
+            $this->assertSame('Those credentials were not accepted.', $outsider['error']);
 
-        $other = $oauth->authorize(
-            $client['client_id'],
-            'https://claude.ai/api/mcp/auth_callback',
-            'challenge',
-            'person@gmail.com',
-            'secret',
-            null,
-        );
-        $this->assertSame('This site only accepts @khamso.ch accounts.', $other['error']);
+            $wrongPassword = $oauth->authorize(
+                $client['client_id'],
+                'https://claude.ai/api/mcp/auth_callback',
+                'challenge',
+                'editor@woodkit.ch',
+                'nope',
+                null,
+            );
+            $this->assertSame('Those credentials were not accepted.', $wrongPassword['error']);
 
-        $sameDomain = $oauth->authorize(
-            $client['client_id'],
-            'https://claude.ai/api/mcp/auth_callback',
-            'challenge',
-            'person@khamso.ch',
-            'secret',
-            null,
-        );
-        $this->assertSame('Those credentials were not accepted, or this account cannot use translations.', $sameDomain['error']);
-    }
-
-    public function test_any_control_panel_account_can_sign_in_when_the_domain_exception_is_on(): void
-    {
-        config([
-            'app.url' => 'https://cms.example',
-            'statamic-ai-assistant.mcp_email_domain' => 'homie.io',
-            'statamic-ai-assistant.mcp_allow_any_user' => true,
-        ]);
-
-        $open = $this->postJson('/mcp', [
-            'jsonrpc' => '2.0',
-            'id' => 1,
-            'method' => 'tools/list',
-        ]);
-        $open->assertUnauthorized();
-        $open->assertJsonPath('message', 'Sign in with a Control Panel account.');
-
-        $oauth = $this->app->make(McpOAuth::class);
-        $client = $oauth->registerClient(['https://claude.ai/api/mcp/auth_callback']);
-        $this->assertNotNull($client);
-
-        $otherDomain = $oauth->authorize(
-            $client['client_id'],
-            'https://claude.ai/api/mcp/auth_callback',
-            'challenge',
-            'person@woodkit.ch',
-            'secret',
-            null,
-        );
-        $this->assertSame('Those credentials were not accepted, or this account cannot use translations.', $otherDomain['error']);
+            $signedIn = $oauth->authorize(
+                $client['client_id'],
+                'https://claude.ai/api/mcp/auth_callback',
+                'challenge',
+                'editor@woodkit.ch',
+                'correct-horse',
+                null,
+            );
+            $this->assertArrayHasKey('redirect', $signedIn);
+            $this->assertStringStartsWith('https://claude.ai/api/mcp/auth_callback?code=', $signedIn['redirect']);
+        } finally {
+            $editor->delete();
+        }
     }
 }

@@ -2,7 +2,6 @@
 
 namespace MotionWork\StatamicAiAssistant\Mcp;
 
-use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -11,11 +10,11 @@ use Statamic\Contracts\Auth\User as UserContract;
 use Statamic\Facades\User;
 
 /**
- * OAuth for the Claude app, plus an optional shared site token.
+ * OAuth for the Claude app.
  *
- * Claude's servers call this site. A translator signs in with a Control
- * Panel account that may run bulk translations. The shared token is only
- * for organizations that attach a request header instead of signing in.
+ * Claude's servers call this site. A translator signs in with any Control
+ * Panel account. An email that is not a Control Panel account is refused,
+ * including addresses on the company domain.
  */
 class McpOAuth
 {
@@ -104,15 +103,11 @@ class McpOAuth
             return ['error' => 'The Claude connector is not enabled on this site.'];
         }
 
-        if (! $this->emailOnAllowedDomain($email)) {
-            return ['error' => 'This site only accepts @'.$this->requiredEmailDomain().' accounts.'];
-        }
-
         $user = $this->userByEmail($email);
         $hash = $user ? (string) $user->password() : '';
         $passwordMatches = $hash !== '' && Hash::check($password, $hash);
-        if ($user === null || ! $passwordMatches || ! $this->userMayUseMcp($user)) {
-            return ['error' => 'Those credentials were not accepted, or this account cannot use translations.'];
+        if ($user === null || ! $passwordMatches) {
+            return ['error' => 'Those credentials were not accepted.'];
         }
 
         $code = Str::random(48);
@@ -156,71 +151,23 @@ class McpOAuth
 
     public function actor(Request $request): ?UserContract
     {
-        if ($this->staticTokenAccepted($request)) {
-            return null;
-        }
-
         $token = (string) $request->bearerToken();
         $record = $token === '' ? null : Cache::get(self::PREFIX.'access:'.$token);
         if (! is_array($record)) {
             return null;
         }
 
-        $user = User::find($record['user_id'] ?? '');
-        if ($user === null || ! $this->userMayUseMcp($user)) {
-            return null;
-        }
-
-        return $user;
+        return User::find($record['user_id'] ?? '');
     }
 
     public function enabled(): bool
     {
-        return $this->allowsAnyStatamicUser() || $this->requiredEmailDomain() !== '';
-    }
-
-    public function allowsAnyStatamicUser(): bool
-    {
-        return (bool) config('statamic-ai-assistant.mcp_allow_any_user');
+        return true;
     }
 
     public function requestIsAllowed(Request $request): bool
     {
-        if (! $this->enabled()) {
-            return false;
-        }
-
-        if ($this->staticTokenAccepted($request)) {
-            return true;
-        }
-
         return $this->actor($request) !== null;
-    }
-
-    private function staticTokenAccepted(Request $request): bool
-    {
-        if ($this->requiredEmailDomain() !== '' || $this->allowsAnyStatamicUser()) {
-            return false;
-        }
-
-        $configured = trim((string) config('statamic-ai-assistant.mcp_token'));
-        if ($configured === '') {
-            return false;
-        }
-
-        $candidates = array_filter([
-            $request->bearerToken(),
-            $request->header('X-Api-Key'),
-            $request->header('X-Auth-Token'),
-        ], fn ($value) => is_string($value) && $value !== '');
-
-        foreach ($candidates as $candidate) {
-            if (hash_equals($configured, $candidate)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**
@@ -327,35 +274,6 @@ class McpOAuth
         }
 
         return $parts['scheme'] === 'https';
-    }
-
-    private function requiredEmailDomain(): string
-    {
-        return ltrim(strtolower(trim((string) config('statamic-ai-assistant.mcp_email_domain'))), '@');
-    }
-
-    private function userMayUseMcp(UserContract $user): bool
-    {
-        if ($this->allowsAnyStatamicUser()) {
-            return true;
-        }
-
-        return $this->emailOnAllowedDomain((string) $user->email())
-            && AgentAccess::allows('bulk_translations', $user);
-    }
-
-    private function emailOnAllowedDomain(string $email): bool
-    {
-        if ($this->allowsAnyStatamicUser()) {
-            return true;
-        }
-
-        $domain = $this->requiredEmailDomain();
-        if ($domain === '') {
-            return false;
-        }
-
-        return str_ends_with(strtolower(trim($email)), '@'.$domain);
     }
 
     private function userByEmail(string $email): ?UserContract
