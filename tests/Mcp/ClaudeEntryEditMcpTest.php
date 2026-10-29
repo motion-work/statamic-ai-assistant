@@ -38,11 +38,16 @@ class ClaudeEntryEditMcpTest extends TestCase
             'tabs' => ['main' => ['sections' => [['fields' => [
                 ['handle' => 'title', 'field' => ['type' => 'text', 'localizable' => true]],
                 ['handle' => 'kicker', 'field' => ['type' => 'text', 'localizable' => false]],
+                ['handle' => 'featured', 'field' => ['type' => 'toggle', 'display' => 'Featured']],
+                ['handle' => 'theme', 'field' => ['type' => 'select', 'display' => 'Theme', 'options' => ['light' => 'Hell', 'dark' => 'Dunkel']]],
+                ['handle' => 'cta_link', 'field' => ['type' => 'link', 'display' => 'Button link']],
                 ['handle' => 'body', 'field' => ['type' => 'bard', 'localizable' => true]],
                 ['handle' => 'blocks', 'field' => ['type' => 'replicator', 'localizable' => true, 'sets' => [
                     'main' => ['sets' => ['columns' => ['fields' => [
                         ['handle' => 'label', 'field' => ['type' => 'text']],
                         ['handle' => 'count', 'field' => ['type' => 'integer']],
+                        ['handle' => 'style', 'field' => ['type' => 'button_group', 'display' => 'Style', 'options' => [['key' => 'primary', 'value' => 'Primär'], ['key' => 'secondary', 'value' => 'Sekundär']]]],
+                        ['handle' => 'tags', 'field' => ['type' => 'checkboxes', 'options' => ['new', 'sale']]],
                     ]]]],
                 ]]],
             ]]]]],
@@ -178,6 +183,66 @@ class ClaudeEntryEditMcpTest extends TestCase
         $saved = $this->tool($editor, 'save_localization', ['confirmation_token' => $preview['confirmation_token'], 'confirmed' => true, 'translations' => $translations]);
         $this->assertTrue($saved['saved']);
         $this->assertSame('EN Über uns', $saved['title']);
+    }
+
+    public function test_an_editor_changes_toggles_choices_and_links(): void
+    {
+        $page = $this->page();
+        $contact = Entry::make()->collection('mcp_pages')->blueprint('page')->locale('de')->slug('kontakt')->data(['title' => 'Kontakt']);
+        $contact->save();
+        $editor = $this->serverAs($this->user('mcp-editor'));
+
+        $listed = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id()]);
+        $values = [];
+        foreach ($listed['segments'] as $segment) {
+            if (isset($segment['kind'])) {
+                $values[($segment['location'] ? 'columns.' : '').$segment['field']] = $segment;
+            }
+        }
+        $this->assertSame('toggle', $values['featured']['kind']);
+        $this->assertNull($values['featured']['value'], 'A toggle that was never set is listed too.');
+        $this->assertSame(['light' => 'Hell', 'dark' => 'Dunkel'], $values['theme']['options']);
+        $this->assertSame(['primary' => 'Primär', 'secondary' => 'Sekundär'], $values['columns.style']['options']);
+        $this->assertTrue($values['columns.tags']['multiple']);
+        $this->assertSame('Blocks › columns 1', $values['columns.style']['location']);
+        $this->assertSame('link', $values['cta_link']['kind']);
+
+        $invalid = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => [
+            $values['theme']['id'] => 'blue',
+            $values['cta_link']['id'] => 'javascript:alert(1)',
+            $values['columns.tags']['id'] => ['new', 'old'],
+        ]]);
+        $this->assertSame('invalid_values', $invalid['error']);
+        $this->assertCount(3, $invalid['invalid']);
+        $missing = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => [$values['cta_link']['id'] => 'entry::nope']]);
+        $this->assertSame('invalid_values', $missing['error']);
+
+        $preview = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => [
+            $values['featured']['id'] => true,
+            $values['theme']['id'] => 'dark',
+            $values['cta_link']['id'] => 'entry::'.$contact->id(),
+            $values['columns.style']['id'] => 'secondary',
+        ]]);
+        $this->assertCount(4, $preview['changes']);
+        $saved = $this->tool($editor, 'save_entry_edit', ['confirmation_token' => $preview['confirmation_token'], 'confirmed' => true]);
+        $this->assertTrue($saved['saved']);
+
+        $data = Entry::find($page->id())->data()->all();
+        $this->assertTrue($data['featured']);
+        $this->assertSame('dark', $data['theme']);
+        $this->assertSame('entry::'.$contact->id(), $data['cta_link']);
+        $this->assertSame('secondary', $data['blocks'][0]['style']);
+        $this->assertSame(1, $data['blocks'][0]['count']);
+        $this->assertArrayNotHasKey('tags', $data['blocks'][0], 'Fields nobody edited are not added.');
+        $this->assertSame('Über uns', $data['title']);
+
+        $listed = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id()]);
+        $link = collect($listed['segments'])->firstWhere('field', 'cta_link');
+        $this->assertSame('Kontakt', $link['linked_entry']);
+
+        $cleared = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => [$values['theme']['id'] => null]]);
+        $this->tool($editor, 'save_entry_edit', ['confirmation_token' => $cleared['confirmation_token'], 'confirmed' => true]);
+        $this->assertNull(Entry::find($page->id())->get('theme'));
     }
 
     public function test_an_editor_changes_the_slug(): void

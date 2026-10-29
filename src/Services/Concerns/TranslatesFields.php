@@ -14,6 +14,12 @@ trait TranslatesFields
 
     private const SKIP_TYPES = ['assets', 'date', 'toggle', 'section', 'color', 'select', 'button_group', 'terms', 'video'];
 
+    /** Non-text fields an in-place edit may change. Never collected for translation. */
+    private const VALUE_TYPES = ['toggle', 'select', 'button_group', 'checkboxes', 'radio', 'link'];
+
+    /** A value field absent from the data; dropped again unless an edit sets it. */
+    private const MISSING_VALUE = '__statamic_ai_assistant_missing__';
+
     /** @var array<string, string> ProseMirror mark type → HTML tag */
     private const MARK_TO_TAG = [
         'bold' => 'b',
@@ -48,6 +54,17 @@ trait TranslatesFields
     private array $htmlTexts = [];
 
     private int $textIndex = 0;
+
+    /** In-place edits only: also collect toggles, choices and links. */
+    private bool $collectingValues = false;
+
+    /** @var array<int, array{value: mixed, def: array<string, mixed>, set: string|null}> */
+    private array $collectedValues = [];
+
+    /** @var array<int, mixed> New values by collected value index. */
+    private array $valueEdits = [];
+
+    private ?string $currentSet = null;
 
     // ── Phase 1: Collect ─────────────────────────────────────────────
 
@@ -150,6 +167,10 @@ trait TranslatesFields
      */
     private function collectFromField(mixed $value, ?string $fieldType, ?array $fieldDef = null): mixed
     {
+        if ($this->collectingValues && in_array($fieldType, self::VALUE_TYPES, true)) {
+            return $this->valuePlaceholder($value, $fieldDef ?? []);
+        }
+
         if ($value === null || $value === '' || $value === []) {
             return $value;
         }
@@ -211,10 +232,12 @@ trait TranslatesFields
         $setsDefs = $fieldDef['sets'] ?? null;
         $gridFieldsDefs = $fieldDef['fields'] ?? null;
 
+        $position = 0;
         foreach ($sets as &$set) {
             if (! is_array($set)) {
                 continue;
             }
+            $position++;
 
             $setType = $set['type'] ?? null;
             $subFields = null;
@@ -225,8 +248,20 @@ trait TranslatesFields
                 $subFields = $gridFieldsDefs;
             }
 
+            // Where a value sits, for the editor: "Komponenten › tiles 3".
+            $parentSet = $this->currentSet;
+            $this->currentSet = implode(' › ', array_filter([
+                $parentSet,
+                $fieldDef['display'] ?? $fieldDef['handle'] ?? null,
+                (is_string($setType) ? $setType : 'row').' '.$position,
+            ]));
+
             foreach ($set as $key => &$value) {
-                if (in_array($key, ['id', 'type', 'enabled']) || $value === null || $value === '' || $value === []) {
+                if (in_array($key, ['id', 'type', 'enabled'])) {
+                    continue;
+                }
+                $isValueField = $this->collectingValues && in_array($subFields[$key]['type'] ?? null, self::VALUE_TYPES, true);
+                if (! $isValueField && ($value === null || $value === '' || $value === [])) {
                     continue;
                 }
 
@@ -238,6 +273,17 @@ trait TranslatesFields
                     $value = $this->collectFromReplicatorFieldFallback($value);
                 }
             }
+            unset($value);
+
+            if ($this->collectingValues && $subFields !== null) {
+                foreach ($subFields as $key => $subFieldDef) {
+                    if (! array_key_exists($key, $set) && in_array($subFieldDef['type'] ?? null, self::VALUE_TYPES, true)) {
+                        $set[$key] = $this->valuePlaceholder(self::MISSING_VALUE, $subFieldDef);
+                    }
+                }
+            }
+
+            $this->currentSet = $parentSet;
         }
 
         return $sets;
@@ -273,6 +319,18 @@ trait TranslatesFields
     }
 
     /**
+     * @param  array<string, mixed>  $fieldDef
+     * @return array{__value__: int}
+     */
+    private function valuePlaceholder(mixed $value, array $fieldDef): array
+    {
+        $index = count($this->collectedValues);
+        $this->collectedValues[$index] = ['value' => $value, 'def' => $fieldDef, 'set' => $this->currentSet];
+
+        return ['__value__' => $index];
+    }
+
+    /**
      * Marks where a collected text goes back. An array, not the bare index,
      * so integers in the data (Bard heading levels, number fields) are never
      * mistaken for a segment.
@@ -296,7 +354,10 @@ trait TranslatesFields
         $result = [];
 
         foreach ($data as $handle => $value) {
-            $result[$handle] = $this->replaceInValue($value, $translations);
+            $replaced = $this->replaceInValue($value, $translations);
+            if ($replaced !== self::MISSING_VALUE) {
+                $result[$handle] = $replaced;
+            }
         }
 
         return $result;
@@ -312,6 +373,16 @@ trait TranslatesFields
                 return $translations[$value['__segment__']] ?? $this->collectedTexts[$value['__segment__']] ?? '';
             }
 
+            if (isset($value['__value__']) && is_int($value['__value__']) && count($value) === 1) {
+                $original = $this->collectedValues[$value['__value__']]['value'] ?? self::MISSING_VALUE;
+                if (! array_key_exists($value['__value__'], $this->valueEdits)) {
+                    return $original;
+                }
+                $new = $this->valueEdits[$value['__value__']];
+
+                return $new === null && $original === self::MISSING_VALUE ? self::MISSING_VALUE : $new;
+            }
+
             if (isset($value['__bard_merged__']) && is_int($value['__bard_merged__'])) {
                 // A block with no replacement keeps its original nodes rather
                 // than a round trip through HTML.
@@ -322,7 +393,10 @@ trait TranslatesFields
                 return $this->htmlToBardContent($translations[$value['__bard_merged__']] ?? '');
             }
 
-            return array_map(fn ($v) => $this->replaceInValue($v, $translations), $value);
+            return array_filter(
+                array_map(fn ($v) => $this->replaceInValue($v, $translations), $value),
+                fn ($v) => $v !== self::MISSING_VALUE,
+            );
         }
 
         return $value;
@@ -330,6 +404,9 @@ trait TranslatesFields
 
     private function resetCollector(): void
     {
+        $this->collectedValues = [];
+        $this->valueEdits = [];
+        $this->currentSet = null;
         $this->collectedTexts = [];
         $this->htmlTexts = [];
         $this->textIndex = 0;
@@ -1166,7 +1243,15 @@ trait TranslatesFields
         $def = [
             'type' => $field->type(),
             'localizable' => $field->isLocalizable(),
+            'handle' => $field->handle(),
+            'display' => $field->display(),
         ];
+
+        if (in_array($field->type(), ['select', 'button_group', 'checkboxes', 'radio'], true)) {
+            $def['options'] = $this->normalizeOptions($field->get('options'));
+            $def['multiple'] = $field->type() === 'checkboxes' || (bool) $field->get('multiple');
+            $def['taggable'] = (bool) $field->get('taggable');
+        }
 
         if (in_array($field->type(), ['replicator', 'components'])) {
             $def['sets'] = [];
@@ -1181,6 +1266,28 @@ trait TranslatesFields
         }
 
         return $def;
+    }
+
+    /**
+     * Statamic accepts options as a list, a key => label map, or a list of
+     * {key, value} pairs. Always key => label here.
+     *
+     * @return array<string, string>
+     */
+    private function normalizeOptions(mixed $options): array
+    {
+        $normalized = [];
+        foreach (is_array($options) ? $options : [] as $key => $option) {
+            if (is_array($option) && array_key_exists('key', $option)) {
+                $normalized[(string) $option['key']] = (string) ($option['value'] ?? $option['key']);
+            } elseif (is_int($key) && array_is_list($options)) {
+                $normalized[(string) $option] = (string) $option;
+            } else {
+                $normalized[(string) $key] = (string) $option;
+            }
+        }
+
+        return $normalized;
     }
 
     /**

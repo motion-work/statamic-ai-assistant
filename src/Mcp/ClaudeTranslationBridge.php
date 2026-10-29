@@ -280,16 +280,41 @@ class ClaudeTranslationBridge
         $byId = array_column($segments, null, 'id');
         $changes = [];
         $unknown = [];
-        foreach ($edits as $id => $text) {
+        $invalid = [];
+        foreach ($edits as $id => $new) {
             $id = (string) $id;
             if (! isset($byId[$id])) {
                 $unknown[] = $id;
 
                 continue;
             }
-            if (is_string($text) && $text !== $byId[$id]['text']) {
-                $changes[$id] = ['id' => $id, 'before' => $byId[$id]['text'], 'after' => $text, 'html' => $byId[$id]['html']];
+            $segment = $byId[$id];
+            if (isset($segment['kind'])) {
+                $checked = $this->checkValue($segment, $new);
+                if (isset($checked['error'])) {
+                    $invalid[$id] = $checked['error'];
+                } elseif ($checked['value'] !== $segment['value']) {
+                    $changes[$id] = [
+                        'id' => $id,
+                        'kind' => $segment['kind'],
+                        'field' => $segment['label'] ?? $segment['field'],
+                        'location' => $segment['location'],
+                        'before' => $segment['value'],
+                        'after' => $checked['value'],
+                    ];
+                }
+            } elseif (is_string($new) && $new !== $segment['text']) {
+                $changes[$id] = ['id' => $id, 'before' => $segment['text'], 'after' => $new, 'html' => $segment['html']];
             }
+        }
+
+        if ($invalid !== []) {
+            return [
+                'saved' => false,
+                'error' => 'invalid_values',
+                'invalid' => $invalid,
+                'message' => 'Some values are not allowed for their field. Nothing was saved.',
+            ];
         }
 
         if ($unknown !== []) {
@@ -327,7 +352,7 @@ class ClaudeTranslationBridge
 
         $parts = [];
         if ($changes !== []) {
-            $parts[] = count($changes).' text segment(s)';
+            $parts[] = count($changes).' field(s)';
         }
         if ($newSlug !== null) {
             $parts[] = 'the slug from "'.$entry->slug().'" to "'.$newSlug.'"';
@@ -346,6 +371,57 @@ class ClaudeTranslationBridge
                 .'Everything else stays as it is, including the published state. '
                 .'Show the changes to the user. Nothing is saved until save_entry_edit is called with this confirmation_token and confirmed true, after they agree.',
         ];
+    }
+
+    /**
+     * A toggle takes true or false, a choice field one of its options (a list
+     * of them when it allows several), a link a URL, mailto:, tel:, a /path,
+     * a #anchor or entry::<id> of an existing entry. Null clears a choice or
+     * a link.
+     *
+     * @param  array<string, mixed>  $segment
+     * @return array{value: mixed}|array{error: string}
+     */
+    private function checkValue(array $segment, mixed $new): array
+    {
+        if ($segment['kind'] === 'toggle') {
+            $bool = is_bool($new) ? $new : filter_var($new, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            return $bool === null ? ['error' => 'A toggle takes true or false.'] : ['value' => $bool];
+        }
+
+        if ($new === null || $new === '' || $new === []) {
+            return ['value' => null];
+        }
+
+        if ($segment['kind'] === 'choice') {
+            $picked = $segment['multiple'] ? (is_array($new) ? array_values($new) : [$new]) : $new;
+            if (! $segment['multiple'] && ! is_scalar($picked)) {
+                return ['error' => 'This field takes one option.'];
+            }
+            foreach ((array) $picked as $option) {
+                if (! is_scalar($option) || (! $segment['custom_values_allowed'] && ! array_key_exists((string) $option, $segment['options']))) {
+                    return ['error' => 'Pick from the options: '.implode(', ', array_keys($segment['options'])).'.'];
+                }
+            }
+
+            return ['value' => is_array($picked) ? array_map('strval', $picked) : (string) $picked];
+        }
+
+        if (! is_string($new)) {
+            return ['error' => 'A link is a string.'];
+        }
+        $link = trim($new);
+        if (str_starts_with($link, 'entry::')) {
+            return EntryFacade::find(substr($link, 7))
+                ? ['value' => $link]
+                : ['error' => 'No entry has id '.substr($link, 7).'. Use an id from find_entries.'];
+        }
+        if (preg_match('~^(https?://\S+|mailto:\S+|tel:[+\d\s()/-]+|/\S*|#\S+)$~i', $link) !== 1) {
+            return ['error' => 'A link is a full URL, mailto:, tel:, a /path, a #anchor or entry::<id>.'];
+        }
+
+        return ['value' => $link];
     }
 
     /**

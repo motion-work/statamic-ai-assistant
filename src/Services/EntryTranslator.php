@@ -244,39 +244,96 @@ class EntryTranslator
      */
     public function editableSegments(mixed $entry): array
     {
-        $this->resetCollector();
-        $blueprint = $entry->blueprint();
-        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
-        $this->collectFromEntryFields($entry->data()->toArray(), $fields, 0, 0, true);
+        $this->collectForEdit($entry);
 
-        return $this->collectedSegments();
+        $segments = $this->collectedSegments();
+        foreach ($this->collectedValues as $index => $collected) {
+            $segments[] = $this->valueSegment($index, $collected);
+        }
+
+        return $segments;
     }
 
     /**
-     * Put edited text back into the same entry, keyed by the ids from
-     * {@see editableSegments()}. Segments left out keep their current value
-     * exactly. The entry is not saved.
+     * Put edited text and values back into the same entry, keyed by the ids
+     * from {@see editableSegments()}. Segments left out keep their current
+     * value exactly. Values must already be validated. The entry is not saved.
      *
-     * @param  array<string, string>  $editsById
+     * @param  array<string, mixed>  $editsById
      */
     public function applySegmentEdits(mixed $entry, array $editsById): StatamicEntry
     {
-        $this->resetCollector();
-        $blueprint = $entry->blueprint();
-        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
-        $data = $entry->data()->toArray();
-        $withPlaceholders = $this->collectFromEntryFields($data, $fields, 0, 0, true);
+        [$data, $withPlaceholders] = $this->collectForEdit($entry);
 
         $edits = [];
-        foreach ($editsById as $id => $text) {
-            if (isset($this->collectedTexts[(int) $id]) && is_string($text)) {
-                $edits[(int) $id] = $text;
+        foreach ($editsById as $id => $new) {
+            $id = (string) $id;
+            if (str_starts_with($id, 'v') && array_key_exists((int) substr($id, 1), $this->collectedValues)) {
+                $this->valueEdits[(int) substr($id, 1)] = $new;
+            } elseif (isset($this->collectedTexts[(int) $id]) && is_string($new)) {
+                $edits[(int) $id] = $new;
             }
         }
 
         $entry->data(array_merge($data, $this->replaceInFields($withPlaceholders, $edits)));
 
         return $entry;
+    }
+
+    /**
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>}
+     */
+    private function collectForEdit(mixed $entry): array
+    {
+        $this->resetCollector();
+        $blueprint = $entry->blueprint();
+        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
+        $data = $entry->data()->toArray();
+
+        $this->collectingValues = true;
+        try {
+            $withPlaceholders = $this->collectFromEntryFields($data, $fields, 0, 0, true)
+                + $this->collectMissingValueFields($data, $fields, $entry->hasOrigin());
+        } finally {
+            $this->collectingValues = false;
+        }
+
+        return [$data, $withPlaceholders];
+    }
+
+    /**
+     * @param  array{value: mixed, def: array<string, mixed>, set: string|null}  $collected
+     * @return array<string, mixed>
+     */
+    private function valueSegment(int $index, array $collected): array
+    {
+        $def = $collected['def'];
+        $type = $def['type'] ?? '';
+        $value = $collected['value'] === self::MISSING_VALUE ? null : $collected['value'];
+        $segment = [
+            'id' => 'v'.$index,
+            'kind' => match ($type) {
+                'toggle' => 'toggle',
+                'link' => 'link',
+                default => 'choice',
+            },
+            'field' => $def['handle'] ?? null,
+            'label' => $def['display'] ?? null,
+            'location' => $collected['set'],
+            'value' => $value,
+        ];
+
+        if ($segment['kind'] === 'choice') {
+            $segment['options'] = $def['options'] ?? [];
+            $segment['multiple'] = (bool) ($def['multiple'] ?? false);
+            $segment['custom_values_allowed'] = (bool) ($def['taggable'] ?? false);
+        }
+        if ($segment['kind'] === 'link' && is_string($value) && str_starts_with($value, 'entry::')) {
+            $linked = Entry::find(substr($value, 7));
+            $segment['linked_entry'] = $linked ? EntryLabel::for($linked) : null;
+        }
+
+        return $segment;
     }
 
     /**
@@ -419,7 +476,8 @@ class EntryTranslator
         $result = [];
 
         foreach ($data as $handle => $value) {
-            if ($value === null || $value === '') {
+            $isValueField = $this->collectingValues && in_array($fields[$handle]['type'] ?? null, self::VALUE_TYPES, true);
+            if (! $isValueField && ($value === null || $value === '')) {
                 $result[$handle] = $value;
 
                 continue;
@@ -445,6 +503,31 @@ class EntryTranslator
         }
 
         return $result;
+    }
+
+    /**
+     * Value fields of the blueprint that the entry has never set, so an edit
+     * can set them. A localization does not own fields marked
+     * localizable: false, as in the Control Panel.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  array<string, array<string, mixed>>  $fields
+     * @return array<string, mixed>
+     */
+    private function collectMissingValueFields(array $data, array $fields, bool $isLocalization): array
+    {
+        $missing = [];
+        foreach ($fields as $handle => $fieldDef) {
+            if (array_key_exists($handle, $data) || ! in_array($fieldDef['type'] ?? null, self::VALUE_TYPES, true)) {
+                continue;
+            }
+            if ($isLocalization && ! ($fieldDef['localizable'] ?? true)) {
+                continue;
+            }
+            $missing[$handle] = $this->valuePlaceholder(self::MISSING_VALUE, $fieldDef);
+        }
+
+        return $missing;
     }
 
     // ── Phase 3b: Resolve entry references ───────────────────────────
