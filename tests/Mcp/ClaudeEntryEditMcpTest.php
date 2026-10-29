@@ -180,6 +180,67 @@ class ClaudeEntryEditMcpTest extends TestCase
         $this->assertSame('EN Über uns', $saved['title']);
     }
 
+    public function test_an_editor_duplicates_an_entry_like_the_control_panel(): void
+    {
+        $page = $this->page();
+        $english = Entry::make()->collection('mcp_pages')->blueprint('page')->locale('en')->origin($page->id())
+            ->slug('about-us')->data(['title' => 'About us']);
+        $english->save();
+        $editor = $this->serverAs($this->user('mcp-editor'));
+
+        $this->assertSame('forbidden', $this->tool($editor, 'duplicate_entry', ['entry_id' => $page->id(), 'confirmed' => true])['error']);
+
+        Role::find('mcp_editor')->addPermission('create mcp_pages entries')->addPermission('access en site')->save();
+        $editor = $this->serverAs(User::find('mcp-editor'));
+
+        $preview = $this->tool($editor, 'duplicate_entry', ['entry_id' => $english->id()]);
+        $this->assertFalse($preview['saved']);
+        $this->assertSame((string) $page->id(), $preview['entry']['entry_id'], 'A localization is duplicated from its source entry.');
+        $this->assertCount(2, Entry::all());
+
+        $copy = $this->tool($editor, 'duplicate_entry', ['entry_id' => $page->id(), 'confirmed' => true]);
+        $this->assertTrue($copy['saved']);
+        $this->assertNotSame((string) $page->id(), $copy['entry_id']);
+        $this->assertSame((string) $page->id(), $copy['duplicated_from']);
+        $this->assertSame('Über uns (Duplicated)', $copy['title']);
+        $this->assertSame('ueber-uns-1', $copy['slug']);
+        $this->assertFalse($copy['published']);
+        $this->assertCount(1, $copy['localizations']);
+        $this->assertSame('en', $copy['localizations'][0]['site']);
+
+        $saved = Entry::find($copy['entry_id']);
+        $this->assertSame($page->value('body'), $saved->value('body'));
+        $this->assertSame($page->value('blocks'), $saved->value('blocks'));
+        $this->assertSame('Über uns', Entry::find($page->id())->value('title'), 'The original is untouched.');
+    }
+
+    public function test_publishing_follows_the_role(): void
+    {
+        $page = $this->page();
+        $page->published(false)->save();
+        $editor = $this->serverAs($this->user('mcp-editor'));
+
+        $this->assertSame('forbidden', $this->tool($editor, 'set_published', ['entry_id' => $page->id(), 'published' => true, 'confirmed' => true])['error']);
+
+        Role::find('mcp_editor')->addPermission('publish mcp_pages entries')->save();
+        $editor = $this->serverAs(User::find('mcp-editor'));
+
+        $preview = $this->tool($editor, 'set_published', ['entry_id' => $page->id(), 'published' => true]);
+        $this->assertFalse($preview['saved']);
+        $this->assertFalse(Entry::find($page->id())->published(), 'Without confirmed true nothing changes.');
+
+        $published = $this->tool($editor, 'set_published', ['entry_id' => $page->id(), 'published' => true, 'confirmed' => true]);
+        $this->assertTrue($published['saved']);
+        $this->assertTrue(Entry::find($page->id())->published());
+        $this->assertSame('mcp-editor', Entry::find($page->id())->get('updated_by'));
+
+        $already = $this->tool($editor, 'set_published', ['entry_id' => $page->id(), 'published' => true, 'confirmed' => true]);
+        $this->assertFalse($already['saved']);
+
+        $this->tool($editor, 'set_published', ['entry_id' => $page->id(), 'published' => false, 'confirmed' => true]);
+        $this->assertFalse(Entry::find($page->id())->published());
+    }
+
     private function page(): \Statamic\Contracts\Entries\Entry
     {
         $page = Entry::make()

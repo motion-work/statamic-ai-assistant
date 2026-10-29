@@ -121,7 +121,7 @@ class TranslationMcpServer
                 'name' => 'statamic-ai-assistant-translations',
                 'version' => '3.x',
             ],
-            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way; the user\'s Control Panel role decides which entries they may edit.',
+            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
         ];
     }
 
@@ -155,6 +155,15 @@ class TranslationMcpServer
             ),
             'save_entry_edit' => $this->bridge->saveEntryEdit(
                 (string) ($arguments['confirmation_token'] ?? ''),
+                (bool) ($arguments['confirmed'] ?? false),
+            ),
+            'duplicate_entry' => $this->bridge->duplicateEntry(
+                (string) ($arguments['entry_id'] ?? ''),
+                (bool) ($arguments['confirmed'] ?? false),
+            ),
+            'set_published' => $this->bridge->setPublished(
+                (string) ($arguments['entry_id'] ?? ''),
+                (bool) ($arguments['published'] ?? false),
                 (bool) ($arguments['confirmed'] ?? false),
             ),
             'read_glossary' => $this->bridge->readGlossary(),
@@ -243,6 +252,23 @@ class TranslationMcpServer
                     'confirmed' => ['type' => 'boolean'],
                 ],
                 'required' => ['confirmation_token', 'confirmed'],
+            ]),
+            $this->tool('duplicate_entry', 'Duplicate an entry the way the Control Panel does: an unpublished copy with "(Duplicated)" in the title and a new slug, in the same place in the page tree, plus copies of its localizations. Without confirmed true, nothing is written and the result describes the copy. Refused when the user\'s Control Panel role cannot create entries in that collection and site.', [
+                'type' => 'object',
+                'properties' => [
+                    'entry_id' => ['type' => 'string'],
+                    'confirmed' => ['type' => 'boolean'],
+                ],
+                'required' => ['entry_id'],
+            ]),
+            $this->tool('set_published', 'Publish or unpublish one entry in one language. Other languages keep their own state. Without confirmed true, nothing is written and the result describes the change. Refused when the user\'s Control Panel role cannot publish that entry.', [
+                'type' => 'object',
+                'properties' => [
+                    'entry_id' => ['type' => 'string'],
+                    'published' => ['type' => 'boolean', 'description' => 'true to publish, false to unpublish.'],
+                    'confirmed' => ['type' => 'boolean'],
+                ],
+                'required' => ['entry_id', 'published'],
             ]),
             $this->tool('read_glossary', 'Read the glossary terms the translation should use. Not synced to DeepL by this connection.', [
                 'type' => 'object',

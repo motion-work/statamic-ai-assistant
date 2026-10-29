@@ -48,6 +48,8 @@ Each translator then signs in with a Control Panel account. The email domain doe
 
 Claude can also change the text of an existing entry in place, in any language ("passe den Einleitungstext der Bankkaution-Seite an"). That follows the account's Control Panel role, as for editing in the Control Panel: the collection's edit permission, access to the entry's site, and edit other authors' entries where the blueprint has an author. Claude shows the before and after of each changed text and saves only after the user agrees. Text it was not asked to change stays exactly as it was, and so do the slug and the published state. The save fires Statamic's normal save events, so git automation and other listeners run as for a Control Panel save.
 
+Claude can also duplicate an entry and publish or unpublish one, again only where the role allows it: duplicating needs the collection's create permission on that site and works like the Control Panel's Duplicate action (an unpublished copy with "(Duplicated)" and a new slug, plus its localizations). Publishing needs the publish permission and changes one language at a time. Claude describes each change first and acts only after the user agrees.
+
 Translating follows the role the same way. Claude only lists and reads entries the account may view, and only saves a localization the account may edit, which includes access to the target site. The glossary and style rules can be read by everyone. Changing them, in Claude and on the Control Panel page, needs the role permission “Edit translation glossary and style rules” (Users → Roles, group “AI Assistant”); super admins always may.
 
 A developer can also run the same tools locally, without a public URL, from the Statamic site:

@@ -10,6 +10,7 @@ use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
 use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Statamic\Actions\DuplicateEntry;
 use Statamic\Contracts\Auth\User as UserContract;
 use Statamic\Contracts\Entries\Entry;
 use Statamic\Facades\Entry as EntryFacade;
@@ -40,9 +41,16 @@ class ClaudeTranslationBridge
         private ContentCommitter $commits,
     ) {}
 
+    /**
+     * Also the request's logged-in user, so policies, updated_by, git commits
+     * and Statamic's own actions see the account as in the Control Panel.
+     */
     public function setActor(?UserContract $user): void
     {
         $this->actor = $user;
+        if ($user !== null) {
+            auth()->setUser($user);
+        }
     }
 
     /**
@@ -356,8 +364,7 @@ class ClaudeTranslationBridge
         }
 
         $this->translator->applySegmentEdits($entry, $plan['edits']);
-        $entry->set('updated_by', $this->actor->id());
-        $entry->set('updated_at', now()->timestamp);
+        $entry->updateLastModified($this->actor);
         $entry->save();
         Cache::forget($this->editTokenKey($token));
 
@@ -365,6 +372,95 @@ class ClaudeTranslationBridge
             'saved' => true,
             'changed_segments' => count($plan['edits']),
         ]);
+    }
+
+    /**
+     * Statamic's own Duplicate action, as the signed-in account: the copy is
+     * unpublished, gets "(Duplicated)" and a new slug, keeps its place in the
+     * page tree, and brings along the localizations the account may create.
+     * A localization is duplicated from its root entry, as in the Control Panel.
+     *
+     * @return array<string, mixed>
+     */
+    public function duplicateEntry(string $entryId, bool $confirmed): array
+    {
+        $entry = $this->findEntry($entryId);
+        if (is_array($entry)) {
+            return $entry;
+        }
+        if (($denied = $this->refuseCreate($entry)) !== null) {
+            return $denied;
+        }
+
+        $root = $entry->hasOrigin() && $entry->root() ? $entry->root() : $entry;
+        if (! $confirmed) {
+            $localizations = $root->descendants()->count();
+
+            return [
+                'saved' => false,
+                'entry' => $this->entrySummary($root),
+                'message' => 'This will create an unpublished copy of "'.EntryLabel::for($root).'" (site '.$root->locale().') with "(Duplicated)" in the title and a new slug'
+                    .($localizations > 0 ? ', plus copies of its '.$localizations.' localization(s) where your role may create entries' : '')
+                    .($root !== $entry ? '. You picked a localization, so its source entry is copied, as in the Control Panel' : '')
+                    .'. Show this to the user and call duplicate_entry again with confirmed true only after they agree.',
+            ];
+        }
+
+        $before = $this->copiesOf($root);
+        (new DuplicateEntry)->context(['view' => 'list'])->run(collect([$entry]), []);
+        $copyId = array_values(array_diff($this->copiesOf($root), $before))[0] ?? null;
+        $copy = $copyId !== null ? EntryFacade::find($copyId) : null;
+        if (! $copy) {
+            return ['saved' => false, 'error' => 'not_duplicated', 'message' => 'The entry could not be duplicated.'];
+        }
+
+        $localizations = EntryFacade::query()->where('origin', $copy->id())->get();
+
+        return array_merge($this->entrySummary($copy), [
+            'saved' => true,
+            'duplicated_from' => (string) $root->id(),
+            'localizations' => $localizations->map(fn ($e) => $this->entrySummary($e))->values()->all(),
+            'message' => 'The copy is unpublished. Use preview_entry_edit to change its text, and set_published to publish it.',
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function setPublished(string $entryId, bool $published, bool $confirmed): array
+    {
+        $entry = $this->findEntry($entryId);
+        if (is_array($entry)) {
+            return $entry;
+        }
+        if ($this->actor === null) {
+            return ['saved' => false, 'error' => 'not_signed_in', 'message' => 'Publishing needs a signed-in Control Panel account.'];
+        }
+        if (($denied = $this->refuse('publish', $entry)) !== null) {
+            return $denied;
+        }
+
+        $verb = $published ? 'publish' : 'unpublish';
+        if ((bool) $entry->published() === $published) {
+            return array_merge($this->entrySummary($entry), [
+                'saved' => false,
+                'message' => 'The entry is already '.($published ? 'published' : 'unpublished').'. Nothing would change.',
+            ]);
+        }
+        if (! $confirmed) {
+            return array_merge($this->entrySummary($entry), [
+                'saved' => false,
+                'message' => 'This will '.$verb.' "'.EntryLabel::for($entry).'" (site '.$entry->locale().') only'
+                    .($published ? ', so it shows on the website' : ', so it no longer shows on the website')
+                    .'. Other languages keep their own state. Show this to the user and call set_published again with confirmed true only after they agree.',
+            ]);
+        }
+
+        $entry->published($published);
+        $entry->updateLastModified($this->actor);
+        $entry->save();
+
+        return array_merge($this->entrySummary($entry), ['saved' => true]);
     }
 
     /**
@@ -528,6 +624,39 @@ class ClaudeTranslationBridge
         }
 
         return $this->refuse('edit', $entry);
+    }
+
+    /**
+     * Statamic's Duplicate check: the role may create entries in this
+     * collection on this site.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function refuseCreate(Entry $entry): ?array
+    {
+        if ($this->actor === null) {
+            return ['saved' => false, 'error' => 'not_signed_in', 'message' => 'Duplicating needs a signed-in Control Panel account.'];
+        }
+        if ($this->actor->can('create', [Entry::class, $entry->collection(), $entry->site()])) {
+            return null;
+        }
+
+        return [
+            'saved' => false,
+            'error' => 'forbidden',
+            'message' => 'Your Control Panel role cannot create '.$entry->collectionHandle().' entries on the '.$entry->locale().' site. Nothing was saved.',
+        ];
+    }
+
+    /**
+     * Ids of the entries duplicated from this one. The action does not return
+     * its copy, so the new id is the one that appears after it runs.
+     *
+     * @return array<int, string>
+     */
+    private function copiesOf(Entry $original): array
+    {
+        return EntryFacade::query()->where('duplicated_from', $original->id())->get()->map(fn ($e) => (string) $e->id())->all();
     }
 
     /**
