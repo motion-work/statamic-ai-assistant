@@ -152,6 +152,7 @@ class TranslationMcpServer
             'preview_entry_edit' => $this->bridge->previewEntryEdit(
                 (string) ($arguments['entry_id'] ?? ''),
                 is_array($arguments['edits'] ?? null) ? $arguments['edits'] : [],
+                isset($arguments['slug']) ? (string) $arguments['slug'] : null,
             ),
             'save_entry_edit' => $this->bridge->saveEntryEdit(
                 (string) ($arguments['confirmation_token'] ?? ''),
@@ -233,7 +234,7 @@ class TranslationMcpServer
                 ],
                 'required' => ['confirmation_token', 'confirmed', 'translations'],
             ]),
-            $this->tool('preview_entry_edit', 'Change the text of an existing entry in place, in any language. Call it with only entry_id to list the entry\'s editable segments. Call it again with edits to get the before/after changes and a confirmation_token. Does not write anything. Refused when the user\'s Control Panel role cannot edit that entry.', [
+            $this->tool('preview_entry_edit', 'Change the text of an existing entry in place, in any language. Call it with only entry_id to list the entry\'s editable segments and its slug. Call it again with edits and/or a new slug to get the before/after changes and a confirmation_token. A new slug changes the page\'s web address. Does not write anything. Refused when the user\'s Control Panel role cannot edit that entry.', [
                 'type' => 'object',
                 'properties' => [
                     'entry_id' => ['type' => 'string'],
@@ -242,6 +243,7 @@ class TranslationMcpServer
                         'additionalProperties' => ['type' => 'string'],
                         'description' => 'Map of segment id to the new text. Only these segments change. HTML segments must stay HTML.',
                     ],
+                    'slug' => ['type' => 'string', 'description' => 'Optional new slug. Formatted like the Control Panel slug field (lowercase, hyphens, umlauts spelled out).'],
                 ],
                 'required' => ['entry_id'],
             ]),

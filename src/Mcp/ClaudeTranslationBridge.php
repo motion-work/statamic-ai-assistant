@@ -252,13 +252,13 @@ class ClaudeTranslationBridge
     }
 
     /**
-     * Without edits, list the entry's editable segments. With edits, describe
-     * the change and return a confirmation_token. Writes nothing.
+     * Without edits or a slug, list the entry's editable segments. With them,
+     * describe the change and return a confirmation_token. Writes nothing.
      *
      * @param  array<string, mixed>  $edits
      * @return array<string, mixed>
      */
-    public function previewEntryEdit(string $entryId, array $edits): array
+    public function previewEntryEdit(string $entryId, array $edits, ?string $slug = null): array
     {
         $entry = $this->findEntry($entryId);
         if (is_array($entry)) {
@@ -269,11 +269,11 @@ class ClaudeTranslationBridge
         }
 
         $segments = $this->translator->editableSegments($entry);
-        if ($edits === []) {
+        if ($edits === [] && ($slug === null || trim($slug) === '')) {
             return array_merge($this->entrySummary($entry), [
                 'saved' => false,
                 'segments' => $segments,
-                'message' => 'Call preview_entry_edit again with edits: a map of segment id to the new text. Only the segments you pass change. HTML segments must stay HTML.',
+                'message' => 'Call preview_entry_edit again with edits (a map of segment id to the new text) and/or a new slug. Only what you pass changes. HTML segments must stay HTML.',
             ]);
         }
 
@@ -300,8 +300,20 @@ class ClaudeTranslationBridge
                 'message' => 'These segment ids are not in the entry. Call preview_entry_edit without edits to list them. Nothing was saved.',
             ];
         }
-        if ($changes === []) {
-            return ['saved' => false, 'error' => 'no_changes', 'message' => 'The edits match the current text. Nothing would change.'];
+
+        $newSlug = null;
+        if ($slug !== null && trim($slug) !== '') {
+            $newSlug = $this->normalizeSlug($entry, $slug);
+            if (is_array($newSlug)) {
+                return $newSlug;
+            }
+            if ($newSlug === (string) $entry->slug()) {
+                $newSlug = null;
+            }
+        }
+
+        if ($changes === [] && $newSlug === null) {
+            return ['saved' => false, 'error' => 'no_changes', 'message' => 'The edits match the current entry. Nothing would change.'];
         }
 
         $token = (string) Str::uuid();
@@ -309,8 +321,18 @@ class ClaudeTranslationBridge
             'entry_id' => (string) $entry->id(),
             'user_id' => (string) $this->actor->id(),
             'edits' => array_map(fn ($change) => $change['after'], $changes),
-            'fingerprint' => $this->fingerprint($segments),
+            'slug' => $newSlug,
+            'fingerprint' => $this->fingerprint($entry, $segments),
         ], now()->addMinutes(self::TOKEN_TTL_MINUTES));
+
+        $parts = [];
+        if ($changes !== []) {
+            $parts[] = count($changes).' text segment(s)';
+        }
+        if ($newSlug !== null) {
+            $parts[] = 'the slug from "'.$entry->slug().'" to "'.$newSlug.'"';
+        }
+        $address = $newSlug !== null ? 'The new slug changes the page\'s web address, so old links to it stop working unless a redirect is added. ' : '';
 
         return [
             'saved' => false,
@@ -318,10 +340,38 @@ class ClaudeTranslationBridge
             'expires_in_minutes' => self::TOKEN_TTL_MINUTES,
             'entry' => $this->entrySummary($entry),
             'changes' => array_values($changes),
-            'message' => 'This will change '.count($changes).' segment(s) of "'.EntryLabel::for($entry).'" (site '.$entry->locale().') in place. '
-                .'Everything else stays as it is, including the slug and the published state. '
+            'slug' => $newSlug !== null ? ['before' => (string) $entry->slug(), 'after' => $newSlug] : null,
+            'message' => 'This will change '.implode(' and ', $parts).' of "'.EntryLabel::for($entry).'" (site '.$entry->locale().'). '
+                .$address
+                .'Everything else stays as it is, including the published state. '
                 .'Show the changes to the user. Nothing is saved until save_entry_edit is called with this confirmation_token and confirmed true, after they agree.',
         ];
+    }
+
+    /**
+     * Format a slug as Statamic's slug field does, in the site's language,
+     * and refuse one another entry in the same collection and site has.
+     *
+     * @return string|array<string, mixed>
+     */
+    private function normalizeSlug(Entry $entry, string $slug): string|array
+    {
+        $normalized = Str::slug($slug, '-', $entry->site()->lang());
+        if ($normalized === '') {
+            return ['saved' => false, 'error' => 'invalid_slug', 'message' => 'The slug needs letters or numbers. Nothing was saved.'];
+        }
+
+        $taken = EntryFacade::query()
+            ->where('collection', $entry->collectionHandle())
+            ->where('site', $entry->locale())
+            ->where('slug', $normalized)
+            ->get()
+            ->contains(fn ($other) => (string) $other->id() !== (string) $entry->id());
+        if ($taken) {
+            return ['saved' => false, 'error' => 'slug_taken', 'message' => 'Another '.$entry->collectionHandle().' entry on the '.$entry->locale().' site already uses the slug "'.$normalized.'". Nothing was saved.'];
+        }
+
+        return $normalized;
     }
 
     /**
@@ -353,7 +403,7 @@ class ClaudeTranslationBridge
         if (($denied = $this->refuseEdit($entry)) !== null) {
             return $denied;
         }
-        if ($this->fingerprint($this->translator->editableSegments($entry)) !== $plan['fingerprint']) {
+        if ($this->fingerprint($entry, $this->translator->editableSegments($entry)) !== $plan['fingerprint']) {
             Cache::forget($this->editTokenKey($token));
 
             return [
@@ -361,6 +411,14 @@ class ClaudeTranslationBridge
                 'error' => 'entry_changed',
                 'message' => 'Someone changed this entry after the preview. Read it again and preview the edit anew. Nothing was saved.',
             ];
+        }
+
+        if ($plan['slug'] !== null) {
+            $slug = $this->normalizeSlug($entry, $plan['slug']);
+            if (is_array($slug)) {
+                return $slug;
+            }
+            $entry->slug($slug);
         }
 
         $this->translator->applySegmentEdits($entry, $plan['edits']);
@@ -371,6 +429,7 @@ class ClaudeTranslationBridge
         return array_merge($this->entrySummary($entry), [
             'saved' => true,
             'changed_segments' => count($plan['edits']),
+            'slug_changed' => $plan['slug'] !== null,
         ]);
     }
 
@@ -714,9 +773,9 @@ class ClaudeTranslationBridge
     /**
      * @param  array<int, array{id: string, text: string, html: bool}>  $segments
      */
-    private function fingerprint(array $segments): string
+    private function fingerprint(Entry $entry, array $segments): string
     {
-        return hash('sha256', (string) json_encode($segments));
+        return hash('sha256', (string) json_encode([$entry->slug(), $segments]));
     }
 
     /**

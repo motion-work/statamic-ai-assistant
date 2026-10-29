@@ -180,6 +180,37 @@ class ClaudeEntryEditMcpTest extends TestCase
         $this->assertSame('EN Über uns', $saved['title']);
     }
 
+    public function test_an_editor_changes_the_slug(): void
+    {
+        $page = $this->page();
+        Entry::make()->collection('mcp_pages')->blueprint('page')->locale('de')->slug('kontakt')->data(['title' => 'Kontakt'])->save();
+        $editor = $this->serverAs($this->user('mcp-editor'));
+
+        $taken = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'slug' => 'Kontakt']);
+        $this->assertSame('slug_taken', $taken['error']);
+
+        $preview = $this->tool($editor, 'preview_entry_edit', [
+            'entry_id' => $page->id(),
+            'slug' => 'Über Homie',
+            'edits' => ['0' => 'Über Homie'],
+        ]);
+        $this->assertSame(['before' => 'ueber-uns', 'after' => 'ueber-homie'], $preview['slug']);
+        $this->assertStringContainsString('web address', $preview['message']);
+        $this->assertSame('ueber-uns', Entry::find($page->id())->slug(), 'A preview writes nothing.');
+
+        $saved = $this->tool($editor, 'save_entry_edit', ['confirmation_token' => $preview['confirmation_token'], 'confirmed' => true]);
+        $this->assertTrue($saved['saved']);
+        $this->assertTrue($saved['slug_changed']);
+        $this->assertSame('ueber-homie', Entry::find($page->id())->slug());
+        $this->assertSame('Über Homie', Entry::find($page->id())->value('title'));
+
+        $stale = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'slug' => 'homie']);
+        Entry::find($page->id())->slug('anders')->save();
+        $refused = $this->tool($editor, 'save_entry_edit', ['confirmation_token' => $stale['confirmation_token'], 'confirmed' => true]);
+        $this->assertSame('entry_changed', $refused['error']);
+        $this->assertSame('anders', Entry::find($page->id())->slug());
+    }
+
     public function test_an_editor_duplicates_an_entry_like_the_control_panel(): void
     {
         $page = $this->page();
