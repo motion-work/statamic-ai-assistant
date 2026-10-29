@@ -17,10 +17,6 @@ class McpController extends Controller
 
     public function handle(Request $request): Response
     {
-        if (! $this->oauth->enabled()) {
-            abort(404);
-        }
-
         if ($request->isMethod('DELETE')) {
             return response('', 204);
         }

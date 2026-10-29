@@ -4,6 +4,7 @@ namespace MotionWork\StatamicAiAssistant\Http\Controllers;
 
 use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Controller;
@@ -14,22 +15,16 @@ class McpOAuthController extends Controller
 
     public function protectedResource(): JsonResponse
     {
-        $this->ensureEnabled();
-
         return response()->json($this->oauth->protectedResource());
     }
 
     public function authorizationServer(): JsonResponse
     {
-        $this->ensureEnabled();
-
         return response()->json($this->oauth->authorizationServer());
     }
 
     public function register(Request $request): JsonResponse
     {
-        $this->ensureEnabled();
-
         $redirects = $request->input('redirect_uris', []);
         if (! is_array($redirects)) {
             $redirects = [];
@@ -53,8 +48,6 @@ class McpOAuthController extends Controller
 
     public function authorizeForm(Request $request): Response
     {
-        $this->ensureEnabled();
-
         return response()->view('statamic-ai-assistant::mcp-authorize', [
             'site' => (string) config('app.name'),
             'error' => null,
@@ -62,10 +55,8 @@ class McpOAuthController extends Controller
         ]);
     }
 
-    public function authorizeSubmit(Request $request): Response
+    public function authorizeSubmit(Request $request): Response|RedirectResponse
     {
-        $this->ensureEnabled();
-
         $result = $this->oauth->authorize(
             (string) $request->query('client_id', $request->input('client_id')),
             (string) $request->query('redirect_uri', $request->input('redirect_uri')),
@@ -88,8 +79,6 @@ class McpOAuthController extends Controller
 
     public function token(Request $request): JsonResponse
     {
-        $this->ensureEnabled();
-
         $basic = null;
         $header = (string) $request->header('Authorization', '');
         if (str_starts_with($header, 'Basic ')) {
@@ -105,10 +94,5 @@ class McpOAuthController extends Controller
         }
 
         return response()->json($issued);
-    }
-
-    private function ensureEnabled(): void
-    {
-        abort_unless($this->oauth->enabled(), 404);
     }
 }

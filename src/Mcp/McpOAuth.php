@@ -99,10 +99,6 @@ class McpOAuth
             return ['error' => 'This sign-in request is not valid.'];
         }
 
-        if (! $this->enabled()) {
-            return ['error' => 'The Claude connector is not enabled on this site.'];
-        }
-
         $user = $this->userByEmail($email);
         $hash = $user ? (string) $user->password() : '';
         $passwordMatches = $hash !== '' && Hash::check($password, $hash);
@@ -158,11 +154,6 @@ class McpOAuth
         }
 
         return User::find($record['user_id'] ?? '');
-    }
-
-    public function enabled(): bool
-    {
-        return true;
     }
 
     public function requestIsAllowed(Request $request): bool

@@ -10,10 +10,7 @@ class McpHttpTest extends TestCase
 {
     public function test_a_shared_token_is_not_a_control_panel_account(): void
     {
-        config([
-            'app.url' => 'https://cms.example',
-            'statamic-ai-assistant.mcp_token' => 'site-token',
-        ]);
+        config(['app.url' => 'https://cms.example']);
 
         $denied = $this->postJson('/mcp', [
             'jsonrpc' => '2.0',
@@ -106,6 +103,51 @@ class McpHttpTest extends TestCase
             $this->assertStringStartsWith('https://claude.ai/api/mcp/auth_callback?code=', $signedIn['redirect']);
         } finally {
             $editor->delete();
+        }
+    }
+
+    public function test_a_control_panel_account_on_any_domain_can_call_tools_until_it_is_deleted(): void
+    {
+        $translator = User::make()
+            ->id('translator-elsewhere')
+            ->email('translator@freelance.example');
+        $translator->password('correct-horse');
+        $translator->save();
+
+        try {
+            $registered = $this->postJson('/mcp/oauth/register', [
+                'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
+            ]);
+            $clientId = $registered->json('client_id');
+            $verifier = str_repeat('v', 64);
+            $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+
+            $signIn = $this->post('/mcp/oauth/authorize?'.http_build_query([
+                'client_id' => $clientId,
+                'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+                'code_challenge' => $challenge,
+            ]), ['email' => 'translator@freelance.example', 'password' => 'correct-horse']);
+            $signIn->assertRedirect();
+            parse_str((string) parse_url((string) $signIn->headers->get('Location'), PHP_URL_QUERY), $query);
+
+            $token = $this->postJson('/mcp/oauth/token', [
+                'grant_type' => 'authorization_code',
+                'client_id' => $clientId,
+                'code' => $query['code'],
+                'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+                'code_verifier' => $verifier,
+            ]);
+            $token->assertOk();
+            $headers = ['Authorization' => 'Bearer '.$token->json('access_token')];
+            $listTools = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'];
+
+            $this->postJson('/mcp', $listTools, $headers)->assertOk();
+
+            $translator->delete();
+
+            $this->postJson('/mcp', $listTools, $headers)->assertUnauthorized();
+        } finally {
+            $translator->delete();
         }
     }
 }
