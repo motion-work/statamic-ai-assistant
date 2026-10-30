@@ -35,7 +35,9 @@
     </header>
 
     <p v-if="!loading && !deeplConfigured" class="gp-engine-note" role="status">
-      {{ __('DeepL is not configured, so translations run on the AI model. Glossary terms and style rules are passed to it as instructions.') }}
+      {{ aiTranslation
+        ? __('DeepL is not configured, so translations run on the AI model. Glossary terms and style rules are passed to it as instructions.')
+        : __('Neither DeepL nor an AI model is configured. Claude follows the glossary and style rules when it translates or edits through the Claude app.') }}
     </p>
 
     <p v-if="!loading && !canEdit" class="gp-engine-note" role="status">
@@ -271,6 +273,7 @@ export default {
       originalStyleDraft: {},
       glossarySynced: false,
       deeplConfigured: true,
+      aiTranslation: true,
       canEdit: false,
       syncWarnings: [],
       dirty: false,
@@ -361,6 +364,7 @@ export default {
       this.originalStyleDraft = JSON.parse(JSON.stringify(styleDraft));
       this.glossarySynced = !!data.glossary_synced;
       this.deeplConfigured = data.deepl_configured !== false;
+      this.aiTranslation = data.ai_translation !== false;
       this.dirty = false;
     },
 

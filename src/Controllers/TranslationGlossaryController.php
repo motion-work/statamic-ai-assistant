@@ -8,6 +8,7 @@ use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
 
 /**
@@ -97,6 +98,7 @@ class TranslationGlossaryController
             // Without a DeepL key there is nothing to sync: the AI translation
             // fallback reads these rules straight from the saved file.
             'deepl_configured' => $this->deepl->isConfigured(),
+            'ai_translation' => CpFeatures::translationsEnabled(),
             'can_edit' => GlossaryAccess::canEdit(),
         ];
     }

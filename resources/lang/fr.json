@@ -867,5 +867,6 @@
   "No role": "Aucun rôle",
   "Granted through the user's role. Change it on the role.": "Accordé par le rôle de l'utilisateur. À modifier sur le rôle.",
   "via role": "par le rôle",
-  "Structure tools": "Outils de structure"
+  "Structure tools": "Outils de structure",
+  "Neither DeepL nor an AI model is configured. Claude follows the glossary and style rules when it translates or edits through the Claude app.": "Ni DeepL ni un modèle d'IA n'est configuré. Claude suit le glossaire et les règles de style lorsqu'il traduit ou modifie via l'app Claude."
 }

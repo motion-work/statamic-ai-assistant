@@ -277,13 +277,10 @@ class ServiceProvider extends AddonServiceProvider
         }
 
         // Glossary & style rules: visible to EVERY CP user — editors own the
-        // terminology and tone applied across all translation paths.
-        if (config('statamic-ai-assistant.translations', true)) {
+        // terminology and tone applied across all translation paths. Shown
+        // without DeepL or an AI model too, since Claude uses them.
+        if (CpFeatures::glossaryEnabled()) {
             Nav::extend(function ($nav) use ($section) {
-                if (! CpFeatures::translationsEnabled()) {
-                    return;
-                }
-
                 $nav->create(__('Glossary & style rules'))
                     ->section($section())
                     ->route('statamic-ai-assistant.glossary.page')

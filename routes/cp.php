@@ -69,9 +69,8 @@ Route::prefix('ai-agent-access')->name('statamic-ai-assistant.access.')
 
 Route::prefix('ai-translation-glossary')->name('statamic-ai-assistant.glossary.')->group(function () {
     Route::get('/', function () {
-        if (! CpFeatures::translationsEnabled()) {
-            abort(404);
-        }
+        // Also without DeepL or an AI model: the Claude connector uses them.
+        abort_unless(CpFeatures::glossaryEnabled(), 404);
 
         return view('statamic-ai-assistant::translation-glossary');
     })->name('page');

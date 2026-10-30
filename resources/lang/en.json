@@ -867,5 +867,6 @@
   "No role": "No role",
   "Granted through the user's role. Change it on the role.": "Granted through the user's role. Change it on the role.",
   "via role": "via role",
-  "Structure tools": "Structure tools"
+  "Structure tools": "Structure tools",
+  "Neither DeepL nor an AI model is configured. Claude follows the glossary and style rules when it translates or edits through the Claude app.": "Neither DeepL nor an AI model is configured. Claude follows the glossary and style rules when it translates or edits through the Claude app."
 }

@@ -62,6 +62,24 @@ class TranslationGlossaryAccessTest extends TestCase
         $this->assertFileExists($this->dir.'/style.yaml');
     }
 
+    public function test_the_page_works_without_deepl_or_an_ai_model_because_claude_uses_it(): void
+    {
+        config(['statamic-ai-assistant.infomaniak_api_token' => null]);
+        $super = User::make()->id('glossary-super')->email('super@example.com')->makeSuper();
+        $super->save();
+        $this->actingAs($super);
+
+        $this->get('/cp/ai-translation-glossary')->assertOk();
+        $this->getJson('/cp/ai-translation-glossary/data')
+            ->assertJsonPath('deepl_configured', false)
+            ->assertJsonPath('ai_translation', false);
+        $this->postJson('/cp/ai-translation-glossary/save', ['styles' => ['de' => ['Formelle Anrede (Sie).']]])->assertOk();
+        $this->assertFileExists($this->dir.'/style.yaml');
+
+        config(['statamic-ai-assistant.translations' => false]);
+        $this->get('/cp/ai-translation-glossary')->assertNotFound();
+    }
+
     public function test_the_permission_is_listed_for_roles(): void
     {
         $this->assertNotNull(Permission::boot()->get(GlossaryAccess::PERMISSION));
