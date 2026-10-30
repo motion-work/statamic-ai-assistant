@@ -20,11 +20,15 @@ use Statamic\Facades\YAML;
  *     limits: { default: 1, roles: { editor: 3 }, users: { user-id: 10 } }
  *   bulk_translations: { roles: [...], users: [...] }
  *   agent_settings:    { roles: [...], users: [...] }
+ *   claude_restricted: true       # off (default): the connector follows the CP role alone
+ *   claude_read:    { roles: [...], users: [...] }
+ *   claude_edit:    { roles: [...], users: [...] }
+ *   claude_publish: { roles: [...], users: [...] }
  */
 class AgentAccessStore
 {
     /** Gated capabilities. `agent` additionally carries entry-generation limits. */
-    public const FEATURES = ['agent', 'bulk_translations', 'agent_settings', 'advanced_tools'];
+    public const FEATURES = ['agent', 'bulk_translations', 'agent_settings', 'advanced_tools', 'claude_read', 'claude_edit', 'claude_publish'];
 
     /** @var array<string, mixed>|null */
     private ?array $cache = null;
@@ -91,6 +95,15 @@ class AgentAccessStore
             'roles' => $this->intMap($limits['roles'] ?? []),
             'users' => $this->intMap($limits['users'] ?? []),
         ];
+    }
+
+    /**
+     * Whether the Claude connector grants apply. Off until a super admin
+     * turns it on, so existing connector users keep their access.
+     */
+    public function claudeRestricted(): bool
+    {
+        return (bool) ($this->all()['claude_restricted'] ?? false);
     }
 
     /**
@@ -166,6 +179,8 @@ class AgentAccessStore
 
             $out[$feature] = $normalized;
         }
+
+        $out['claude_restricted'] = filter_var($input['claude_restricted'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         return $out;
     }

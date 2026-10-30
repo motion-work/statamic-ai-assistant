@@ -105,6 +105,9 @@ class McpOAuth
         if ($user === null || ! $passwordMatches) {
             return ['error' => 'Those credentials were not accepted.'];
         }
+        if (! \MotionWork\StatamicAiAssistant\Support\ClaudeAccess::allows($user, 'read')) {
+            return ['error' => \MotionWork\StatamicAiAssistant\Support\ClaudeAccess::denial('read')];
+        }
 
         $code = Str::random(48);
         Cache::put(self::PREFIX.'code:'.$code, [

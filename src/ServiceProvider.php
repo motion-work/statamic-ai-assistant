@@ -308,20 +308,15 @@ class ServiceProvider extends AddonServiceProvider
             });
         }
 
-        // "AI agent access" — super-admins only.
-        if (config('statamic-ai-assistant.entry_generator', true)) {
-            Nav::extend(function ($nav) use ($section) {
-                if (! CpFeatures::aiEnabled()) {
-                    return;
-                }
-
-                $nav->create(__('AI agent access'))
-                    ->section($section())
-                    ->route('statamic-ai-assistant.access.page')
-                    ->icon('permissions')
-                    ->can(AgentAccess::manageGateAbility());
-            });
-        }
+        // "AI & Claude access" — super-admins only. Always listed: the Claude
+        // connector has its own access levels even without AI features.
+        Nav::extend(function ($nav) use ($section) {
+            $nav->create(__('AI & Claude access'))
+                ->section($section())
+                ->route('statamic-ai-assistant.access.page')
+                ->icon('permissions')
+                ->can(AgentAccess::manageGateAbility());
+        });
 
         Statamic::provideToScript([
             'translationsActiv' => fn () => CpFeatures::translationsEnabled(),

@@ -10,7 +10,7 @@
           </svg>
         </div>
         <div class="translation-page__hero-text">
-          <p class="translation-page__eyebrow">{{ __('AI agent') }}</p>
+          <p class="translation-page__eyebrow">{{ __('AI assistant') }}</p>
           <h1 class="translation-page__title">{{ __('Who has access') }}</h1>
           <p class="translation-page__subtitle">
             {{ __('Choose who can use each capability. Everyone with a selected role gets access; add individual users for exceptions. Super admins always have full access.') }}
@@ -59,6 +59,12 @@
             <span class="ax-hint">{{ __('Applies to granted users without a specific limit. Super admins are never limited.') }}</span>
           </div>
 
+          <label v-if="feat.key === 'claude'" class="ax-switch">
+            <input v-model="access.claude_restricted" type="checkbox" class="ax-chip__box" />
+            <span>{{ __('Restrict Claude connector access') }}</span>
+          </label>
+
+          <template v-else>
           <!-- Roles -->
           <div class="ax-group">
             <div class="ax-group__label">{{ __('Roles') }}</div>
@@ -120,6 +126,7 @@
               </li>
             </ul>
           </div>
+          </template>
         </section>
       </template>
     </div>
@@ -141,6 +148,7 @@ export default {
       users: [],
       ceiling: 100,
       userFilter: '',
+      aiEnabled: true,
       access: this.emptyAccess(),
       original: '{}',
     };
@@ -148,12 +156,29 @@ export default {
 
   computed: {
     features() {
-      return [
+      const agent = [
         { key: 'agent', label: this.__('AI agent'), description: this.__('Generate and chat with the agent to create or update entries.') },
         { key: 'bulk_translations', label: this.__('Bulk translations'), description: this.__('Translate many entries at once from the Bulk translations tool.') },
         { key: 'agent_settings', label: this.__('AI instructions'), description: this.__('Edit the site instructions and the block and field hints on the AI instructions page.') },
         { key: 'advanced_tools', label: this.__('Advanced structure tools'), description: this.__('Let the agent create and modify collections, blueprints and taxonomies. Structural changes are applied immediately — grant with care.') },
       ];
+      const claude = [
+        {
+          key: 'claude',
+          label: this.__('Claude connector'),
+          description: this.access.claude_restricted
+            ? this.__('Only the roles and users below can use the Claude app with this site, and only up to their level. The Control Panel role still applies on top: Claude can never do more than the account may do in the Control Panel.')
+            : this.__('Off: everyone can use the Claude app with this site as far as their Control Panel role allows. Turn on to give each role or user a level of its own, for example editing in the Control Panel but only reading through Claude.'),
+        },
+      ];
+      if (this.access.claude_restricted) {
+        claude.push(
+          { key: 'claude_read', label: this.__('Claude: read'), description: this.__('Find and read entries, the content model, the asset library, the glossary and style rules.') },
+          { key: 'claude_edit', label: this.__('Claude: edit'), description: this.__('Also edit and translate entries, compose and duplicate them, upload images, and change the glossary and style rules.') },
+          { key: 'claude_publish', label: this.__('Claude: publish'), description: this.__('Also publish and unpublish entries.') },
+        );
+      }
+      return [...(this.aiEnabled ? agent : []), ...claude];
     },
 
     filteredUsers() {
@@ -180,6 +205,10 @@ export default {
         bulk_translations: { roles: [], users: [] },
         agent_settings: { roles: [], users: [] },
         advanced_tools: { roles: [], users: [] },
+        claude_restricted: false,
+        claude_read: { roles: [], users: [] },
+        claude_edit: { roles: [], users: [] },
+        claude_publish: { roles: [], users: [] },
       };
     },
 
@@ -201,6 +230,10 @@ export default {
         bulk_translations: feat('bulk_translations'),
         agent_settings: feat('agent_settings'),
         advanced_tools: feat('advanced_tools'),
+        claude_restricted: raw?.claude_restricted === true,
+        claude_read: feat('claude_read'),
+        claude_edit: feat('claude_edit'),
+        claude_publish: feat('claude_publish'),
       };
     },
 
@@ -212,6 +245,7 @@ export default {
         this.roles = data.roles || [];
         this.users = data.users || [];
         this.ceiling = data.ceiling || 100;
+        this.aiEnabled = data.aiEnabled !== false;
         this.access = this.normalize(data.access || {});
         this.original = JSON.stringify(this.access);
       } catch (e) {
@@ -412,6 +446,15 @@ export default {
   margin-bottom: 1.1rem;
   background: var(--tp-surface-muted, #f9fafb);
   border-radius: 0.6rem;
+}
+
+.ax-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
 }
 
 .ax-default__label {

@@ -204,7 +204,7 @@ class ClaudeEntryEditMcpTest extends TestCase
         $this->assertSame(['light' => 'Hell', 'dark' => 'Dunkel'], $values['theme']['options']);
         $this->assertSame(['primary' => 'Primär', 'secondary' => 'Sekundär'], $values['columns.style']['options']);
         $this->assertTrue($values['columns.tags']['multiple']);
-        $this->assertSame('Blocks › columns 1', $values['columns.style']['location']);
+        $this->assertSame('Blocks › columns 1 "Spalten"', $values['columns.style']['location'], 'A block is named by its heading.');
         $this->assertSame('link', $values['cta_link']['kind']);
 
         $invalid = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => [

@@ -4,6 +4,7 @@ namespace MotionWork\StatamicAiAssistant\Controllers;
 
 use MotionWork\StatamicAiAssistant\Services\AgentAccessStore;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
+use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,6 +42,8 @@ class AgentAccessController
                 ])->values()->all(),
             'access' => $this->store->all(),
             'ceiling' => EntryCreationPolicy::configuredMaxPlanEntries(),
+            // Without AI features only the Claude connector section applies.
+            'aiEnabled' => CpFeatures::aiEnabled() && (bool) config('statamic-ai-assistant.entry_generator', true),
         ]);
     }
 
@@ -55,6 +58,7 @@ class AgentAccessController
 
         $data = $request->validate([
             'access' => 'required|array',
+            'access.claude_restricted' => 'sometimes|boolean',
             'access.*.roles' => 'sometimes|array',
             'access.*.roles.*' => 'string',
             'access.*.users' => 'sometimes|array',

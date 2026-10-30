@@ -15,7 +15,7 @@ trait TranslatesFields
     private const SKIP_TYPES = ['assets', 'date', 'toggle', 'section', 'color', 'select', 'button_group', 'terms', 'video'];
 
     /** Non-text fields an in-place edit may change. Never collected for translation. */
-    private const VALUE_TYPES = ['toggle', 'select', 'button_group', 'checkboxes', 'radio', 'link'];
+    private const VALUE_TYPES = ['toggle', 'select', 'button_group', 'checkboxes', 'radio', 'link', 'assets'];
 
     /** A value field absent from the data; dropped again unless an edit sets it. */
     private const MISSING_VALUE = '__statamic_ai_assistant_missing__';
@@ -55,7 +55,7 @@ trait TranslatesFields
 
     private int $textIndex = 0;
 
-    /** In-place edits only: also collect toggles, choices and links. */
+    /** In-place edits only: also collect toggles, choices, links and images. */
     private bool $collectingValues = false;
 
     /** @var array<int, array{value: mixed, def: array<string, mixed>, set: string|null}> */
@@ -248,12 +248,13 @@ trait TranslatesFields
                 $subFields = $gridFieldsDefs;
             }
 
-            // Where a value sits, for the editor: "Komponenten › tiles 3".
+            // Where a value sits, for the editor: Komponenten › tiles 3 "Sicherheit".
             $parentSet = $this->currentSet;
+            $headline = $this->collectingValues ? $this->setHeadline($set) : null;
             $this->currentSet = implode(' › ', array_filter([
                 $parentSet,
                 $fieldDef['display'] ?? $fieldDef['handle'] ?? null,
-                (is_string($setType) ? $setType : 'row').' '.$position,
+                (is_string($setType) ? $setType : 'row').' '.$position.($headline !== null ? ' "'.$headline.'"' : ''),
             ]));
 
             foreach ($set as $key => &$value) {
@@ -287,6 +288,36 @@ trait TranslatesFields
         }
 
         return $sets;
+    }
+
+    /**
+     * The block's own heading, so a request like "the Bankkaution section"
+     * can be matched to its values. Plain text or Bard.
+     *
+     * @param  array<string, mixed>  $set
+     */
+    private function setHeadline(array $set): ?string
+    {
+        foreach (['title', 'heading', 'headline', 'label', 'name'] as $key) {
+            $value = $set[$key] ?? null;
+            if (is_array($value)) {
+                $text = [];
+                array_walk_recursive($value, function ($node, $k) use (&$text) {
+                    if ($k === 'text' && is_string($node)) {
+                        $text[] = $node;
+                    }
+                });
+                $value = implode(' ', $text);
+            }
+            if (is_string($value)) {
+                $value = trim(preg_replace('/\s+/u', ' ', str_replace("\u{00AD}", '', strip_tags($value))));
+                if ($value !== '') {
+                    return \Illuminate\Support\Str::limit($value, 40);
+                }
+            }
+        }
+
+        return null;
     }
 
     private function collectFromReplicatorFieldFallback(mixed $value): mixed
@@ -1251,6 +1282,14 @@ trait TranslatesFields
             $def['options'] = $this->normalizeOptions($field->get('options'));
             $def['multiple'] = $field->type() === 'checkboxes' || (bool) $field->get('multiple');
             $def['taggable'] = (bool) $field->get('taggable');
+        }
+
+        if ($field->type() === 'assets') {
+            $containers = \Statamic\Facades\AssetContainer::all();
+            $def['container'] = $field->get('container') ?: ($containers->count() === 1 ? $containers->first()->handle() : null);
+            $def['folder'] = trim((string) $field->get('folder'), '/');
+            $def['restrict'] = (bool) $field->get('restrict');
+            $def['max_files'] = (int) $field->get('max_files');
         }
 
         if (in_array($field->type(), ['replicator', 'components'])) {

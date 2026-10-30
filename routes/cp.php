@@ -60,11 +60,8 @@ Route::prefix('ai-block-hints')->name('statamic-ai-assistant.block-hints.')
 Route::prefix('ai-agent-access')->name('statamic-ai-assistant.access.')
     ->middleware('can:'.AgentAccess::manageGateAbility())
     ->group(function () {
-        Route::get('/', function () {
-            abort_unless(CpFeatures::aiEnabled(), 404);
-
-            return view('statamic-ai-assistant::agent-access');
-        })->name('page');
+        // Always available: the Claude connector works without AI features.
+        Route::get('/', fn () => view('statamic-ai-assistant::agent-access'))->name('page');
 
         Route::get('/data', [AgentAccessController::class, 'index'])->name('data');
         Route::post('/save', [AgentAccessController::class, 'save'])->name('save');

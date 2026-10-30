@@ -2,6 +2,7 @@
 
 use MotionWork\StatamicAiAssistant\Http\Controllers\McpController;
 use MotionWork\StatamicAiAssistant\Http\Controllers\McpOAuthController;
+use MotionWork\StatamicAiAssistant\Http\Controllers\McpUploadController;
 use Illuminate\Support\Facades\Route;
 
 $csrf = [
@@ -26,6 +27,13 @@ Route::post('/mcp/oauth/authorize', [McpOAuthController::class, 'authorizeSubmit
 Route::post('/mcp/oauth/token', [McpOAuthController::class, 'token'])
     ->withoutMiddleware($csrf)
     ->middleware('throttle:30,1');
+
+Route::get('/mcp/upload/{token}', [McpUploadController::class, 'form'])
+    ->where('token', '[A-Za-z0-9]{40}');
+Route::post('/mcp/upload/{token}', [McpUploadController::class, 'store'])
+    ->where('token', '[A-Za-z0-9]{40}')
+    ->withoutMiddleware($csrf)
+    ->middleware('throttle:20,1');
 
 Route::match(['get', 'post', 'delete'], '/mcp', [McpController::class, 'handle'])
     ->withoutMiddleware($csrf)

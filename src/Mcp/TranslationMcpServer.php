@@ -2,6 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Mcp;
 
+use MotionWork\StatamicAiAssistant\Support\ClaudeAccess;
+
 /**
  * Stdio MCP server (newline-delimited JSON-RPC) for Claude.
  *
@@ -10,6 +12,25 @@ namespace MotionWork\StatamicAiAssistant\Mcp;
  */
 class TranslationMcpServer
 {
+    /**
+     * The Claude access level each tool needs, besides the Control Panel
+     * permission the bridge checks. Previews of a write need the write's level.
+     */
+    private const TOOL_LEVELS = [
+        'preview_localization' => 'edit',
+        'save_localization' => 'edit',
+        'preview_entry_edit' => 'edit',
+        'save_entry_edit' => 'edit',
+        'duplicate_entry' => 'edit',
+        'preview_compose_entry' => 'edit',
+        'save_compose_entry' => 'edit',
+        'prepare_image_upload' => 'edit',
+        'check_image_upload' => 'edit',
+        'save_glossary' => 'edit',
+        'save_style_rules' => 'edit',
+        'set_published' => 'publish',
+    ];
+
     public function __construct(private ClaudeTranslationBridge $bridge) {}
 
     public function bridge(): ClaudeTranslationBridge
@@ -50,7 +71,10 @@ class TranslationMcpServer
             $result = match ($method) {
                 'initialize' => $this->initialize(is_string($params['protocolVersion'] ?? null) ? $params['protocolVersion'] : '2024-11-05'),
                 'ping' => new \stdClass,
-                'tools/list' => ['tools' => $this->tools()],
+                'tools/list' => ['tools' => array_values(array_filter(
+                    $this->tools(),
+                    fn ($tool) => ClaudeAccess::allows($this->bridge->actor(), self::TOOL_LEVELS[$tool['name']] ?? 'read'),
+                ))],
                 'tools/call' => $this->callTool($params),
                 default => null,
             };
@@ -121,7 +145,7 @@ class TranslationMcpServer
                 'name' => 'statamic-ai-assistant-translations',
                 'version' => '3.x',
             ],
-            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. To build a new entry from a goal, or restructure an existing one, call get_content_model first and follow its brief (block descriptions, when-to-use rules, site instructions, glossary, style rules), get the fields of the chosen blocks with get_block_schemas, then preview_compose_entry and save_compose_entry. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
+            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. To build a new entry from a goal, or restructure an existing one, call get_content_model first and follow its brief (block descriptions, when-to-use rules, site instructions, glossary, style rules), get the fields of the chosen blocks with get_block_schemas, then preview_compose_entry and save_compose_entry. To put an image from the chat on a page, call prepare_image_upload (into the container and folder of the image field, or where the user says), let the user upload it through the link, call check_image_upload for its path, then set the asset segment with preview_entry_edit and save_entry_edit. list_assets shows what is in a folder of the asset library, for existing images too. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
         ];
     }
 
@@ -133,7 +157,8 @@ class TranslationMcpServer
     {
         $name = (string) ($params['name'] ?? '');
         $arguments = is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
-        $result = match ($name) {
+        $level = self::TOOL_LEVELS[$name] ?? 'read';
+        $result = ! ClaudeAccess::allows($this->bridge->actor(), $level) ? ['error' => 'forbidden', 'message' => ClaudeAccess::denial($level).' Nothing was changed.'] : match ($name) {
             'list_sites' => $this->bridge->listSites(),
             'find_entries' => $this->bridge->findEntries(
                 (string) ($arguments['query'] ?? ''),
@@ -193,6 +218,18 @@ class TranslationMcpServer
                 (string) ($arguments['confirmation_token'] ?? ''),
                 (bool) ($arguments['confirmed'] ?? false),
             ),
+            'list_assets' => $this->bridge->listAssets(
+                isset($arguments['container']) ? (string) $arguments['container'] : null,
+                isset($arguments['folder']) ? (string) $arguments['folder'] : null,
+                isset($arguments['query']) ? (string) $arguments['query'] : null,
+            ),
+            'prepare_image_upload' => $this->bridge->prepareImageUpload(
+                isset($arguments['container']) ? (string) $arguments['container'] : null,
+                isset($arguments['folder']) ? (string) $arguments['folder'] : null,
+                isset($arguments['filename']) ? (string) $arguments['filename'] : null,
+                isset($arguments['alt']) ? (string) $arguments['alt'] : null,
+            ),
+            'check_image_upload' => $this->bridge->checkImageUpload((string) ($arguments['upload_id'] ?? '')),
             'read_glossary' => $this->bridge->readGlossary(),
             'save_glossary' => $this->bridge->saveGlossary(
                 is_array($arguments['entries'] ?? null) ? $arguments['entries'] : [],
@@ -261,13 +298,13 @@ class TranslationMcpServer
                 ],
                 'required' => ['confirmation_token', 'confirmed', 'translations'],
             ]),
-            $this->tool('preview_entry_edit', 'Change the text of an existing entry in place, in any language. Call it with only entry_id to list the entry\'s editable segments (text, plus toggles, choice fields and links, with their field label and block) and its slug. Call it again with edits and/or a new slug to get the before/after changes and a confirmation_token. A new slug changes the page\'s web address. Does not write anything. Refused when the user\'s Control Panel role cannot edit that entry.', [
+            $this->tool('preview_entry_edit', 'Change the text of an existing entry in place, in any language. Call it with only entry_id to list the entry\'s editable segments (text, plus toggles, choice fields, links and assets such as images, with their field label and block) and its slug. Call it again with edits and/or a new slug to get the before/after changes and a confirmation_token. A new slug changes the page\'s web address. Does not write anything. Refused when the user\'s Control Panel role cannot edit that entry.', [
                 'type' => 'object',
                 'properties' => [
                     'entry_id' => ['type' => 'string'],
                     'edits' => [
                         'type' => 'object',
-                        'description' => 'Map of segment id to the new value. Only these segments change. Text segments take a string; HTML segments must stay HTML. Segments with a kind: toggle takes true or false; choice takes one of its options, or a list when multiple is true; link takes a full URL, mailto:, tel:, a /path, a #anchor or entry::<id> from find_entries. null clears a choice or a link.',
+                        'description' => 'Map of segment id to the new value. Only these segments change. Text segments take a string; HTML segments must stay HTML. Segments with a kind: toggle takes true or false; choice takes one of its options, or a list when multiple is true; link takes a full URL, mailto:, tel:, a /path, a #anchor or entry::<id> from find_entries; asset takes the path of an asset in the segment\'s container (such as from check_image_upload), or a list when multiple is true; check the field label, since an asset field can also hold a video or file. null clears a choice, a link or an asset.',
                     ],
                     'slug' => ['type' => 'string', 'description' => 'Optional new slug. Formatted like the Control Panel slug field (lowercase, hyphens, umlauts spelled out).'],
                 ],
@@ -338,6 +375,30 @@ class TranslationMcpServer
                     'confirmed' => ['type' => 'boolean'],
                 ],
                 'required' => ['confirmation_token', 'confirmed'],
+            ]),
+            $this->tool('list_assets', 'List the asset library: the files (path, type, size, alt text; URL is url_prefix + path) and subfolders of one folder, or with query, the files anywhere below the folder whose name contains it. Use it when the user asks what is in a folder, or to find an existing image to set on an entry by its path. Read-only. Refused for containers the user\'s Control Panel role cannot view.', [
+                'type' => 'object',
+                'properties' => [
+                    'container' => ['type' => 'string', 'description' => 'Asset container handle. Without it, the only container you may view, or the list of containers.'],
+                    'folder' => ['type' => 'string', 'description' => 'Folder inside the container, such as illustrationen. Empty is the root.'],
+                    'query' => ['type' => 'string', 'description' => 'Part of a file name to search for in the folder and its subfolders.'],
+                ],
+            ]),
+            $this->tool('prepare_image_upload', 'Get a link to upload one image, such as a picture the user attached in the chat, into the asset library. Attachments cannot be passed to tools: post the attached file to the link yourself with code execution (curl), and only if that is not possible give the user the link to drop the image there. Then call check_image_upload. Uploading changes no page: set the image on an entry afterwards with preview_entry_edit. Refused when the user\'s Control Panel role cannot upload to that container.', [
+                'type' => 'object',
+                'properties' => [
+                    'container' => ['type' => 'string', 'description' => 'Asset container handle. Use the container of the asset segment you will set.'],
+                    'folder' => ['type' => 'string', 'description' => 'Folder inside the container, such as team/2026. Use the folder the user names, else the asset segment\'s folder. Empty is the container root. Created when missing.'],
+                    'filename' => ['type' => 'string', 'description' => 'Optional file name without extension, such as hero-bankkaution. Defaults to the uploaded file\'s name. An existing file is never overwritten.'],
+                    'alt' => ['type' => 'string', 'description' => 'Alt text describing the image, in the site\'s language. Write it from what you see in the attachment.'],
+                ],
+            ]),
+            $this->tool('check_image_upload', 'Whether the image for an upload link has arrived, and its stored path to use as an asset segment\'s value.', [
+                'type' => 'object',
+                'properties' => [
+                    'upload_id' => ['type' => 'string'],
+                ],
+                'required' => ['upload_id'],
             ]),
             $this->tool('read_glossary', 'Read the glossary terms the translation should use. Not synced to DeepL by this connection.', [
                 'type' => 'object',

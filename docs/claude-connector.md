@@ -4,7 +4,7 @@ The site exposes `{APP_URL}/mcp` for the Claude app. Claude writes the text; the
 
 ## Request flow and sign-in
 
-- Routes live in `routes/web.php`: `/mcp`, `/.well-known/oauth-*`, `/mcp/oauth/{register,authorize,token}`.
+- Routes live in `routes/web.php`: `/mcp`, `/.well-known/oauth-*`, `/mcp/oauth/{register,authorize,token}`, `/mcp/upload/{token}`.
 - `McpOAuth`: OAuth with PKCE and dynamic client registration; clients, codes and tokens live in the cache (access 12 h, refresh 30 days). Any Control Panel account signs in; there is no email-domain gate and no shared token.
 - The sign-in form carries a CSRF token and is throttled to 10 posts per minute. A script driving it fetches the form first (cookie jar + `_token`), and a 429 means wait a minute.
 - `McpController` → `TranslationMcpServer::dispatch()` (JSON-RPC, tool list and schemas) → `ClaudeTranslationBridge` (all behaviour).
@@ -13,7 +13,9 @@ The site exposes `{APP_URL}/mcp` for the Claude app. Claude writes the text; the
 
 ## Permissions
 
-Every tool follows Statamic's own policies for the actor, rechecked at save time:
+Two layers. First, a super admin may give each role or user a Claude level on the **AI & Claude access** page (`Support/ClaudeAccess`): read ⊂ edit ⊂ publish. `TranslationMcpServer::TOOL_LEVELS` names the level each tool needs (unlisted tools need read; previews of a write need the write's level). `tools/list` hides what the account may not use and `tools/call` refuses it, so a grant revoked mid-session takes effect on the next call; sign-in needs read, and the upload link checks edit again on upload. The levels only apply while `claude_restricted` is on in `access.yaml`; it is off by default so an update locks nobody out. Super admins and the stdio server are never restricted. When adding a write tool, add it to `TOOL_LEVELS`.
+
+Second, every tool follows Statamic's own policies for the actor, rechecked at save time. A Claude level never grants more than these:
 
 | Tool | Check |
 |---|---|
@@ -22,6 +24,8 @@ Every tool follows Statamic's own policies for the actor, rechecked at save time
 | translate | `view` on the source, `edit` on the localization; a new one is checked on the unsaved `makeLocalization()`, so access to the target site counts |
 | duplicate, compose new | `create` with `[Entry::class, $collection, $site]` |
 | publish / unpublish | `publish` |
+| list assets | `view` on the asset container (`view {container} assets`) |
+| image upload | `store` on the asset container (`upload {container} assets`), when the link is made and again on upload |
 | glossary, style rules | `GlossaryAccess` (`edit translation glossary` permission; super admins always) |
 
 ## Writes: preview, then confirm
@@ -34,9 +38,20 @@ Edits, publishing and composing use a normal `save()` plus `updateLastModified($
 
 `EntryTranslator::editableSegments()` / `applySegmentEdits()` reuse the translation walker in `Concerns/TranslatesFields`:
 
-- Text segments have numeric ids. Value segments (`toggle`, `select`, `button_group`, `checkboxes`, `radio`, `link`) have ids `v{n}`, carry label, options and a location such as `Komponenten › tiles 2 › Kacheln › row 1`, and are collected only while `collectingValues` is on; translation never sees them.
+- Text segments have numeric ids. Value segments (`toggle`, `select`, `button_group`, `checkboxes`, `radio`, `link`, `assets`) have ids `v{n}`, carry label, options and a location such as `Komponenten › tiles 2 › Kacheln › row 1 "Bankkaution"` (the block's own title, heading or label, so Claude can match the section a user names), and are collected only while `collectingValues` is on; translation never sees them.
+- Assets segments have kind `asset`, not `image`: an assets field may hold a video or a file. They carry `container`, `folder`, `restrict_to_folder` and `multiple`; a value must exist on the container's disk (the disk, not the asset listing cache, which misses files written outside Statamic) and is stored as the field stores it: one path when `max_files` is 1, a list otherwise. A `container::` prefix is stripped.
 - A value field absent from the data gets the `MISSING_VALUE` placeholder and is dropped again unless an edit sets it, so untouched entries gain no keys.
 - An unedited text segment returns its original string; an unedited merged Bard block returns its `__original__` nodes instead of an HTML round trip. Untouched content stays byte-identical, which the tests assert.
+
+## Images
+
+Claude cannot pass a chat attachment to a tool (it sees the picture, not its bytes), so `ImageUploads` hands out an upload link instead:
+
+- `prepare_image_upload` caches a record under a random 40-character token (30 minutes, bound to the actor, container, sanitized folder, optional file name and Claude's alt text). The token in `/mcp/upload/{token}` is the only credential: the page and its POST need no session or bearer token, so the user can open it from the chat and Claude's sandbox can `curl -F file=@…` it. CSRF is off for that POST.
+- The POST validates like the Control Panel (`AllowedFile`, the container's validation rules) plus images only and `image_fetch.max_bytes`, sets the alt text before `upload()` so the first save carries it, and runs as the link's account so asset events see it. A link takes one image; a second post gets 409. The path returned is `$asset->path()` after upload, because Statamic's uploader may lowercase the name or change the extension (source preset).
+- Uploading changes no page, so it has no preview/confirm of its own; placing the image is a normal entry edit with one. A name that exists gets `-2`, `-3`; the uploader adds a timestamp as a last resort, so nothing is ever overwritten.
+- `list_assets` lists one folder (files plus subfolders), or with a query searches file names below it; at most 100 files. URLs are returned once as `url_prefix` (container URL + path) instead of per file, which saves about a quarter of the result on an S3 container.
+- In a host app whose `assets` disk is S3, a test upload lands in the real bucket: delete the asset again through Statamic after verifying.
 
 ## Composing and refactoring
 

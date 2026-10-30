@@ -46,6 +46,7 @@ No linter/formatter is configured.
 
 ### Access rules
 - `entry_generator` is the master switch for the AI agent; `enable_agent_for_editors` only gates non-super users (super admins always have access). `EntryCreationPolicy` caps entries per request for editors (`editor_limit_entries`).
+- Claude connector levels (`Support/ClaudeAccess`): read ⊂ edit ⊂ publish, granted per role/user on the access page (`claude_*` in `access.yaml`) and enforced per tool in `TranslationMcpServer::TOOL_LEVELS`, on top of Statamic's policies. They apply only while `claude_restricted` is on (default off, so existing users keep access); super admins and stdio are never restricted.
 - Bulk translations and AI agent settings nav are super-admin only; Glossary & style rules is visible to all CP users; changing it (CP page and Claude connector) needs the `edit translation glossary` permission (`Support/GlossaryAccess`), super admins always.
 
 ### AI agent (entry generation)

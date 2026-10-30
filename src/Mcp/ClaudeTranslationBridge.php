@@ -15,6 +15,7 @@ use Illuminate\Support\Str;
 use Statamic\Actions\DuplicateEntry;
 use Statamic\Contracts\Auth\User as UserContract;
 use Statamic\Contracts\Entries\Entry;
+use Statamic\Facades\AssetContainer;
 use Statamic\Facades\Entry as EntryFacade;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Site;
@@ -42,6 +43,7 @@ class ClaudeTranslationBridge
         private TranslationGlossaryService $glossary,
         private TranslationStyleRulesService $styleRules,
         private ContentCommitter $commits,
+        private ImageUploads $images,
     ) {}
 
     /**
@@ -54,6 +56,11 @@ class ClaudeTranslationBridge
         if ($user !== null) {
             auth()->setUser($user);
         }
+    }
+
+    public function actor(): ?UserContract
+    {
+        return $this->actor;
     }
 
     /**
@@ -379,8 +386,9 @@ class ClaudeTranslationBridge
     /**
      * A toggle takes true or false, a choice field one of its options (a list
      * of them when it allows several), a link a URL, mailto:, tel:, a /path,
-     * a #anchor or entry::<id> of an existing entry. Null clears a choice or
-     * a link.
+     * a #anchor or entry::<id> of an existing entry, an assets field (images,
+     * also videos or files) the path of an asset in its container (a list
+     * when it takes several). Null clears a choice, a link or an asset.
      *
      * @param  array<string, mixed>  $segment
      * @return array{value: mixed}|array{error: string}
@@ -395,6 +403,10 @@ class ClaudeTranslationBridge
 
         if ($new === null || $new === '' || $new === []) {
             return ['value' => null];
+        }
+
+        if ($segment['kind'] === 'asset') {
+            return $this->checkImages($segment, $new);
         }
 
         if ($segment['kind'] === 'choice') {
@@ -425,6 +437,46 @@ class ClaudeTranslationBridge
         }
 
         return ['value' => $link];
+    }
+
+    /**
+     * Paths may carry the container prefix the Control Panel shows
+     * ("assets::hero/bild.jpg"). Stored as the field stores them: one path,
+     * or a list when the field takes several.
+     *
+     * @param  array<string, mixed>  $segment
+     * @return array{value: mixed}|array{error: string}
+     */
+    private function checkImages(array $segment, mixed $new): array
+    {
+        $container = is_string($segment['container']) ? AssetContainer::find($segment['container']) : null;
+        if (! $container) {
+            return ['error' => 'This assets field has no single asset container, so it cannot be set here.'];
+        }
+        $paths = is_array($new) ? array_values($new) : [$new];
+        if (! $segment['multiple'] && count($paths) > 1) {
+            return ['error' => 'This field takes one asset.'];
+        }
+
+        $checked = [];
+        foreach ($paths as $path) {
+            if (! is_string($path) || trim($path) === '') {
+                return ['error' => 'An asset is its path in the container, such as from check_image_upload.'];
+            }
+            $path = ltrim(trim($path), '/');
+            if (str_starts_with($path, $container->handle().'::')) {
+                $path = substr($path, strlen($container->handle()) + 2);
+            }
+            if (! $container->disk()->exists($path)) {
+                return ['error' => 'No asset '.$path.' in the '.$container->handle().' container. Upload it with prepare_image_upload first.'];
+            }
+            if ($segment['restrict_to_folder'] && $segment['folder'] !== '' && ! str_starts_with($path, $segment['folder'].'/')) {
+                return ['error' => 'This field only takes assets from the folder '.$segment['folder'].'. Upload into that folder.'];
+            }
+            $checked[] = $path;
+        }
+
+        return ['value' => $segment['multiple'] ? $checked : $checked[0]];
     }
 
     /**
@@ -599,6 +651,117 @@ class ClaudeTranslationBridge
         $entry->save();
 
         return array_merge($this->entrySummary($entry), ['saved' => true]);
+    }
+
+    /**
+     * The files and subfolders of one folder in the asset library, or with a
+     * query, the files below it whose name contains it. Needs the role's
+     * "view {container} assets" permission, as browsing in the Control Panel.
+     *
+     * @return array<string, mixed>
+     */
+    public function listAssets(?string $containerHandle, ?string $folder, ?string $query): array
+    {
+        $visible = AssetContainer::all()
+            ->filter(fn ($container) => $this->actor === null || $this->actor->can('view', $container))
+            ->values();
+        if ($containerHandle === null || $containerHandle === '') {
+            if ($visible->count() !== 1) {
+                return [
+                    'containers' => $visible->map(fn ($c) => ['handle' => $c->handle(), 'title' => $c->title()])->all(),
+                    'message' => $visible->isEmpty() ? 'Your Control Panel role cannot view any assets.' : 'Pass one of these containers.',
+                ];
+            }
+            $containerHandle = $visible->first()->handle();
+        }
+
+        $container = $visible->first(fn ($c) => $c->handle() === $containerHandle);
+        if (! $container) {
+            return AssetContainer::find($containerHandle)
+                ? ['error' => 'forbidden', 'message' => 'Your Control Panel role cannot view the '.$containerHandle.' assets.']
+                : ['error' => 'missing_container', 'message' => 'No asset container has the handle '.$containerHandle.'.'];
+        }
+
+        $folder = trim((string) $folder, '/');
+        $needle = mb_strtolower(trim((string) $query));
+        $assets = $container->assets($folder === '' ? '/' : $folder, $needle !== '');
+        if ($needle !== '') {
+            $assets = $assets->filter(fn ($asset) => str_contains(mb_strtolower($asset->basename()), $needle));
+        }
+        $assets = $assets->sortBy(fn ($asset) => $asset->path())->values();
+
+        // Every URL is the container's URL plus the path: say it once.
+        $first = $assets->first();
+        $firstUrl = $first ? $this->assetUrl($first) : null;
+        $urlPrefix = $firstUrl !== null && str_ends_with($firstUrl, $first->path()) ? substr($firstUrl, 0, -strlen($first->path())) : null;
+
+        $limit = 100;
+        $files = $assets->take($limit)->map(function ($asset) use ($urlPrefix) {
+            $image = $asset->isImage() || $asset->isSvg();
+
+            return array_filter([
+                'path' => $asset->path(),
+                'type' => $image ? 'image' : ($asset->isVideo() ? 'video' : $asset->extension()),
+                'kb' => (int) ceil($asset->size() / 1024),
+                'alt' => $image ? ($asset->get('alt') ?: null) : null,
+                'url' => $urlPrefix === null ? $this->assetUrl($asset) : null,
+            ], fn ($value) => $value !== null);
+        })->all();
+
+        return array_filter([
+            'container' => $container->handle(),
+            'folder' => $folder,
+            'url_prefix' => $urlPrefix,
+            'folders' => $needle === '' ? $container->folders($folder === '' ? '/' : $folder)->values()->all() : null,
+            'files' => $files,
+            'total_files' => $assets->count(),
+            'message' => $assets->count() > $limit ? 'Only the first '.$limit.' files are listed. Open a subfolder or pass a query to narrow it down.' : null,
+        ], fn ($value) => $value !== null);
+    }
+
+    private function assetUrl($asset): ?string
+    {
+        try {
+            return $asset->absoluteUrl();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * An upload link for one image the user has in the chat. The image is
+     * stored in the asset library only; placing it on a page is a normal
+     * entry edit with its own preview and confirmation.
+     *
+     * @return array<string, mixed>
+     */
+    public function prepareImageUpload(?string $container, ?string $folder, ?string $filename, ?string $alt): array
+    {
+        if ($this->actor === null) {
+            return ['error' => 'not_signed_in', 'message' => 'Uploading needs a signed-in Control Panel account.'];
+        }
+
+        $prepared = $this->images->prepare($this->actor, $container, $folder, $filename, $alt);
+        if (isset($prepared['error'])) {
+            return $prepared;
+        }
+
+        return $prepared + [
+            'max_megabytes' => round($this->images->maxBytes() / 1048576, 1),
+            'message' => 'A chat attachment cannot be passed to this tool. First try to upload it yourself: if you can run code, the attachment is usually a file in /mnt/user-data/uploads; post it with curl -F "file=@<path>" '.$prepared['upload_url'].' and read the JSON reply. Only if you cannot run code, the file is not there, or the request is blocked (the site\'s domain must be allowed under Settings, Capabilities, Code execution), give the user upload_url as a link: they open it, drop the image, and come back. Either way, call check_image_upload with upload_id for the stored path. The link takes one image and expires in '.$prepared['expires_in_minutes'].' minutes.',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function checkImageUpload(string $uploadId): array
+    {
+        if ($this->actor === null) {
+            return ['error' => 'not_signed_in', 'message' => 'Uploading needs a signed-in Control Panel account.'];
+        }
+
+        return $this->images->status($this->actor, trim($uploadId));
     }
 
     /**

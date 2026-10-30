@@ -315,6 +315,7 @@ class EntryTranslator
             'kind' => match ($type) {
                 'toggle' => 'toggle',
                 'link' => 'link',
+                'assets' => 'asset',
                 default => 'choice',
             },
             'field' => $def['handle'] ?? null,
@@ -327,6 +328,12 @@ class EntryTranslator
             $segment['options'] = $def['options'] ?? [];
             $segment['multiple'] = (bool) ($def['multiple'] ?? false);
             $segment['custom_values_allowed'] = (bool) ($def['taggable'] ?? false);
+        }
+        if ($segment['kind'] === 'asset') {
+            $segment['container'] = $def['container'] ?? null;
+            $segment['folder'] = $def['folder'] ?? '';
+            $segment['restrict_to_folder'] = (bool) ($def['restrict'] ?? false);
+            $segment['multiple'] = ($def['max_files'] ?? 0) !== 1;
         }
         if ($segment['kind'] === 'link' && is_string($value) && str_starts_with($value, 'entry::')) {
             $linked = Entry::find(substr($value, 7));
