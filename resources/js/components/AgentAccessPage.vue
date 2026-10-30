@@ -42,61 +42,39 @@
       </div>
 
       <template v-else>
-        <section v-for="feat in features" :key="feat.key" class="ax-card">
+        <!-- First: it decides whether Claude follows the role alone. -->
+        <section class="ax-card">
           <div class="ax-card__head">
-            <h2 class="ax-card__title">{{ feat.label }}</h2>
-            <p class="ax-card__desc">{{ feat.description }}</p>
+            <h2 class="ax-card__title">{{ __('Claude app') }}</h2>
+            <p class="ax-card__desc">{{ __('Who can work on this site through the Claude app, and how far. The Control Panel role always applies as well: Claude never does more than the account may do in the Control Panel.') }}</p>
           </div>
 
-          <div v-if="feat.key === 'agent'" class="ax-default">
-            <label class="ax-default__label" :for="'ax-default'">{{ __('Default entries per request') }}</label>
-            <input
-              id="ax-default"
-              type="number" min="1" :max="ceiling" class="ax-num"
-              :value="access.agent.limits.default"
-              @input="setDefaultLimit($event.target.value)"
-            />
-            <span class="ax-hint">{{ __('Applies to granted users without a specific limit. Super admins are never limited.') }}</span>
+          <div class="ax-modes" role="radiogroup" :aria-label="__('Claude app')">
+            <label class="ax-mode" :class="{ 'ax-mode--on': !access.claude_restricted }">
+              <input type="radio" class="ax-box" name="ax-claude-mode" :checked="!access.claude_restricted" @change="access.claude_restricted = false" />
+              <span class="ax-mode__text">
+                <span class="ax-mode__title">{{ __('Same as the Control Panel') }}</span>
+                <span class="ax-mode__desc">{{ __('Everyone with a Control Panel account can use Claude, as far as their role allows.') }}</span>
+              </span>
+            </label>
+            <label class="ax-mode" :class="{ 'ax-mode--on': access.claude_restricted }">
+              <input type="radio" class="ax-box" name="ax-claude-mode" :checked="access.claude_restricted" @change="access.claude_restricted = true" />
+              <span class="ax-mode__text">
+                <span class="ax-mode__title">{{ __('Set per role and user') }}</span>
+                <span class="ax-mode__desc">{{ __('Each role and user gets a Claude level in the table below. Without one, Claude cannot be used.') }}</span>
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <!-- One table: who may do what. Roles set the defaults, users the exceptions. -->
+        <section v-if="columns.length" class="ax-card ax-card--table">
+          <div class="ax-card__head">
+            <h2 class="ax-card__title">{{ __('Who may do what') }}</h2>
+            <p class="ax-card__desc">{{ __('Roles set what their users may do. Change a single user only for exceptions. Super admins may always do everything and are not listed.') }}</p>
           </div>
 
-          <label v-if="feat.key === 'claude'" class="ax-switch">
-            <input v-model="access.claude_restricted" type="checkbox" class="ax-chip__box" />
-            <span>{{ __('Restrict Claude connector access') }}</span>
-          </label>
-
-          <template v-else>
-          <!-- Roles -->
-          <div class="ax-group">
-            <div class="ax-group__label">{{ __('Roles') }}</div>
-            <p v-if="roles.length === 0" class="ax-hint">{{ __('No roles found.') }}</p>
-            <div v-else class="ax-chips">
-              <label
-                v-for="role in roles"
-                :key="role.handle"
-                class="ax-chip"
-                :class="{ 'ax-chip--on': hasRole(feat.key, role.handle) }"
-              >
-                <input type="checkbox" class="ax-chip__box" :checked="hasRole(feat.key, role.handle)" @change="toggleRole(feat.key, role.handle)" />
-                <span class="ax-chip__text">{{ role.title || role.handle }}</span>
-                <input
-                  v-if="feat.key === 'agent' && hasRole('agent', role.handle)"
-                  type="number" min="1" :max="ceiling" class="ax-num ax-num--inline"
-                  :value="access.agent.limits.roles[role.handle] || ''"
-                  :placeholder="String(access.agent.limits.default)"
-                  :title="__('Max entries per request for this role (blank = default)')"
-                  @click.prevent.stop
-                  @input="setRoleLimit(role.handle, $event.target.value)"
-                />
-              </label>
-            </div>
-          </div>
-
-          <!-- Individual users -->
-          <div class="ax-group">
-            <div class="ax-group__label">
-              {{ __('Individual users') }}
-              <span v-if="selectedUserCount(feat.key) > 0" class="ax-count">{{ selectedUserCount(feat.key) }}</span>
-            </div>
+          <div class="ax-toolbar">
             <div class="ax-search">
               <svg class="ax-search__icon" viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="11" cy="11" r="7" fill="none" stroke-width="2" />
@@ -104,29 +82,128 @@
               </svg>
               <input v-model="userFilter" type="search" class="ax-search__input" :placeholder="__('Filter users by name or email…')" />
             </div>
-            <p v-if="filteredUsers.length === 0" class="ax-hint">{{ __('No users match.') }}</p>
-            <ul v-else class="ax-users">
-              <li v-for="user in filteredUsers" :key="user.id">
-                <label class="ax-user" :class="{ 'ax-user--on': hasUser(feat.key, user.id) }">
-                  <input type="checkbox" class="ax-user__box" :checked="hasUser(feat.key, user.id)" @change="toggleUser(feat.key, user.id)" />
-                  <span class="ax-user__main">
-                    <span class="ax-user__name">{{ user.name }}</span>
-                    <span v-if="user.email && user.email !== user.name" class="ax-user__email">{{ user.email }}</span>
-                  </span>
-                  <input
-                    v-if="feat.key === 'agent' && hasUser('agent', user.id)"
-                    type="number" min="1" :max="ceiling" class="ax-num ax-num--inline"
-                    :value="access.agent.limits.users[user.id] || ''"
-                    :placeholder="String(access.agent.limits.default)"
-                    :title="__('Max entries per request for this user (blank = default)')"
-                    @click.prevent.stop
-                    @input="setUserLimit(user.id, $event.target.value)"
-                  />
-                </label>
-              </li>
-            </ul>
+            <label v-if="aiEnabled" class="ax-inline">
+              {{ __('AI agent: default max.') }}
+              <input type="number" min="1" :max="ceiling" class="ax-num" :value="access.agent.limits.default" @input="setDefaultLimit($event.target.value)" />
+              {{ __('entries per request') }}
+            </label>
           </div>
-          </template>
+
+          <div class="ax-table-wrap">
+            <table class="ax-table">
+              <thead>
+                <tr>
+                  <th scope="col" class="ax-table__who"><span class="sr-only">{{ __('Who') }}</span></th>
+                  <th v-for="col in columns" :key="col.key" scope="col" :title="col.description">{{ col.label }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="ax-table__group">
+                  <th :colspan="columns.length + 1" scope="colgroup">{{ __('Roles') }}</th>
+                </tr>
+                <tr v-if="roles.length === 0">
+                  <td :colspan="columns.length + 1" class="ax-hint">{{ __('No roles found.') }}</td>
+                </tr>
+                <tr v-for="role in roles" :key="'r-' + role.handle">
+                  <th scope="row" class="ax-table__who">
+                    <span class="ax-who__name">{{ role.title || role.handle }}</span>
+                  </th>
+                  <td v-for="col in columns" :key="col.key">
+                    <select
+                      v-if="col.key === 'claude'"
+                      class="ax-select" :class="{ 'ax-select--none': roleLevel(role.handle) === 'none' }"
+                      :value="roleLevel(role.handle)" :aria-label="col.label + ': ' + (role.title || role.handle)"
+                      @change="setRoleLevel(role.handle, $event.target.value)"
+                    >
+                      <option v-for="level in claudeLevels" :key="level.key" :value="level.key">{{ level.label }}</option>
+                    </select>
+                    <span v-else class="ax-cell">
+                      <input
+                        type="checkbox" class="ax-box" :checked="hasRole(col.key, role.handle)"
+                        :aria-label="col.label + ': ' + (role.title || role.handle)"
+                        @change="toggleRole(col.key, role.handle)"
+                      />
+                      <label v-if="col.key === 'agent' && hasRole('agent', role.handle)" class="ax-limit">
+                        {{ __('max.') }}
+                        <input
+                          type="number" min="1" :max="ceiling" class="ax-num ax-num--sm"
+                          :value="access.agent.limits.roles[role.handle] || ''"
+                          :placeholder="String(access.agent.limits.default)"
+                          :title="__('Max entries per request for this role (blank = default)')"
+                          @input="setRoleLimit(role.handle, $event.target.value)"
+                        />
+                      </label>
+                    </span>
+                  </td>
+                </tr>
+
+                <tr class="ax-table__group">
+                  <th :colspan="columns.length + 1" scope="colgroup">{{ __('Users') }}</th>
+                </tr>
+                <tr v-if="filteredUsers.length === 0">
+                  <td :colspan="columns.length + 1" class="ax-hint">{{ __('No users match.') }}</td>
+                </tr>
+                <tr v-for="user in filteredUsers" :key="'u-' + user.id">
+                  <th scope="row" class="ax-table__who">
+                    <span class="ax-who__name">{{ user.name }}</span>
+                    <span v-if="user.email && user.email !== user.name" class="ax-who__email">{{ user.email }}</span>
+                    <span class="ax-who__roles">
+                      <span v-for="handle in user.roles || []" :key="handle" class="ax-tag">{{ roleTitle(handle) }}</span>
+                      <span v-if="!(user.roles || []).length" class="ax-who__email">{{ __('No role') }}</span>
+                    </span>
+                  </th>
+                  <td v-for="col in columns" :key="col.key">
+                    <select
+                      v-if="col.key === 'claude'"
+                      class="ax-select"
+                      :class="{ 'ax-select--own': userLevel(user.id) !== 'role', 'ax-select--none': effectiveClaude(user) === 'none' }"
+                      :value="userLevel(user.id)" :aria-label="col.label + ': ' + user.name"
+                      @change="setUserLevel(user.id, $event.target.value)"
+                    >
+                      <option value="role">{{ __('Like role') }} ({{ levelLabel(roleLevelForUser(user)) }})</option>
+                      <option v-for="level in claudeLevels" :key="level.key" :value="level.key">{{ level.label }}</option>
+                    </select>
+                    <span v-else-if="viaRole(col.key, user)" class="ax-cell ax-cell--via" :title="__('Granted through the user\'s role. Change it on the role.')">
+                      <input type="checkbox" class="ax-box" checked disabled :aria-label="col.label + ': ' + user.name" />
+                      <span class="ax-via">{{ __('via role') }}</span>
+                      <label v-if="col.key === 'agent'" class="ax-limit">
+                        {{ __('max.') }}
+                        <input
+                          type="number" min="1" :max="ceiling" class="ax-num ax-num--sm"
+                          :value="access.agent.limits.users[user.id] || ''" :placeholder="String(limitFromRoles(user))"
+                          :title="__('Max entries per request for this user (blank = default)')"
+                          @input="setUserLimit(user.id, $event.target.value)"
+                        />
+                      </label>
+                    </span>
+                    <span v-else class="ax-cell">
+                      <input
+                        type="checkbox" class="ax-box" :checked="hasUser(col.key, user.id)"
+                        :aria-label="col.label + ': ' + user.name"
+                        @change="toggleUser(col.key, user.id)"
+                      />
+                      <label v-if="col.key === 'agent' && hasUser('agent', user.id)" class="ax-limit">
+                        {{ __('max.') }}
+                        <input
+                          type="number" min="1" :max="ceiling" class="ax-num ax-num--sm"
+                          :value="access.agent.limits.users[user.id] || ''" :placeholder="String(limitFromRoles(user))"
+                          :title="__('Max entries per request for this user (blank = default)')"
+                          @input="setUserLimit(user.id, $event.target.value)"
+                        />
+                      </label>
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <dl class="ax-legend">
+            <div v-for="col in columns" :key="col.key">
+              <dt>{{ col.label }}</dt>
+              <dd>{{ col.description }}</dd>
+            </div>
+          </dl>
         </section>
       </template>
     </div>
@@ -155,31 +232,33 @@ export default {
   },
 
   computed: {
+    // Table columns: the Claude level (only when set per role), then the AI features.
+    columns() {
+      const claude = this.access.claude_restricted
+        ? [{ key: 'claude', label: this.__('Claude app'), description: this.claudeLevels.slice(1).map((l) => l.label + ': ' + l.description).join(' ') }]
+        : [];
+      return [...claude, ...this.features];
+    },
+
     features() {
       const agent = [
         { key: 'agent', label: this.__('AI agent'), description: this.__('Generate and chat with the agent to create or update entries.') },
         { key: 'bulk_translations', label: this.__('Bulk translations'), description: this.__('Translate many entries at once from the Bulk translations tool.') },
         { key: 'agent_settings', label: this.__('AI instructions'), description: this.__('Edit the site instructions and the block and field hints on the AI instructions page.') },
-        { key: 'advanced_tools', label: this.__('Advanced structure tools'), description: this.__('Let the agent create and modify collections, blueprints and taxonomies. Structural changes are applied immediately — grant with care.') },
+        { key: 'advanced_tools', label: this.__('Structure tools'), description: this.__('Let the agent create and modify collections, blueprints and taxonomies. Structural changes are applied immediately — grant with care.') },
       ];
-      const claude = [
-        {
-          key: 'claude',
-          label: this.__('Claude connector'),
-          description: this.access.claude_restricted
-            ? this.__('Only the roles and users below can use the Claude app with this site, and only up to their level. The Control Panel role still applies on top: Claude can never do more than the account may do in the Control Panel.')
-            : this.__('Off: everyone can use the Claude app with this site as far as their Control Panel role allows. Turn on to give each role or user a level of its own, for example editing in the Control Panel but only reading through Claude.'),
-        },
-      ];
-      if (this.access.claude_restricted) {
-        claude.push(
-          { key: 'claude_read', label: this.__('Claude: read'), description: this.__('Find and read entries, the content model, the asset library, the glossary and style rules.') },
-          { key: 'claude_edit', label: this.__('Claude: edit'), description: this.__('Also edit and translate entries, compose and duplicate them, upload images, and change the glossary and style rules.') },
-          { key: 'claude_publish', label: this.__('Claude: publish'), description: this.__('Also publish and unpublish entries.') },
-        );
-      }
-      return [...(this.aiEnabled ? agent : []), ...claude];
+      return this.aiEnabled ? agent : [];
     },
+
+    claudeLevels() {
+      return [
+        { key: 'none', label: this.__('No access') },
+        { key: 'read', label: this.__('Read'), description: this.__('Find and read entries, the content model, the asset library, the glossary and style rules. Change nothing.') },
+        { key: 'edit', label: this.__('Edit'), description: this.__('Also edit and translate entries, compose and duplicate them, upload images, and change the glossary and style rules.') },
+        { key: 'publish', label: this.__('Publish'), description: this.__('Also publish and unpublish entries.') },
+      ];
+    },
+
 
     filteredUsers() {
       const q = this.userFilter.trim().toLowerCase();
@@ -206,6 +285,7 @@ export default {
         agent_settings: { roles: [], users: [] },
         advanced_tools: { roles: [], users: [] },
         claude_restricted: false,
+        claude_none: { roles: [], users: [] },
         claude_read: { roles: [], users: [] },
         claude_edit: { roles: [], users: [] },
         claude_publish: { roles: [], users: [] },
@@ -231,6 +311,7 @@ export default {
         agent_settings: feat('agent_settings'),
         advanced_tools: feat('advanced_tools'),
         claude_restricted: raw?.claude_restricted === true,
+        claude_none: feat('claude_none'),
         claude_read: feat('claude_read'),
         claude_edit: feat('claude_edit'),
         claude_publish: feat('claude_publish'),
@@ -285,8 +366,57 @@ export default {
       }
     },
 
-    selectedUserCount(feature) {
-      return this.access[feature].users.length;
+    // Claude: one level per role and per user, stored as claude_<level> lists.
+    roleLevel(handle) {
+      return ['publish', 'edit', 'read'].find((l) => this.access['claude_' + l].roles.includes(handle)) || 'none';
+    },
+
+    setRoleLevel(handle, level) {
+      ['read', 'edit', 'publish'].forEach((l) => {
+        this.access['claude_' + l].roles = this.access['claude_' + l].roles.filter((h) => h !== handle);
+      });
+      if (level !== 'none') this.access['claude_' + level].roles.push(handle);
+    },
+
+    userLevel(id) {
+      return ['none', 'read', 'edit', 'publish'].find((l) => this.access['claude_' + l].users.includes(id)) || 'role';
+    },
+
+    setUserLevel(id, level) {
+      ['none', 'read', 'edit', 'publish'].forEach((l) => {
+        this.access['claude_' + l].users = this.access['claude_' + l].users.filter((u) => u !== id);
+      });
+      if (level !== 'role') this.access['claude_' + level].users.push(id);
+    },
+
+    roleLevelForUser(user) {
+      const order = ['none', 'read', 'edit', 'publish'];
+      return (user.roles || []).map((h) => this.roleLevel(h)).reduce((best, l) => (order.indexOf(l) > order.indexOf(best) ? l : best), 'none');
+    },
+
+    effectiveClaude(user) {
+      const own = this.userLevel(user.id);
+      return own === 'role' ? this.roleLevelForUser(user) : own;
+    },
+
+    // A feature the user has through one of their roles (not editable on the user).
+    viaRole(feature, user) {
+      return (user.roles || []).some((h) => this.hasRole(feature, h));
+    },
+
+    // The limit a user gets without one of their own: their roles' highest, else the default.
+    limitFromRoles(user) {
+      const limits = (user.roles || []).map((h) => this.access.agent.limits.roles[h]).filter((n) => n > 0);
+      return limits.length ? Math.max(...limits) : this.access.agent.limits.default;
+    },
+
+    roleTitle(handle) {
+      const role = this.roles.find((r) => r.handle === handle);
+      return role ? role.title || role.handle : handle;
+    },
+
+    levelLabel(key) {
+      return (this.claudeLevels.find((l) => l.key === key) || {}).label || key;
     },
 
     setDefaultLimit(value) {
@@ -396,7 +526,7 @@ export default {
 }
 
 .ax {
-  max-width: 60rem;
+  max-width: 72rem;
 }
 
 .ax-state {
@@ -421,6 +551,10 @@ export default {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+.ax-card--table {
+  padding-bottom: 1rem;
+}
+
 .ax-card__head {
   margin-bottom: 1.1rem;
 }
@@ -437,105 +571,67 @@ export default {
   margin: 0;
 }
 
-.ax-default {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  padding: 0.75rem 0.9rem;
-  margin-bottom: 1.1rem;
-  background: var(--tp-surface-muted, #f9fafb);
-  border-radius: 0.6rem;
-}
-
-.ax-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.ax-default__label {
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.ax-group {
-  margin-top: 1.1rem;
-}
-
-.ax-group__label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 600;
-  color: var(--tp-text-muted, #6b7280);
-  margin-bottom: 0.6rem;
-}
-
-.ax-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  padding: 0 0.35rem;
-  border-radius: 999px;
-  background: var(--tp-accent, #3b82f6);
-  color: #fff;
-  font-size: 0.7rem;
-  letter-spacing: 0;
-}
-
-.ax-hint {
-  font-size: 0.8rem;
-  color: var(--tp-text-muted, #6b7280);
-  margin: 0.25rem 0 0;
-}
-
-.ax-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.ax-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.4rem 0.7rem;
-  border: 1px solid var(--tp-border, #e5e7eb);
-  border-radius: 999px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  user-select: none;
-  transition: background 0.12s, border-color 0.12s;
-}
-
-.ax-chip:hover {
-  border-color: var(--tp-accent, #3b82f6);
-}
-
-.ax-chip--on {
-  background: var(--tp-accent-soft, #eff6ff);
-  border-color: var(--tp-accent, #3b82f6);
-}
-
-.ax-chip__box,
-.ax-user__box {
+.ax-box {
   accent-color: var(--tp-accent, #3b82f6);
   margin: 0;
 }
 
+/* Claude mode switch */
+.ax-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.ax-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--tp-border, #e5e7eb);
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+.ax-mode input {
+  margin-top: 0.2rem;
+}
+
+.ax-mode--on {
+  background: var(--tp-accent-soft, #eff6ff);
+  border-color: var(--tp-accent, #3b82f6);
+}
+
+.ax-mode__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.ax-mode__title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.ax-mode__desc {
+  font-size: 0.8rem;
+  color: var(--tp-text-muted, #6b7280);
+}
+
+/* Toolbar above the table */
+.ax-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  margin-bottom: 0.9rem;
+}
+
 .ax-search {
   position: relative;
+  flex: 1 1 16rem;
   max-width: 22rem;
-  margin-bottom: 0.6rem;
 }
 
 .ax-search__icon {
@@ -550,68 +646,191 @@ export default {
 }
 
 .ax-search__input,
-.ax-num {
-  width: 100%;
+.ax-num,
+.ax-select {
   border: 1px solid var(--tp-border, #e5e7eb);
   border-radius: 0.5rem;
   font-size: 0.875rem;
   background: var(--tp-surface, #fff);
+  color: var(--tp-text, inherit);
 }
 
 .ax-search__input {
+  width: 100%;
   padding: 0.45rem 0.6rem 0.45rem 2rem;
 }
 
+.ax-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--tp-text-muted, #6b7280);
+}
+
 .ax-num {
-  width: 5rem;
+  width: 4.5rem;
   padding: 0.3rem 0.45rem;
   text-align: center;
 }
 
-.ax-num--inline {
-  margin-left: auto;
+.ax-num--sm {
+  width: 3.5rem;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.8rem;
 }
 
-.ax-users {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 20rem;
-  overflow-y: auto;
+/* The table */
+.ax-table-wrap {
+  overflow-x: auto;
   border: 1px solid var(--tp-border, #e5e7eb);
   border-radius: 0.6rem;
+  max-height: 34rem;
+  overflow-y: auto;
 }
 
-.ax-users li + li {
-  border-top: 1px solid var(--tp-border, #f0f1f3);
-}
-
-.ax-user {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0.75rem;
-  cursor: pointer;
+.ax-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 0.875rem;
 }
 
-.ax-user:hover {
+.ax-table th,
+.ax-table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  vertical-align: middle;
+  border-top: 1px solid var(--tp-border, #f0f1f3);
+  white-space: nowrap;
+}
+
+.ax-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--tp-surface-muted, #f9fafb);
+  border-top: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--tp-text-muted, #6b7280);
+  cursor: help;
 }
 
-.ax-user--on {
-  background: var(--tp-accent-soft, #eff6ff);
+.ax-table__group th {
+  background: var(--tp-surface-muted, #f9fafb);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--tp-text-muted, #6b7280);
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
 }
 
-.ax-user__main {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-  min-width: 0;
+.ax-table tbody tr:not(.ax-table__group):hover {
+  background: var(--tp-surface-muted, #fafafa);
 }
 
-.ax-user__email {
+.ax-table__who {
+  width: 1%;
+  font-weight: 400;
+  white-space: normal !important;
+  min-width: 13rem;
+}
+
+.ax-who__name {
+  display: block;
+  font-weight: 500;
+}
+
+.ax-who__email {
+  display: block;
   font-size: 0.75rem;
   color: var(--tp-text-muted, #6b7280);
+}
+
+.ax-who__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.ax-tag {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--tp-surface-muted, #f3f4f6);
+  border: 1px solid var(--tp-border, #e5e7eb);
+  color: var(--tp-text-muted, #4b5563);
+}
+
+.ax-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ax-cell--via {
+  color: var(--tp-text-muted, #6b7280);
+}
+
+.ax-via {
+  font-size: 0.75rem;
+}
+
+.ax-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--tp-text-muted, #6b7280);
+}
+
+.ax-select {
+  padding: 0.3rem 0.5rem;
+  min-width: 9rem;
+}
+
+.ax-select--own {
+  border-color: var(--tp-accent, #3b82f6);
+  background: var(--tp-accent-soft, #eff6ff);
+  font-weight: 500;
+}
+
+.ax-select--none {
+  color: var(--tp-text-muted, #9ca3af);
+}
+
+.ax-hint {
+  font-size: 0.8rem;
+  color: var(--tp-text-muted, #6b7280);
+}
+
+/* Column explanations under the table */
+.ax-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 1rem 0 0;
+  font-size: 0.8rem;
+}
+
+.ax-legend dt {
+  font-weight: 600;
+}
+
+.ax-legend dd {
+  margin: 0.1rem 0 0;
+  color: var(--tp-text-muted, #6b7280);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 </style>

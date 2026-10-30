@@ -79,6 +79,24 @@ class ClaudeAccessMcpTest extends TestCase
         $this->assertTrue(User::find('michi')->can('edit', Entry::find($page->id())), 'The Control Panel role is unchanged.');
     }
 
+    public function test_a_users_own_level_overrides_their_roles_level(): void
+    {
+        $this->grant([
+            'claude_edit' => ['roles' => ['mcp_full_editor']],
+            'claude_read' => ['users' => ['michi']],
+            'claude_none' => ['users' => ['anna']],
+        ]);
+        $page = $this->page();
+
+        $michi = $this->serverAs($this->user('michi'));
+        $this->assertSame('forbidden', $this->tool($michi, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => ['0' => 'Neu']])['error'], 'Lower than the role.');
+        $this->assertSame([], $this->toolNames($this->serverAs($this->user('anna'))), 'No access although the role has some.');
+
+        $boss = User::make()->id('boss')->email('boss@example.com')->assignRole('mcp_full_editor');
+        $boss->save();
+        $this->assertContains('preview_entry_edit', $this->toolNames($this->serverAs($boss)), 'Everyone else with the role gets its level.');
+    }
+
     public function test_levels_add_up_and_the_role_still_applies_on_top(): void
     {
         $this->grant(['claude_edit' => ['roles' => ['mcp_full_editor']], 'claude_publish' => ['users' => ['anna']]]);

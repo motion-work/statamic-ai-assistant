@@ -39,6 +39,7 @@ class AgentAccessController
                     'id' => (string) $user->id(),
                     'name' => (string) ($user->name() ?: $user->email()),
                     'email' => (string) $user->email(),
+                    'roles' => $user->roles()->map(fn ($role) => $role->handle())->values()->all(),
                 ])->values()->all(),
             'access' => $this->store->all(),
             'ceiling' => EntryCreationPolicy::configuredMaxPlanEntries(),

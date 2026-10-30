@@ -9,14 +9,17 @@ use Statamic\Contracts\Auth\User as UserContract;
  * What an account may do through the Claude connector, on top of its Control
  * Panel role: an editor may edit in the Control Panel and only read in Claude.
  *
- * Levels are cumulative (publish includes edit, edit includes read) and are
- * granted per role or user on the access page. Until a super admin turns the
- * restriction on, every account keeps the level its role allows. Super admins
- * and the local stdio server (no account) are never restricted.
+ * Levels are cumulative (publish includes edit, edit includes read). A role
+ * gets one level; a user gets the highest level of their roles, unless the
+ * user has a level of their own, which wins, also when it is lower ("none").
+ * Until a super admin turns the restriction on, every account keeps the level
+ * its role allows. Super admins and the local stdio server (no account) are
+ * never restricted.
  */
 class ClaudeAccess
 {
-    public const LEVELS = ['read', 'edit', 'publish'];
+    /** Ranked lowest first; "none" exists only as a user's own setting. */
+    public const LEVELS = ['none', 'read', 'edit', 'publish'];
 
     public static function allows(?UserContract $user, string $level): bool
     {
@@ -24,14 +27,31 @@ class ClaudeAccess
             return true;
         }
 
-        $index = array_search($level, self::LEVELS, true);
-        foreach (array_slice(self::LEVELS, $index === false ? count(self::LEVELS) : $index) as $granted) {
-            if (AgentAccess::allows('claude_'.$granted, $user)) {
-                return true;
+        $needed = array_search($level, self::LEVELS, true);
+
+        return $needed !== false && array_search(self::levelOf($user), self::LEVELS, true) >= $needed;
+    }
+
+    public static function levelOf(UserContract $user): string
+    {
+        $store = app(AgentAccessStore::class);
+        $userId = (string) $user->id();
+        foreach (self::LEVELS as $level) {
+            if (in_array($userId, $store->feature('claude_'.$level)['users'], true)) {
+                return $level;
             }
         }
 
-        return false;
+        $best = 'none';
+        foreach (array_slice(self::LEVELS, 1) as $level) {
+            foreach ($store->feature('claude_'.$level)['roles'] as $role) {
+                if ($user->hasRole($role)) {
+                    $best = $level;
+                }
+            }
+        }
+
+        return $best;
     }
 
     public static function denial(string $level): string

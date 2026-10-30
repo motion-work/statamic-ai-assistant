@@ -21,6 +21,7 @@ use Statamic\Facades\YAML;
  *   bulk_translations: { roles: [...], users: [...] }
  *   agent_settings:    { roles: [...], users: [...] }
  *   claude_restricted: true       # off (default): the connector follows the CP role alone
+ *   claude_none:    { users: [...] }   # a user's own "no access", overriding their roles
  *   claude_read:    { roles: [...], users: [...] }
  *   claude_edit:    { roles: [...], users: [...] }
  *   claude_publish: { roles: [...], users: [...] }
@@ -28,7 +29,7 @@ use Statamic\Facades\YAML;
 class AgentAccessStore
 {
     /** Gated capabilities. `agent` additionally carries entry-generation limits. */
-    public const FEATURES = ['agent', 'bulk_translations', 'agent_settings', 'advanced_tools', 'claude_read', 'claude_edit', 'claude_publish'];
+    public const FEATURES = ['agent', 'bulk_translations', 'agent_settings', 'advanced_tools', 'claude_none', 'claude_read', 'claude_edit', 'claude_publish'];
 
     /** @var array<string, mixed>|null */
     private ?array $cache = null;
