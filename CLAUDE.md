@@ -17,6 +17,11 @@ vendor/bin/phpunit tests/Services/TieredModelTest.php # one file
 vendor/bin/phpunit --filter test_no_swap_when_fast_model_unset
 ```
 
+- A suite run rewrites `tests/__fixtures__` (deletes and creates content files). Restore before committing: `git checkout -- tests/__fixtures__ && git clean -fd tests/__fixtures__`.
+- Tests that sign in more than one user over CP routes need `config(['statamic.editions.pro' => true])`; otherwise Statamic throws "Statamic Pro is required for multiple users".
+- Permissions added with `Permission::extend()` are only listed after `Permission::boot()`.
+- A field without a `display` reports its handle in Title Case (`blocks` → `Blocks`).
+
 Frontend (Node per `.nvmrc` = v22, pnpm). `@statamic/cms` resolves from `vendor/statamic/cms/resources/dist-package`, so **run `composer install` before `pnpm install`**:
 
 ```bash
@@ -42,7 +47,6 @@ No linter/formatter is configured.
 ### Access rules
 - `entry_generator` is the master switch for the AI agent; `enable_agent_for_editors` only gates non-super users (super admins always have access). `EntryCreationPolicy` caps entries per request for editors (`editor_limit_entries`).
 - Bulk translations and AI agent settings nav are super-admin only; Glossary & style rules is visible to all CP users; changing it (CP page and Claude connector) needs the `edit translation glossary` permission (`Support/GlossaryAccess`), super admins always.
-- Claude connector (`/mcp`, `src/Mcp/`): any CP account signs in; each tool then follows Statamic's entry policy for that account (`view` to read, `edit` to edit in place or to write a localization, `create` to duplicate via Statamic's `DuplicateEntry` action or to compose a new entry, `publish` to publish/unpublish, checked on the unsaved localization so target-site access counts).
 
 ### AI agent (entry generation)
 Flow: `EntryGeneratorController::generateStream` → `EntryGenerationBatchService::initPlanningSession` → `PlanEntriesJob` → `EntryGenerationPlanner` (agentic mode: LLM calls a `create_entry_job` tool to append plan rows) → one `GeneratePlannedEntryJob` per entry → `EntryGeneratorService` (the large core: blueprint/field schema building, LLM generation, asset/link resolution).
@@ -50,12 +54,12 @@ Flow: `EntryGeneratorController::generateStream` → `EntryGenerationBatchServic
 - Tool calling: `src/Tools/` — each `ChatTool` is a self-contained class (name, OpenAI-style definition, handler, `maxCalls`), dispatched by `ChatToolRunner` with a shared `ToolContext`. Both the generator loop and the planner use the same runner.
 - Context sources: `PromptUrlFetcher` (Jina reader, `prompt_url_fetch` config) + `HtmlReadableExtractor`, `FigmaContentFetcher` (Figma OAuth, tokens in `FigmaTokenStore`), `RemoteImageFetcher`/`AssetImageDownloader`, and editor-authored hints from `SetHintsService` (YAML at `set_hints_path`).
 
-### Claude connector composing
-`get_content_model` / `get_block_schemas` / `preview_compose_entry` / `save_compose_entry` (in `ClaudeTranslationBridge`) reuse the agent: `EntryGeneratorService::compositionBrief()` (schema + block catalog + rules; block fields only for requested blocks, repeated descriptions hoisted into notes), `blockSchemas()`, `mapComposedData()` and `mergeComposedData()`. The agent's own prompt is unchanged. Refactors keep blocks sent back by stored `id` verbatim and only map changed keys (`splitKeptBlocks`/`reassembleBlocks`), because the agent's mapper does not round-trip stored blocks (it drops asset paths and entry references and re-enables disabled sets).
+### Claude connector (`/mcp`, `src/Mcp/`)
+The Claude app signs in with any CP account, then reads, translates, edits, duplicates, publishes and composes entries, each gated by Statamic's own policies for that account. Every write is a preview plus a confirmed save. Before changing anything in `src/Mcp/`, the connector tools, or the parts of `EntryGeneratorService` / `TranslatesFields` they reuse, read `docs/claude-connector.md`: it covers the permission table, the preview/confirm contract, why refactors keep stored blocks by id, where the connector deliberately differs from the agent, and how to verify a change against a host app.
 
 ### Translations (DeepL; LLM only as fallback)
 - Every translation path funnels through `DeeplService::translateBatch()`. Without `DEEPL_API_KEY` (and `translation_llm_fallback` on) it hands the batch to `LlmTranslator` (JSON-in/JSON-out prompt with glossary hits + style rules, per-text retry on a malformed batch). `DeeplService::llmFallbackNotice()` is what controllers/actions surface to editors.
-- `DeeplService` wraps `deeplcom/deepl-php`; `EntryTranslator` + `Concerns/TranslatesFields` walk field data (Bard, replicator, grids); `EntryReferenceResolver` remaps linked entry IDs and may recursively translate linked entries up to `linked_entries_max_depth` (0–5, default 1).
+- `DeeplService` wraps `deeplcom/deepl-php`; `EntryTranslator` + `Concerns/TranslatesFields` walk field data (Bard, replicator, grids), swapping each text for a placeholder and back. Placeholders are arrays (`['__segment__' => n]`, `['__bard_merged__' => n]`) because entry data holds real integers (Bard heading levels, number fields) that a bare-int placeholder would overwrite; `EntryReferenceResolver` remaps linked entry IDs and may recursively translate linked entries up to `linked_entries_max_depth` (0–5, default 1).
 - `CpTranslationBatchRunner` picks sync vs queued (`TranslateEntryJob` on the `translations` queue) by `translation_mode` / `translation_sync_threshold`. `NavigationTreeSyncService` syncs nav trees across sites.
 - Glossary and style rules are YAML files under `content/statamic-ai-assistant/` (`TranslationGlossaryService`, `TranslationStyleRulesService`), synced to DeepL v3 and namespaced by `APP_NAME` — shared DeepL accounts need a unique `APP_NAME` per site. Style rules are arrays per language (legacy single strings are normalized on read); `prefer_glossary_over_style` splits segments so glossary terms stay enforced.
 
