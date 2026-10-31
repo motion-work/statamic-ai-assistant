@@ -75,7 +75,7 @@ class McpHttpTest extends TestCase
                 $client['client_id'],
                 'https://claude.ai/api/mcp/auth_callback',
                 'challenge',
-                'someone@homie.io',
+                'someone@globex.io',
                 'correct-horse',
                 null,
             );

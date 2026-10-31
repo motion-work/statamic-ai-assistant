@@ -87,7 +87,7 @@ class ClaudeEntryEditMcpTest extends TestCase
         $this->assertContains('Hinweis', $texts, 'Fields marked localizable: false can be edited on the entry itself.');
 
         $edits = [
-            array_search('Über uns', $texts, true) => 'Über Homie',
+            array_search('Über uns', $texts, true) => 'Über Globex',
             array_search('Absatz', $texts, true) => 'Neuer Absatz',
         ];
         $preview = $this->tool($server, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => $edits]);
@@ -102,7 +102,7 @@ class ClaudeEntryEditMcpTest extends TestCase
         $this->assertSame(2, $saved['changed_segments']);
 
         $after = Entry::find($page->id());
-        $this->assertSame('Über Homie', $after->value('title'));
+        $this->assertSame('Über Globex', $after->value('title'));
         $this->assertSame('ueber-uns', $after->slug());
         $this->assertSame('mcp-editor', $after->get('updated_by'));
 
@@ -129,7 +129,7 @@ class ClaudeEntryEditMcpTest extends TestCase
         $english = Entry::make()->collection('mcp_pages')->blueprint('page')->locale('en')->origin($page->id())
             ->slug('about-us')->data(['title' => 'About us']);
         $english->save();
-        $denied = $this->tool($server, 'preview_entry_edit', ['entry_id' => $english->id(), 'edits' => ['0' => 'About Homie']]);
+        $denied = $this->tool($server, 'preview_entry_edit', ['entry_id' => $english->id(), 'edits' => ['0' => 'About Globex']]);
         $this->assertSame('forbidden', $denied['error'], 'The role has no access to the en site.');
         $this->assertSame('About us', Entry::find($english->id())->value('title'));
 
@@ -142,7 +142,7 @@ class ClaudeEntryEditMcpTest extends TestCase
     {
         $page = $this->page();
         $editor = $this->serverAs($this->user('mcp-editor'));
-        $preview = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => ['0' => 'Über Homie']]);
+        $preview = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'edits' => ['0' => 'Über Globex']]);
 
         $other = $this->serverAs($this->user('mcp-other'));
         $stolen = $this->tool($other, 'save_entry_edit', ['confirmation_token' => $preview['confirmation_token'], 'confirmed' => true]);
@@ -256,20 +256,20 @@ class ClaudeEntryEditMcpTest extends TestCase
 
         $preview = $this->tool($editor, 'preview_entry_edit', [
             'entry_id' => $page->id(),
-            'slug' => 'Über Homie',
-            'edits' => ['0' => 'Über Homie'],
+            'slug' => 'Über Globex',
+            'edits' => ['0' => 'Über Globex'],
         ]);
-        $this->assertSame(['before' => 'ueber-uns', 'after' => 'ueber-homie'], $preview['slug']);
+        $this->assertSame(['before' => 'ueber-uns', 'after' => 'ueber-globex'], $preview['slug']);
         $this->assertStringContainsString('web address', $preview['message']);
         $this->assertSame('ueber-uns', Entry::find($page->id())->slug(), 'A preview writes nothing.');
 
         $saved = $this->tool($editor, 'save_entry_edit', ['confirmation_token' => $preview['confirmation_token'], 'confirmed' => true]);
         $this->assertTrue($saved['saved']);
         $this->assertTrue($saved['slug_changed']);
-        $this->assertSame('ueber-homie', Entry::find($page->id())->slug());
-        $this->assertSame('Über Homie', Entry::find($page->id())->value('title'));
+        $this->assertSame('ueber-globex', Entry::find($page->id())->slug());
+        $this->assertSame('Über Globex', Entry::find($page->id())->value('title'));
 
-        $stale = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'slug' => 'homie']);
+        $stale = $this->tool($editor, 'preview_entry_edit', ['entry_id' => $page->id(), 'slug' => 'globex']);
         Entry::find($page->id())->slug('anders')->save();
         $refused = $this->tool($editor, 'save_entry_edit', ['confirmation_token' => $stale['confirmation_token'], 'confirmed' => true]);
         $this->assertSame('entry_changed', $refused['error']);
