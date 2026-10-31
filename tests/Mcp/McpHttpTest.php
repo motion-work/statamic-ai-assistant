@@ -98,6 +98,21 @@ class McpHttpTest extends TestCase
         $this->assertSame('This sign-in request is not valid.', $result['error']);
     }
 
+    public function test_connected_apps_survive_clearing_the_default_cache_in_their_own_store(): void
+    {
+        $callback = 'https://claude.ai/api/mcp/auth_callback';
+        $oauth = $this->app->make(McpOAuth::class);
+
+        $shared = $oauth->registerClient([$callback]);
+        \Illuminate\Support\Facades\Cache::flush();
+        $this->assertNull($oauth->redirectHost($shared['client_id'], $callback), 'In the default store a cache:clear signs the app out.');
+
+        config(['cache.stores.mcp_test' => ['driver' => 'array'], 'statamic-ai-assistant.mcp_cache_store' => 'mcp_test']);
+        $own = $oauth->registerClient([$callback]);
+        \Illuminate\Support\Facades\Cache::flush();
+        $this->assertSame('claude.ai', $oauth->redirectHost($own['client_id'], $callback));
+    }
+
     public function test_a_confidential_client_must_present_its_secret(): void
     {
         $translator = User::make()->id('translator-secret')->email('secret@freelance.example');

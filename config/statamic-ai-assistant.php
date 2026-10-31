@@ -94,6 +94,16 @@ return [
     ))),
 
     /*
+    | mcp_cache_store: the cache store (from config/cache.php) that keeps
+    | connected apps and their sign-ins. Empty uses the default store, which
+    | `php artisan cache:clear` empties, signing everyone out of the
+    | connector, often on every deploy. Use a store the deploy does not clear,
+    | for example `database` (needs the cache table: `php artisan make:cache-table`).
+    */
+
+    'mcp_cache_store' => env('STATAMIC_AI_ASSISTANT_MCP_CACHE_STORE') ?: null,
+
+    /*
     |--------------------------------------------------------------------------
     | INFOMANIAK product id
     |--------------------------------------------------------------------------

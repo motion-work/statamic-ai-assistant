@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Mcp;
 
+use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -19,6 +20,11 @@ use Statamic\Facades\User;
 class McpOAuth
 {
     private const PREFIX = 'statamic-ai-assistant:mcp-oauth:';
+
+    private function store(): Repository
+    {
+        return Cache::store(config('statamic-ai-assistant.mcp_cache_store') ?: null);
+    }
 
     public function issuer(): string
     {
@@ -86,7 +92,7 @@ class McpOAuth
 
         $id = (string) Str::uuid();
         $secret = $authMethod === 'none' ? null : Str::random(48);
-        Cache::put(self::PREFIX.'client:'.$id, [
+        $this->store()->put(self::PREFIX.'client:'.$id, [
             'secret' => $secret === null ? null : hash('sha256', $secret),
             'auth_method' => $authMethod,
             'redirects' => array_values($redirects),
@@ -129,7 +135,7 @@ class McpOAuth
         }
 
         $code = Str::random(48);
-        Cache::put(self::PREFIX.'code:'.$code, [
+        $this->store()->put(self::PREFIX.'code:'.$code, [
             'client_id' => $clientId,
             'redirect' => $redirectUri,
             'challenge' => $challenge,
@@ -170,7 +176,7 @@ class McpOAuth
     public function actor(Request $request): ?UserContract
     {
         $token = (string) $request->bearerToken();
-        $record = $token === '' ? null : Cache::get(self::PREFIX.'access:'.$token);
+        $record = $token === '' ? null : $this->store()->get(self::PREFIX.'access:'.$token);
         if (! is_array($record)) {
             return null;
         }
@@ -185,7 +191,7 @@ class McpOAuth
     private function exchangeCode(string $clientId, array $input): ?array
     {
         $code = (string) ($input['code'] ?? '');
-        $record = Cache::pull(self::PREFIX.'code:'.$code);
+        $record = $this->store()->pull(self::PREFIX.'code:'.$code);
         if (! is_array($record) || ($record['client_id'] ?? null) !== $clientId) {
             return null;
         }
@@ -204,7 +210,7 @@ class McpOAuth
      */
     private function exchangeRefresh(string $clientId, string $refresh): ?array
     {
-        $record = Cache::pull(self::PREFIX.'refresh:'.$refresh);
+        $record = $this->store()->pull(self::PREFIX.'refresh:'.$refresh);
         if (! is_array($record) || ($record['client_id'] ?? null) !== $clientId) {
             return null;
         }
@@ -219,11 +225,11 @@ class McpOAuth
     {
         $access = Str::random(48);
         $refresh = Str::random(48);
-        Cache::put(self::PREFIX.'access:'.$access, [
+        $this->store()->put(self::PREFIX.'access:'.$access, [
             'user_id' => $userId,
             'client_id' => $clientId,
         ], now()->addHours(12));
-        Cache::put(self::PREFIX.'refresh:'.$refresh, [
+        $this->store()->put(self::PREFIX.'refresh:'.$refresh, [
             'user_id' => $userId,
             'client_id' => $clientId,
         ], now()->addDays(30));
@@ -241,7 +247,7 @@ class McpOAuth
      */
     private function client(string $id): ?array
     {
-        $client = $id === '' ? null : Cache::get(self::PREFIX.'client:'.$id);
+        $client = $id === '' ? null : $this->store()->get(self::PREFIX.'client:'.$id);
 
         return is_array($client) ? $client : null;
     }

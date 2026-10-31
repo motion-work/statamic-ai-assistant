@@ -159,7 +159,10 @@ class EntryTranslator
                 ->origin($originEntry->id());
         }
 
-        $targetEntry->slug($translatedSlug);
+        // An existing localization keeps its slug, so re-translating never changes a live URL.
+        if (! $targetEntry->slug()) {
+            $targetEntry->slug($translatedSlug);
+        }
         $targetEntry->data($translatedData);
 
         if ($originEntry->published()) {
@@ -415,7 +418,9 @@ class EntryTranslator
                 ->origin($originEntry->id());
         }
 
-        $targetEntry->slug($translatedSlug);
+        if (! $targetEntry->slug()) {
+            $targetEntry->slug($translatedSlug);
+        }
         $targetEntry->data($translatedData);
 
         if ($originEntry->published()) {

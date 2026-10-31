@@ -138,6 +138,29 @@ class ClaudeTranslationMcpTest extends TestCase
         $this->assertSame('Geschichte', Entry::find($originId)->value('title'));
     }
 
+    public function test_a_new_localization_gets_a_slug_from_its_title_and_an_existing_one_keeps_its_slug(): void
+    {
+        $origin = Entry::make()->collection('mcp_stories')->blueprint('article')->locale('de')
+            ->slug('geschichte')->data(['title' => 'Geschichte']);
+        $origin->save();
+        $server = $this->app->make(TranslationMcpServer::class);
+
+        $translate = function (string $title) use ($server, $origin) {
+            $preview = $this->tool($server, 'preview_localization', ['entry_id' => (string) $origin->id(), 'target_site' => 'en']);
+            $translations = array_map(fn () => $title, array_column($preview['segments'], 'text', 'id'));
+
+            return $this->tool($server, 'save_localization', ['confirmation_token' => $preview['confirmation_token'], 'confirmed' => true, 'translations' => $translations]);
+        };
+
+        $this->assertTrue($translate('Our History')['saved']);
+        $this->assertSame('our-history', $origin->fresh()->in('en')->slug());
+
+        $this->assertTrue($translate('The Story So Far')['saved']);
+        $english = $origin->fresh()->in('en');
+        $this->assertSame('The Story So Far', $english->value('title'));
+        $this->assertSame('our-history', $english->slug(), 'Re-translating must not change a live URL.');
+    }
+
     public function test_numbers_in_the_entry_survive_a_translation(): void
     {
         $origin = Entry::make()
