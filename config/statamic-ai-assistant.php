@@ -80,7 +80,18 @@ return [
     | other addresses on the company domain. Claude translates the text itself.
     | This addon only reads entries and saves what Claude sends back.
     |
+    | mcp_redirect_hosts: the apps allowed to connect, by the host of their
+    | OAuth callback (comma-separated in the env). A sign-in only hands its
+    | code to these hosts, so a stranger cannot register a client that sends
+    | it to their own server. localhost is always allowed (local clients).
+    | Add chatgpt.com to connect ChatGPT.
+    |
     */
+
+    'mcp_redirect_hosts' => array_values(array_filter(array_map(
+        fn ($host) => strtolower(trim($host)),
+        explode(',', (string) env('STATAMIC_AI_ASSISTANT_MCP_REDIRECT_HOSTS', 'claude.ai,claude.com')),
+    ))),
 
     /*
     |--------------------------------------------------------------------------

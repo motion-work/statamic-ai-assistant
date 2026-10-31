@@ -53,16 +53,98 @@ class McpHttpTest extends TestCase
         $registered->assertCreated();
         $this->assertNotSame('', $registered->json('client_id'));
 
-        $page = $this->get('/mcp/oauth/authorize?client_id='.$registered->json('client_id'));
+        $this->assertNull($registered->json('client_secret'), 'A public client gets no secret.');
+
+        $page = $this->get('/mcp/oauth/authorize?'.http_build_query([
+            'client_id' => $registered->json('client_id'),
+            'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+        ]));
         $page->assertOk();
-        $page->assertSee('Connect Claude');
+        $page->assertSee('claude.ai');
+        $page->assertSee('name="password"', false);
+    }
+
+    public function test_a_stranger_cannot_register_a_client_that_sends_the_code_to_their_server(): void
+    {
+        $this->postJson('/mcp/oauth/register', [
+            'redirect_uris' => ['https://attacker.example/cb'],
+        ])->assertStatus(400)->assertJsonPath('error', 'invalid_redirect_uri');
+
+        $this->postJson('/mcp/oauth/register', [
+            'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback', 'https://attacker.example/cb'],
+        ])->assertStatus(400);
+
+        config(['statamic-ai-assistant.mcp_redirect_hosts' => ['claude.ai', 'chatgpt.com']]);
+        $this->postJson('/mcp/oauth/register', [
+            'redirect_uris' => ['https://chatgpt.com/connector_platform_oauth_redirect'],
+        ])->assertCreated();
+    }
+
+    public function test_a_client_registered_for_a_host_no_longer_allowed_cannot_sign_in(): void
+    {
+        $oauth = $this->app->make(McpOAuth::class);
+        config(['statamic-ai-assistant.mcp_redirect_hosts' => ['claude.ai', 'chatgpt.com']]);
+        $client = $oauth->registerClient(['https://chatgpt.com/connector_platform_oauth_redirect']);
+        config(['statamic-ai-assistant.mcp_redirect_hosts' => ['claude.ai']]);
+
+        $page = $this->get('/mcp/oauth/authorize?'.http_build_query([
+            'client_id' => $client['client_id'],
+            'redirect_uri' => 'https://chatgpt.com/connector_platform_oauth_redirect',
+        ]));
+        $page->assertStatus(400);
+        $page->assertDontSee('name="password"', false);
+
+        $result = $oauth->authorize($client['client_id'], 'https://chatgpt.com/connector_platform_oauth_redirect', 'challenge', 'x@globex.io', 'pw', null);
+        $this->assertSame('This sign-in request is not valid.', $result['error']);
+    }
+
+    public function test_a_confidential_client_must_present_its_secret(): void
+    {
+        $translator = User::make()->id('translator-secret')->email('secret@freelance.example');
+        $translator->password('correct-horse');
+        $translator->save();
+
+        try {
+            $registered = $this->postJson('/mcp/oauth/register', [
+                'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
+                'token_endpoint_auth_method' => 'client_secret_post',
+            ]);
+            $registered->assertJsonPath('token_endpoint_auth_method', 'client_secret_post');
+            $secret = $registered->json('client_secret');
+            $this->assertNotEmpty($secret);
+
+            $exchange = function (?string $presented) use ($registered) {
+                $verifier = str_repeat('s', 64);
+                $signIn = $this->post('/mcp/oauth/authorize?'.http_build_query([
+                    'client_id' => $registered->json('client_id'),
+                    'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+                    'code_challenge' => rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '='),
+                ]), ['email' => 'secret@freelance.example', 'password' => 'correct-horse']);
+                parse_str((string) parse_url((string) $signIn->headers->get('Location'), PHP_URL_QUERY), $query);
+
+                return $this->postJson('/mcp/oauth/token', array_filter([
+                    'grant_type' => 'authorization_code',
+                    'client_id' => $registered->json('client_id'),
+                    'client_secret' => $presented,
+                    'code' => $query['code'],
+                    'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+                    'code_verifier' => $verifier,
+                ]));
+            };
+
+            $exchange(null)->assertStatus(400);
+            $exchange('wrong')->assertStatus(400);
+            $exchange($secret)->assertOk();
+        } finally {
+            $translator->delete();
+        }
     }
 
     public function test_only_a_control_panel_account_can_sign_in(): void
     {
         $editor = User::make()
-            ->id('editor-woodkit')
-            ->email('editor@woodkit.ch');
+            ->id('editor-globex')
+            ->email('editor@globex.io');
         $editor->password('correct-horse');
         $editor->save();
 
@@ -85,7 +167,7 @@ class McpHttpTest extends TestCase
                 $client['client_id'],
                 'https://claude.ai/api/mcp/auth_callback',
                 'challenge',
-                'editor@woodkit.ch',
+                'editor@globex.io',
                 'nope',
                 null,
             );
@@ -95,7 +177,7 @@ class McpHttpTest extends TestCase
                 $client['client_id'],
                 'https://claude.ai/api/mcp/auth_callback',
                 'challenge',
-                'editor@woodkit.ch',
+                'editor@globex.io',
                 'correct-horse',
                 null,
             );
@@ -146,6 +228,45 @@ class McpHttpTest extends TestCase
             $translator->delete();
 
             $this->postJson('/mcp', $listTools, $headers)->assertUnauthorized();
+        } finally {
+            $translator->delete();
+        }
+    }
+
+    public function test_a_client_can_authenticate_with_http_basic_alone(): void
+    {
+        $translator = User::make()
+            ->id('translator-basic')
+            ->email('basic@freelance.example');
+        $translator->password('correct-horse');
+        $translator->save();
+
+        try {
+            $registered = $this->postJson('/mcp/oauth/register', [
+                'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
+                'token_endpoint_auth_method' => 'client_secret_basic',
+            ]);
+            $clientId = $registered->json('client_id');
+            $secret = $registered->json('client_secret');
+            $verifier = str_repeat('b', 64);
+            $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+
+            $signIn = $this->post('/mcp/oauth/authorize?'.http_build_query([
+                'client_id' => $clientId,
+                'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+                'code_challenge' => $challenge,
+            ]), ['email' => 'basic@freelance.example', 'password' => 'correct-horse']);
+            parse_str((string) parse_url((string) $signIn->headers->get('Location'), PHP_URL_QUERY), $query);
+
+            $token = $this->postJson('/mcp/oauth/token', [
+                'grant_type' => 'authorization_code',
+                'code' => $query['code'],
+                'redirect_uri' => 'https://claude.ai/api/mcp/auth_callback',
+                'code_verifier' => $verifier,
+            ], ['Authorization' => 'Basic '.base64_encode($clientId.':'.$secret)]);
+
+            $token->assertOk();
+            $this->assertNotSame('', (string) $token->json('access_token'));
         } finally {
             $translator->delete();
         }

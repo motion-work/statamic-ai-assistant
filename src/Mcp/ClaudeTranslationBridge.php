@@ -158,6 +158,7 @@ class ClaudeTranslationBridge
             'root_id' => (string) $root->id(),
             'target_site' => $site->handle(),
             'segment_ids' => array_column($segments, 'id'),
+            'fingerprint' => $this->fingerprint($source, $segments),
             'user_id' => $this->actor !== null ? (string) $this->actor->id() : null,
         ], now()->addMinutes(self::TOKEN_TTL_MINUTES));
 
@@ -216,6 +217,15 @@ class ClaudeTranslationBridge
         }
         if (($denied = $this->refuseLocalization($source, $root, $plan['target_site'])) !== null) {
             return $denied;
+        }
+        if ($this->fingerprint($source, $this->translator->externalSegments($source)) !== $plan['fingerprint']) {
+            Cache::forget($this->tokenKey($token));
+
+            return [
+                'saved' => false,
+                'error' => 'entry_changed',
+                'message' => 'Someone changed the source entry after the preview. Read it again and preview the translation anew. Nothing was saved.',
+            ];
         }
 
         $strings = [];

@@ -30,29 +30,41 @@ class McpOAuthController extends Controller
             $redirects = [];
         }
 
-        $client = $this->oauth->registerClient(array_values($redirects));
+        $client = $this->oauth->registerClient(
+            array_values($redirects),
+            (string) $request->input('token_endpoint_auth_method', 'none'),
+        );
         if ($client === null) {
-            return response()->json(['error' => 'invalid_redirect_uri'], 400);
+            return response()->json([
+                'error' => 'invalid_redirect_uri',
+                'error_description' => 'This site only connects the apps its administrator allowed.',
+            ], 400);
         }
 
-        return response()->json([
+        return response()->json(array_filter([
             'client_id' => $client['client_id'],
             'client_secret' => $client['client_secret'],
             'redirect_uris' => array_values($redirects),
             'grant_types' => ['authorization_code', 'refresh_token'],
             'response_types' => ['code'],
-            'token_endpoint_auth_method' => 'none',
+            'token_endpoint_auth_method' => $client['token_endpoint_auth_method'],
             'client_id_issued_at' => time(),
-        ], 201);
+        ], fn ($value) => $value !== null), 201);
     }
 
     public function authorizeForm(Request $request): Response
     {
+        $host = $this->oauth->redirectHost(
+            (string) $request->query('client_id', ''),
+            (string) $request->query('redirect_uri', ''),
+        );
+
         return response()->view('statamic-ai-assistant::mcp-authorize', [
             'site' => (string) config('app.name'),
-            'error' => null,
+            'host' => $host,
+            'error' => $host === null ? 'This sign-in request is not valid.' : null,
             'email' => '',
-        ]);
+        ], $host === null ? 400 : 200);
     }
 
     public function authorizeSubmit(Request $request): Response|RedirectResponse
@@ -72,6 +84,10 @@ class McpOAuthController extends Controller
 
         return response()->view('statamic-ai-assistant::mcp-authorize', [
             'site' => (string) config('app.name'),
+            'host' => $this->oauth->redirectHost(
+                (string) $request->query('client_id', $request->input('client_id')),
+                (string) $request->query('redirect_uri', $request->input('redirect_uri')),
+            ),
             'error' => $result['error'],
             'email' => (string) $request->input('email'),
         ], isset($result['error']) && str_contains($result['error'], 'not valid') ? 400 : 422);
@@ -79,16 +95,22 @@ class McpOAuthController extends Controller
 
     public function token(Request $request): JsonResponse
     {
-        $basic = null;
+        $basicId = null;
+        $basicSecret = null;
         $header = (string) $request->header('Authorization', '');
         if (str_starts_with($header, 'Basic ')) {
             $decoded = base64_decode(substr($header, 6), true);
             if (is_string($decoded) && str_contains($decoded, ':')) {
-                $basic = explode(':', $decoded, 2)[1];
+                [$basicId, $basicSecret] = explode(':', $decoded, 2);
             }
         }
 
-        $issued = $this->oauth->exchange($request->all(), $basic);
+        $input = $request->all();
+        if ($basicId !== null && ! isset($input['client_id'])) {
+            $input['client_id'] = $basicId;
+        }
+
+        $issued = $this->oauth->exchange($input, $basicSecret);
         if ($issued === null) {
             return response()->json(['error' => 'invalid_grant'], 400);
         }

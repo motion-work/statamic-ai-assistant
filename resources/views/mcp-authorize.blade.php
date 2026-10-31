@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Connect Claude</title>
+    <title>Connect an AI app</title>
     <style>
         body { margin: 0; font: 16px/1.45 system-ui, sans-serif; background: #f4f4f5; color: #18181b; }
         main { max-width: 26rem; margin: 8vh auto; padding: 1.5rem; background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; }
@@ -17,11 +17,14 @@
 </head>
 <body>
 <main>
-    <h1>Connect Claude to {{ $site }}</h1>
-    <p>Sign in with your Control Panel account. Claude translates the text. This site saves it as a localization of the original entry.</p>
+    <h1>Connect an AI app to {{ $site }}</h1>
+    @if ($host)
+        <p>After you sign in, <strong>{{ $host }}</strong> gets access to {{ $site }} with your Control Panel account. Only continue if you started this connection from that app.</p>
+    @endif
     @if ($error)
         <p class="error">{{ $error }}</p>
     @endif
+    @if ($host)
     <form method="post" action="{{ request()->getRequestUri() }}">
         @csrf
         <label>Email
@@ -30,8 +33,9 @@
         <label>Password
             <input type="password" name="password" autocomplete="current-password" required>
         </label>
-        <button type="submit">Allow Claude</button>
+        <button type="submit">Allow {{ $host }}</button>
     </form>
+    @endif
 </main>
 </body>
 </html>

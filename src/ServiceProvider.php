@@ -33,6 +33,11 @@ use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
+use MotionWork\StatamicAiAssistant\Mcp\ClaudeTranslationBridge;
+use MotionWork\StatamicAiAssistant\Mcp\ContentCommitter;
+use MotionWork\StatamicAiAssistant\Mcp\ImageUploads;
+use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
+use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
@@ -202,6 +207,36 @@ class ServiceProvider extends AddonServiceProvider
             return new NavigationTreeSyncService(
                 $app->make(TranslationService::class),
                 $app->make(DeeplService::class),
+            );
+        });
+
+        $this->app->singleton(McpOAuth::class, function () {
+            return new McpOAuth;
+        });
+
+        $this->app->singleton(ImageUploads::class, function () {
+            return new ImageUploads;
+        });
+
+        $this->app->singleton(ContentCommitter::class, function () {
+            return new ContentCommitter;
+        });
+
+        // Not singletons: the bridge holds the signed-in actor.
+        $this->app->bind(ClaudeTranslationBridge::class, function ($app) {
+            return new ClaudeTranslationBridge(
+                $app->make(EntryTranslator::class),
+                $app->make(\MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver::class),
+                $app->make(TranslationGlossaryService::class),
+                $app->make(TranslationStyleRulesService::class),
+                $app->make(ContentCommitter::class),
+                $app->make(ImageUploads::class),
+            );
+        });
+
+        $this->app->bind(TranslationMcpServer::class, function ($app) {
+            return new TranslationMcpServer(
+                $app->make(ClaudeTranslationBridge::class),
             );
         });
 

@@ -21,6 +21,8 @@ All notable changes to **motion-work/statamic-ai-assistant** are documented here
 
 ### Fixed
 
+- **Connector sign-in only reaches allowed apps:** client registration accepted any HTTPS callback, and the sign-in page did not say where it would send the user, so a stranger could register a client pointing at their own server and collect a Control Panel account's access from a link. Callbacks must now be on a host in the new `mcp_redirect_hosts` config (`STATAMIC_AI_ASSISTANT_MCP_REDIRECT_HOSTS`, default `claude.ai,claude.com`; `localhost` always allowed), checked at registration and again at every sign-in, and the sign-in page names the host. Clients that register for `client_secret_post` / `client_secret_basic` get a secret that is now required at the token endpoint; public clients (what the Claude app uses) get none and rely on PKCE as before. HTTP Basic client authentication now also reads the client id from the header.
+- **Stale translations are refused:** `save_localization` refuses with `entry_changed` when the source entry changed after `preview_localization`, as `save_entry_edit` already did.
 - **Numbers survive translations:** translating an entry no longer overwrites Bard heading levels and integer fields whose value matched a text's position (a level-2 heading could become the text of the second segment). This affected DeepL, the AI fallback and the Claude connector.
 
 ### Changed

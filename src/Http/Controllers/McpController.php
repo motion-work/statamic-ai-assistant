@@ -25,7 +25,8 @@ class McpController extends Controller
             return response('', 405, ['Allow' => 'POST, DELETE']);
         }
 
-        if (! $this->oauth->requestIsAllowed($request)) {
+        $actor = $this->oauth->actor($request);
+        if ($actor === null) {
             return response(json_encode([
                 'error' => 'unauthorized',
                 'message' => 'Sign in with a Control Panel account.',
@@ -36,10 +37,7 @@ class McpController extends Controller
             ]);
         }
 
-        $actor = $this->oauth->actor($request);
-        if ($actor !== null) {
-            $this->server->bridge()->setActor($actor);
-        }
+        $this->server->bridge()->setActor($actor);
 
         $payload = $request->json()->all();
         if (! is_array($payload) || ($payload['jsonrpc'] ?? null) !== '2.0') {

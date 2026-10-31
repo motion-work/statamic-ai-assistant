@@ -185,6 +185,21 @@ class ClaudeEntryEditMcpTest extends TestCase
         $this->assertSame('EN Über uns', $saved['title']);
     }
 
+    public function test_a_translation_of_a_changed_source_is_refused(): void
+    {
+        $page = $this->page();
+        Role::find('mcp_editor')->addPermission('access en site')->save();
+        $editor = $this->serverAs($this->user('mcp-editor'));
+        $preview = $this->tool($editor, 'preview_localization', ['entry_id' => $page->id(), 'target_site' => 'en']);
+        $translations = array_map(fn ($segment) => 'EN '.$segment['text'], array_column($preview['segments'], null, 'id'));
+
+        Entry::find($page->id())->set('title', 'Über uns heute')->save();
+
+        $stale = $this->tool($editor, 'save_localization', ['confirmation_token' => $preview['confirmation_token'], 'confirmed' => true, 'translations' => $translations]);
+        $this->assertSame('entry_changed', $stale['error']);
+        $this->assertFalse(Entry::find($page->id())->existsIn('en'));
+    }
+
     public function test_an_editor_changes_toggles_choices_and_links(): void
     {
         $page = $this->page();

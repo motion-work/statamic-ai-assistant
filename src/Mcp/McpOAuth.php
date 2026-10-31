@@ -69,24 +69,44 @@ class McpOAuth
     }
 
     /**
+     * A public client ('none', what the Claude app registers as) gets no
+     * secret and relies on PKCE; a confidential one must present its secret.
+     *
      * @param  array<int, string>  $redirects
-     * @return array{client_id: string, client_secret: string}|null
+     * @return array{client_id: string, client_secret: ?string, token_endpoint_auth_method: string}|null
      */
-    public function registerClient(array $redirects): ?array
+    public function registerClient(array $redirects, string $authMethod = 'none'): ?array
     {
-        $allowed = array_values(array_filter($redirects, fn ($uri) => is_string($uri) && $this->redirectIsAllowed($uri)));
-        if ($allowed === []) {
+        if (count($redirects) === 0 || count(array_filter($redirects, fn ($uri) => ! is_string($uri) || ! $this->redirectIsAllowed($uri))) > 0) {
             return null;
+        }
+        if (! in_array($authMethod, ['none', 'client_secret_post', 'client_secret_basic'], true)) {
+            $authMethod = 'none';
         }
 
         $id = (string) Str::uuid();
-        $secret = Str::random(48);
+        $secret = $authMethod === 'none' ? null : Str::random(48);
         Cache::put(self::PREFIX.'client:'.$id, [
-            'secret' => hash('sha256', $secret),
-            'redirects' => $allowed,
+            'secret' => $secret === null ? null : hash('sha256', $secret),
+            'auth_method' => $authMethod,
+            'redirects' => array_values($redirects),
         ], now()->addDays(90));
 
-        return ['client_id' => $id, 'client_secret' => $secret];
+        return ['client_id' => $id, 'client_secret' => $secret, 'token_endpoint_auth_method' => $authMethod];
+    }
+
+    /**
+     * The host the sign-in will hand its code to, for the sign-in page, or
+     * null when the request is not one this site would complete.
+     */
+    public function redirectHost(string $clientId, string $redirectUri): ?string
+    {
+        $client = $this->client($clientId);
+        if ($client === null || ! in_array($redirectUri, $client['redirects'], true) || ! $this->redirectIsAllowed($redirectUri)) {
+            return null;
+        }
+
+        return strtolower((string) parse_url($redirectUri, PHP_URL_HOST));
     }
 
     /**
@@ -94,8 +114,7 @@ class McpOAuth
      */
     public function authorize(string $clientId, string $redirectUri, string $challenge, string $email, string $password, ?string $state): array
     {
-        $client = $this->client($clientId);
-        if ($client === null || ! in_array($redirectUri, $client['redirects'], true) || $challenge === '') {
+        if ($this->redirectHost($clientId, $redirectUri) === null || $challenge === '') {
             return ['error' => 'This sign-in request is not valid.'];
         }
 
@@ -159,11 +178,6 @@ class McpOAuth
         return User::find($record['user_id'] ?? '');
     }
 
-    public function requestIsAllowed(Request $request): bool
-    {
-        return $this->actor($request) !== null;
-    }
-
     /**
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>|null
@@ -223,7 +237,7 @@ class McpOAuth
     }
 
     /**
-     * @return array{secret: string, redirects: array<int, string>}|null
+     * @return array{secret: ?string, auth_method?: string, redirects: array<int, string>}|null
      */
     private function client(string $id): ?array
     {
@@ -233,15 +247,18 @@ class McpOAuth
     }
 
     /**
-     * @param  array{secret: string, redirects: array<int, string>}  $client
+     * Clients registered before auth methods were stored carry no
+     * auth_method; they were all told to use 'none', so they stay public.
+     *
+     * @param  array{secret: ?string, auth_method?: string, redirects: array<int, string>}  $client
      */
     private function secretMatches(array $client, string $presented): bool
     {
-        if ($presented === '') {
+        if (($client['auth_method'] ?? 'none') === 'none') {
             return true;
         }
 
-        return hash_equals($client['secret'], hash('sha256', $presented));
+        return $presented !== '' && is_string($client['secret']) && hash_equals($client['secret'], hash('sha256', $presented));
     }
 
     private function pkce(string $verifier, string $challenge): bool
@@ -267,22 +284,17 @@ class McpOAuth
             return $parts['scheme'] === 'http';
         }
 
-        return $parts['scheme'] === 'https';
+        return $parts['scheme'] === 'https'
+            && in_array($host, (array) config('statamic-ai-assistant.mcp_redirect_hosts', ['claude.ai', 'claude.com']), true);
     }
 
     private function userByEmail(string $email): ?UserContract
     {
-        $email = strtolower(trim($email));
+        $email = trim($email);
         if ($email === '') {
             return null;
         }
 
-        foreach (User::all() as $user) {
-            if (strtolower((string) $user->email()) === $email) {
-                return $user;
-            }
-        }
-
-        return null;
+        return User::findByEmail($email);
     }
 }
