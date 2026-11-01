@@ -8,6 +8,7 @@ use MotionWork\StatamicAiAssistant\Services\Concerns\ReconcilesBatchReferences;
 use MotionWork\StatamicAiAssistant\Services\Concerns\ReportsTranslationCoverage;
 use MotionWork\StatamicAiAssistant\Services\Concerns\TracksTranslationBatchProgress;
 use MotionWork\StatamicAiAssistant\Services\Concerns\TranslatesTerms;
+use MotionWork\StatamicAiAssistant\Support\CollectionSites;
 use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use Statamic\Contracts\Entries\Entry;
 use Statamic\Facades\Site;
@@ -47,6 +48,10 @@ class TranslationService
 
         if (! $sourceSite || ! $destinationSite) {
             return $this->errorResult($entry, __('Source or destination site not found.'), $destinationLocale);
+        }
+
+        if (! CollectionSites::includes($entry, $destinationSite->handle())) {
+            return $this->errorResult($entry, CollectionSites::refusal($entry, $destinationSite->handle()), $destinationLocale);
         }
 
         $sourceEntry = $this->resolveSourceEntry($entry, $sourceSite);

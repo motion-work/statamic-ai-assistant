@@ -7,6 +7,7 @@ use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
+use MotionWork\StatamicAiAssistant\Support\CollectionSites;
 use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
 use Statamic\Contracts\Entries\Entry;
@@ -215,6 +216,10 @@ final class LocalizationTools
                 'error' => 'same_site',
                 'message' => 'The target site is the source entry\'s own site ('.$site->handle().'). Pick another site.',
             ];
+        }
+
+        if (! CollectionSites::includes($root, $site->handle())) {
+            return ['error' => 'site_not_in_collection', 'message' => CollectionSites::refusal($root, $site->handle())];
         }
 
         $existing = $root->existsIn($site->handle()) ? $root->in($site->handle()) : null;

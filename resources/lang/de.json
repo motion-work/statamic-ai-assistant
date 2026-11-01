@@ -868,5 +868,6 @@
   "Granted through the user's role. Change it on the role.": "Über die Rolle des Benutzers erteilt. Bei der Rolle ändern.",
   "via role": "über Rolle",
   "Structure tools": "Strukturtools",
-  "Neither DeepL nor an AI model is configured. Claude follows the glossary and style rules when it translates or edits through the Claude app.": "Weder DeepL noch ein KI-Modell ist eingerichtet. Claude befolgt Glossar und Stilregeln, wenn es über die Claude-App übersetzt oder bearbeitet."
+  "Neither DeepL nor an AI model is configured. Claude follows the glossary and style rules when it translates or edits through the Claude app.": "Weder DeepL noch ein KI-Modell ist eingerichtet. Claude befolgt Glossar und Stilregeln, wenn es über die Claude-App übersetzt oder bearbeitet.",
+  "The collection \":collection\" is not set up for the site :site. Add the site to the collection first.": "Die Sammlung «:collection» ist für die Website :site nicht eingerichtet. Füge die Website zuerst der Sammlung hinzu."
 }

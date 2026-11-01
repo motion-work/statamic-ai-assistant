@@ -3,7 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Str;
-use Statamic\Facades\Collection;
+use MotionWork\StatamicAiAssistant\Support\CollectionSites;
 use Statamic\Facades\Entry;
 
 class EntryReferenceResolver
@@ -114,8 +114,7 @@ class EntryReferenceResolver
             return $originId;
         }
 
-        $collection = Collection::findByHandle($originEntry->collectionHandle());
-        if (! $collection || ! in_array($targetSite, $collection->sites()->all())) {
+        if (! CollectionSites::includes($originEntry, $targetSite)) {
             return $originId;
         }
 

@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Services;
 
 use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
+use MotionWork\StatamicAiAssistant\Support\CollectionSites;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
@@ -115,6 +116,10 @@ final class LocalizeEntryJobTool
                 'error' => 'same_site',
                 'message' => 'That entry is already on site '.$site->handle().'. localize_entry writes a localization on a different site. Do not create a new entry on the current site.',
             ];
+        }
+
+        if (! CollectionSites::includes($entry, $site->handle())) {
+            return ['ok' => false, 'error' => 'site_not_in_collection', 'message' => CollectionSites::refusal($entry, $site->handle())];
         }
 
         return $site;
