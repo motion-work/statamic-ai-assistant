@@ -55,6 +55,20 @@ class TranslationBatchProgressTest extends TestCase
         $this->assertSame('processing', $progress['entries']["entry-2\x1ede"]['status']);
     }
 
+    public function test_batch_stays_processing_between_rows_of_a_running_job(): void
+    {
+        Bus::fake();
+        $this->dispatch('b4', 1);
+        $service = app(TranslationService::class);
+
+        // A navigation job finished one page and has not written its next row yet.
+        $service->updateEntryStatus('b4', 'page-1', 'it', 'completed', null, ['origin_title' => 'Demo']);
+
+        $progress = $service->getBatchProgress('b4');
+        $this->assertSame('processing', $progress['status']);
+        $this->assertNull($progress['current_entry']);
+    }
+
     public function test_summary_written_on_completion_wins_over_the_counter(): void
     {
         Bus::fake();

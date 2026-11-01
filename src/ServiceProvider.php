@@ -19,6 +19,7 @@ use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
 use MotionWork\StatamicAiAssistant\Services\AssetImageDownloader;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\EditorialGuidanceService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorAssetResolver;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorLinkFallback;
@@ -43,6 +44,7 @@ use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
+use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 use Statamic\Facades\CP\Nav;
 use Statamic\Providers\AddonServiceProvider;
 use Statamic\Statamic;
@@ -124,6 +126,11 @@ class ServiceProvider extends AddonServiceProvider
         foreach (self::SINGLETONS as $class) {
             $this->app->singleton($class);
         }
+
+        // Not singletons, but bound: the container passes null for an optional
+        // constructor parameter whose class is not bound (the planner's).
+        $this->app->bind(EntryGenerationBatchService::class);
+        $this->app->bind(PlanEntryDecorator::class);
 
         // Not singletons: the bridge holds the signed-in actor.
         $this->app->bind(ClaudeTranslationBridge::class);

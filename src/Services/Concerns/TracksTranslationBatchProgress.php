@@ -182,7 +182,8 @@ trait TracksTranslationBatchProgress
         return array_merge($progress, [
             'current' => $done,
             'total' => $batch->totalJobs,
-            'status' => $done > 0 || $running !== null ? 'processing' : 'queued',
+            // Any row means a job has started, also between a job's rows (navigation).
+            'status' => $done > 0 || $entries !== [] ? 'processing' : 'queued',
             'current_entry' => $running ? $this->runningLabel($running) : null,
         ]);
     }
