@@ -47,10 +47,9 @@ class AnalyzeImageTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
 
         $ref = isset($args['ref']) && is_string($args['ref']) ? trim($args['ref']) : '';

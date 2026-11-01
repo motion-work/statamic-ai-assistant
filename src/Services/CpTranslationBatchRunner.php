@@ -2,13 +2,15 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Jobs\SyncNavigationTreeJob;
-use MotionWork\StatamicAiAssistant\Jobs\TranslateEntryJob;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Jobs\SyncNavigationTreeJob;
+use MotionWork\StatamicAiAssistant\Jobs\TranslateEntryJob;
+use MotionWork\StatamicAiAssistant\Support\ReferenceOrder;
+use Statamic\Contracts\Entries\Entry;
 
 class CpTranslationBatchRunner
 {
@@ -48,7 +50,7 @@ class CpTranslationBatchRunner
     /**
      * Same sync/async rules as the Bulk translations CP tool.
      *
-     * @param  array<int, \Statamic\Contracts\Entries\Entry>|\Illuminate\Support\Collection  $entries
+     * @param  array<int, Entry>|Collection  $entries
      * @param  array<int, string>  $destinationLocales
      * @return array{mode: 'sync', batch_id: string, translated: int, updated: int, skipped: int, errors: array<int, string|null>, total: int, results: array}|array{mode: 'async', batch_id: string, total: int}
      *
@@ -79,7 +81,7 @@ class CpTranslationBatchRunner
         // Translate referenced entries BEFORE the entries referencing them, so
         // reference remapping finds existing localizations instead of having to
         // create them mid-run (or leaving source-site ids behind).
-        $entries = $this->orderByReferences($entries);
+        $entries = ReferenceOrder::sort($entries);
 
         if ($this->shouldUseAsync($jobCount)) {
             return $this->dispatchAsync($entries, $sourceLocale, $destinationLocales, $overwrite, $maxDepth);
@@ -89,7 +91,7 @@ class CpTranslationBatchRunner
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, \Statamic\Contracts\Entries\Entry>  $entries
+     * @param  Collection<int, Entry>  $entries
      * @param  array<int, string>  $destinationLocales
      * @return array{mode: 'sync', batch_id: string, translated: int, updated: int, skipped: int, errors: array<int, string|null>, total: int, results: array}
      */
@@ -110,7 +112,7 @@ class CpTranslationBatchRunner
         // the whole batch is done, their localizations exist and ids can swap.
         $reconciled = $this->translationService->reconcileBatchReferences(
             self::reconcilePairs($entries, $sourceLocale, $destinationLocales),
-            self::linkedEntryIdsFromResults($result['results'] ?? []),
+            TranslationBatchCompletion::linkedEntryIdsFromResults($result['results'] ?? []),
         );
 
         return array_merge($result, [
@@ -121,7 +123,7 @@ class CpTranslationBatchRunner
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, \Statamic\Contracts\Entries\Entry>  $entries
+     * @param  Collection<int, Entry>  $entries
      * @param  array<int, string>  $destinationLocales
      * @return array<int, array{0: string, 1: string}>
      */
@@ -140,25 +142,7 @@ class CpTranslationBatchRunner
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $rows
-     * @return array<int, string>
-     */
-    protected static function linkedEntryIdsFromResults(array $rows): array
-    {
-        $ids = [];
-        foreach ($rows as $row) {
-            foreach ((array) ($row['linked_entries'] ?? []) as $linked) {
-                if (is_array($linked) && is_string($linked['entry_id'] ?? null)) {
-                    $ids[] = $linked['entry_id'];
-                }
-            }
-        }
-
-        return array_values(array_unique($ids));
-    }
-
-    /**
-     * @param  \Illuminate\Support\Collection<int, \Statamic\Contracts\Entries\Entry>  $entries
+     * @param  Collection<int, Entry>  $entries
      * @param  array<int, string>  $destinationLocales
      * @return array{mode: 'async', batch_id: string, total: int}
      */
@@ -166,119 +150,18 @@ class CpTranslationBatchRunner
     {
         $batchId = Str::uuid()->toString();
 
-        $totalJobs = 0;
-        foreach ($entries as $entry) {
-            foreach ($destinationLocales as $destinationLocale) {
-                if ($destinationLocale === $sourceLocale) {
-                    continue;
-                }
-                $totalJobs++;
-            }
-        }
-
-        $jobs = [];
-        $jobIndex = 0;
-        foreach ($entries as $entry) {
-            foreach ($destinationLocales as $destinationLocale) {
-                if ($destinationLocale === $sourceLocale) {
-                    continue;
-                }
-                $jobIndex++;
-                $jobs[] = new TranslateEntryJob(
-                    $entry->id(),
-                    $sourceLocale,
-                    $destinationLocale,
-                    $overwrite,
-                    $batchId,
-                    $maxDepth,
-                    $jobIndex,
-                    $totalJobs,
-                );
-            }
-        }
+        $jobs = self::translationJobs($entries, $sourceLocale, $destinationLocales, $overwrite, $batchId, $maxDepth);
+        $totalJobs = count($jobs);
 
         if ($totalJobs === 0) {
             throw new \InvalidArgumentException(__('No translation jobs to run.'));
         }
 
-        Cache::put("translation:batch:{$batchId}:progress", [
-            'current' => 0,
-            'total' => $totalJobs,
-            'current_entry' => null,
-            'status' => 'queued',
-        ], now()->addHours(2));
-
         // Serialized into the completion callback so the reconcile pass knows
         // every (entry, locale) the batch touched without re-reading the jobs.
         $reconcilePairs = self::reconcilePairs($entries, $sourceLocale, $destinationLocales);
 
-        try {
-            Bus::batch($jobs)
-                ->name("Translation batch: {$batchId}")
-                ->then(function () use ($batchId, $totalJobs, $reconcilePairs) {
-                    $entriesData = Cache::get("translation:batch:{$batchId}:entries", []);
-                    $rows = collect($entriesData);
-                    $legacySkippedCount = $rows->where('status', 'skipped')->count();
-                    $success = $rows->filter(fn ($row) => ($row['status'] ?? '') === 'completed');
-                    $skippedSuccess = $success->filter(fn ($row) => ($row['skipped'] ?? false) === true);
-                    $notSkipped = $success->filter(fn ($row) => ! ($row['skipped'] ?? false));
-                    $translated = $notSkipped->filter(fn ($row) => ($row['is_new'] ?? false) === true)->count()
-                        + $skippedSuccess->count()
-                        + $legacySkippedCount;
-                    $updated = $notSkipped->filter(fn ($row) => ($row['is_new'] ?? false) === false)->count();
-                    $failed = $rows->where('status', 'failed');
-                    $errors = $failed->pluck('error')->filter()->values()->toArray();
-
-                    $linkedCreatedTotal = 0;
-                    foreach ($entriesData as $row) {
-                        $linkedCreatedTotal += count($row['linked_entries'] ?? []);
-                    }
-
-                    // Post-batch reconcile: parallel jobs may have translated a
-                    // referencing page before its linked entries existed in the
-                    // target site — those references kept source-site ids. All
-                    // translations exist now, so remap them (remap-only pass;
-                    // creates nothing, calls no translation API).
-                    $reconciled = 0;
-                    try {
-                        $reconciled = app(TranslationService::class)->reconcileBatchReferences(
-                            $reconcilePairs,
-                            self::linkedEntryIdsFromResults(array_values($entriesData)),
-                        );
-                    } catch (\Throwable $e) {
-                        \Illuminate\Support\Facades\Log::warning('Translation batch reference reconcile failed', [
-                            'batch_id' => $batchId,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
-
-                    Cache::put("translation:batch:{$batchId}:progress", [
-                        'current' => $totalJobs,
-                        'total' => $totalJobs,
-                        'current_entry' => null,
-                        'status' => 'completed',
-                        'translated' => $translated,
-                        'updated' => $updated,
-                        'skipped' => 0,
-                        'errors' => $errors,
-                        'linked_created_total' => $linkedCreatedTotal,
-                        'reconciled' => $reconciled,
-                    ], now()->addHours(2));
-                })
-                ->catch(function ($batch, \Throwable $e) use ($batchId) {
-                    Cache::put("translation:batch:{$batchId}:progress", array_merge(
-                        Cache::get("translation:batch:{$batchId}:progress", []),
-                        ['status' => 'failed', 'fatal_error' => $e->getMessage()]
-                    ), now()->addHours(2));
-                })
-                ->dispatch();
-        } catch (\Exception $e) {
-            throw new \RuntimeException(
-                __('Failed to dispatch translation batch. Make sure a queue driver is configured.'),
-                0,
-                $e
-            );
-        }
+        TranslationBatchCompletion::dispatchTracked("Translation batch: {$batchId}", $jobs, $batchId, static fn () => TranslationBatchCompletion::finishBatch($batchId, $totalJobs, $reconcilePairs));
 
         return [
             'mode' => 'async',
@@ -288,70 +171,27 @@ class CpTranslationBatchRunner
     }
 
     /**
-     * Topologically order the selection so entries whose ids appear inside
-     * OTHER selected entries' data come first (referenced before referencing).
-     * Detection is a cheap substring scan of the raw data — ids are UUIDs, so
-     * false positives are practically impossible. Cycles (A ↔ B) fall back to
-     * the original selection order for the entries involved.
+     * One TranslateEntryJob per (entry, destination) pair, skipping the source locale.
      *
-     * @param  \Illuminate\Support\Collection<int, \Statamic\Contracts\Entries\Entry>  $entries
-     * @return \Illuminate\Support\Collection<int, \Statamic\Contracts\Entries\Entry>
+     * @param  Collection<int, Entry>  $entries
+     * @param  array<int, string>  $destinationLocales
+     * @return array<int, TranslateEntryJob>
      */
-    protected function orderByReferences(Collection $entries): Collection
+    private static function translationJobs(Collection $entries, string $sourceLocale, array $destinationLocales, bool $overwrite, string $batchId, int $maxDepth): array
     {
-        if ($entries->count() < 2) {
-            return $entries;
-        }
-
-        $ids = $entries->map(fn ($e) => (string) $e->id())->all();
-
-        $payloads = [];
+        $pairs = [];
         foreach ($entries as $entry) {
-            $payloads[(string) $entry->id()] = json_encode($entry->data()->toArray()) ?: '';
-        }
-
-        // id => selected ids it references (its dependencies).
-        $deps = [];
-        foreach ($payloads as $id => $json) {
-            foreach ($ids as $other) {
-                if ($other !== $id && str_contains($json, $other)) {
-                    $deps[$id][] = $other;
+            foreach ($destinationLocales as $destinationLocale) {
+                if ($destinationLocale !== $sourceLocale) {
+                    $pairs[] = [$entry->id(), $destinationLocale];
                 }
             }
         }
 
-        $ordered = [];
-        $emitted = [];
-        $remaining = $ids;
-
-        while ($remaining !== []) {
-            $next = [];
-            $progress = false;
-
-            foreach ($remaining as $id) {
-                $unmet = array_filter($deps[$id] ?? [], fn ($d) => ! isset($emitted[$d]));
-
-                if ($unmet === []) {
-                    $ordered[] = $id;
-                    $emitted[$id] = true;
-                    $progress = true;
-                } else {
-                    $next[] = $id;
-                }
-            }
-
-            if (! $progress) {
-                // Reference cycle — emit the rest in selection order.
-                array_push($ordered, ...$next);
-                break;
-            }
-
-            $remaining = $next;
-        }
-
-        $byId = $entries->keyBy(fn ($e) => (string) $e->id());
-
-        return collect($ordered)->map(fn ($id) => $byId[$id])->values();
+        return array_map(
+            fn (array $pair) => new TranslateEntryJob($pair[0], $sourceLocale, $pair[1], $overwrite, $batchId, $maxDepth),
+            $pairs,
+        );
     }
 
     /**
@@ -404,72 +244,12 @@ class CpTranslationBatchRunner
         $batchId = Str::uuid()->toString();
         $totalJobs = count($destinationLocales);
 
-        $jobs = [];
-        foreach ($destinationLocales as $i => $locale) {
-            $jobs[] = new SyncNavigationTreeJob(
-                $navHandle,
-                $locale,
-                $overwrite,
-                $maxDepth,
-                $batchId,
-                $i + 1,
-                $totalJobs,
-            );
-        }
+        $jobs = array_map(
+            fn (string $locale) => new SyncNavigationTreeJob($navHandle, $locale, $overwrite, $maxDepth, $batchId),
+            $destinationLocales,
+        );
 
-        Cache::put("translation:batch:{$batchId}:progress", [
-            'current' => 0,
-            'total' => $totalJobs,
-            'current_entry' => null,
-            'status' => 'queued',
-        ], now()->addHours(2));
-
-        try {
-            Bus::batch($jobs)
-                ->name("Navigation sync batch: {$batchId}")
-                ->then(function () use ($batchId, $totalJobs) {
-                    $rows = collect(Cache::get("translation:batch:{$batchId}:entries", []));
-
-                    $navPrefix = 'navigation'."\x1e";
-                    $navRows = $rows->filter(fn ($row, $key) => str_starts_with((string) $key, $navPrefix));
-                    $pageRows = $rows->reject(fn ($row, $key) => str_starts_with((string) $key, $navPrefix));
-
-                    $navWarnings = $navRows
-                        ->flatMap(fn ($row) => (array) ($row['navigation_warnings'] ?? []))
-                        ->filter()
-                        ->unique()
-                        ->values()
-                        ->all();
-
-                    $linkedCreatedTotal = $pageRows->sum(fn ($row) => count($row['linked_entries'] ?? []));
-
-                    Cache::put("translation:batch:{$batchId}:progress", [
-                        'current' => $totalJobs,
-                        'total' => $totalJobs,
-                        'current_entry' => null,
-                        'status' => 'completed',
-                        'translated' => $pageRows->where('status', 'completed')->count(),
-                        'updated' => 0,
-                        'skipped' => 0,
-                        'errors' => $rows->where('status', 'failed')->pluck('error')->filter()->values()->all(),
-                        'linked_created_total' => $linkedCreatedTotal,
-                        'navigation_warnings' => $navWarnings,
-                    ], now()->addHours(2));
-                })
-                ->catch(function ($batch, \Throwable $e) use ($batchId) {
-                    Cache::put("translation:batch:{$batchId}:progress", array_merge(
-                        Cache::get("translation:batch:{$batchId}:progress", []),
-                        ['status' => 'failed', 'fatal_error' => $e->getMessage()]
-                    ), now()->addHours(2));
-                })
-                ->dispatch();
-        } catch (\Exception $e) {
-            throw new \RuntimeException(
-                __('Failed to dispatch translation batch. Make sure a queue driver is configured.'),
-                0,
-                $e
-            );
-        }
+        TranslationBatchCompletion::dispatchTracked("Navigation sync batch: {$batchId}", $jobs, $batchId, static fn () => TranslationBatchCompletion::finishNavigationBatch($batchId, $totalJobs));
 
         return [
             'mode' => 'async',
@@ -482,8 +262,26 @@ class CpTranslationBatchRunner
     {
         try {
             return Schema::hasTable('job_batches');
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Log::warning('[translation] job_batches check failed, translating synchronously', ['error' => $e->getMessage()]);
+
             return false;
         }
+    }
+
+    /**
+     * Batches queued before an upgrade carry callbacks that call these by
+     * their old names, so they still finish.
+     *
+     * @param  array<int, array<string, mixed>>  $reconcilePairs
+     */
+    private static function finishBatch(string $batchId, int $totalJobs, array $reconcilePairs): void
+    {
+        TranslationBatchCompletion::finishBatch($batchId, $totalJobs, $reconcilePairs);
+    }
+
+    private static function finishNavigationBatch(string $batchId, int $totalJobs): void
+    {
+        TranslationBatchCompletion::finishNavigationBatch($batchId, $totalJobs);
     }
 }

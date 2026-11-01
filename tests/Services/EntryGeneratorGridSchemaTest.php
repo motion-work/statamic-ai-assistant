@@ -3,6 +3,9 @@
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\FieldSchemaBuilder;
+use MotionWork\StatamicAiAssistant\Services\FieldValueMapper;
+use MotionWork\StatamicAiAssistant\Services\GenerationPrompt;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Fields\Field;
 
@@ -23,14 +26,17 @@ class EntryGeneratorGridSchemaTest extends TestCase
     }
 
     /**
+     * Calls a schema, mapping or prompt method on the class that owns it.
+     *
      * @param  array<int, mixed>  $args
      */
     private function invoke(string $method, array $args): mixed
     {
-        $ref = new \ReflectionMethod(EntryGeneratorService::class, $method);
-        $ref->setAccessible(true);
+        $owner = collect([FieldSchemaBuilder::class, FieldValueMapper::class, GenerationPrompt::class, EntryGeneratorService::class])
+            ->first(fn (string $class) => method_exists($class, $method));
+        $ref = new \ReflectionMethod($owner, $method);
 
-        return $ref->invokeArgs($this->service, $args);
+        return $ref->invokeArgs($owner === EntryGeneratorService::class ? $this->service : app($owner), $args);
     }
 
     private function gridField(): Field

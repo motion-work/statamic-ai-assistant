@@ -45,10 +45,9 @@ class UseAssetsTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
 
         $refs = is_array($args['refs'] ?? null) ? array_values(array_filter($args['refs'], 'is_string')) : [];

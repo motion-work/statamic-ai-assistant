@@ -2,7 +2,6 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 

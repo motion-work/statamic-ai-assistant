@@ -2,8 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 use MotionWork\StatamicAiAssistant\Services\EntryStructureSerializer;
+use MotionWork\StatamicAiAssistant\Services\FieldValueMapper;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Entry;
@@ -113,7 +113,7 @@ class EntryStructureSerializerTest extends TestCase
             ],
         ]);
 
-        $service = app(EntryGeneratorService::class);
+        $service = app(FieldValueMapper::class);
         $method = new \ReflectionMethod($service, 'mapReplicatorData');
         $method->setAccessible(true);
 
@@ -150,7 +150,7 @@ class EntryStructureSerializerTest extends TestCase
             ],
         ]);
 
-        $service = app(EntryGeneratorService::class);
+        $service = app(FieldValueMapper::class);
         $method = new \ReflectionMethod($service, 'mapReplicatorData');
         $method->setAccessible(true);
 

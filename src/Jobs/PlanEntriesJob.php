@@ -2,10 +2,6 @@
 
 namespace MotionWork\StatamicAiAssistant\Jobs;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
-use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -13,6 +9,11 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\PromptAssetMentionResolver;
+use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 
 /**
  * Run the AI agent planner asynchronously so the HTTP request returns immediately.
@@ -117,7 +118,7 @@ class PlanEntriesJob implements ShouldQueue
             }
         }
 
-        $preferred = (new \MotionWork\StatamicAiAssistant\Services\PromptAssetMentionResolver)
+        $preferred = (new PromptAssetMentionResolver)
             ->resolve([$newest])['preferred'];
 
         if ($preferred !== []) {

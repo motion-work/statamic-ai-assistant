@@ -1,9 +1,9 @@
 <?php
 
+use Illuminate\Support\Facades\Route;
 use MotionWork\StatamicAiAssistant\Http\Controllers\McpController;
 use MotionWork\StatamicAiAssistant\Http\Controllers\McpOAuthController;
 use MotionWork\StatamicAiAssistant\Http\Controllers\McpUploadController;
-use Illuminate\Support\Facades\Route;
 
 $csrf = [
     'App\Http\Middleware\VerifyCsrfToken',

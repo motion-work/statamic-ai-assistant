@@ -2,8 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools\Advanced;
 
-use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use Statamic\Facades\Fieldset;
 
 /**
@@ -71,16 +71,10 @@ class AddComponentSetTool extends AbstractAdvancedTool
         $component = $this->stringArg($args, 'component');
         $container = $this->stringArg($args, 'container');
 
-        if (! $component || ! Fieldset::find($component)) {
-            return ['ok' => false, 'error' => "Component fieldset \"{$component}\" not found. Create it first with create_fieldset."];
+        if ($err = $this->fieldsetsError($component, $container)) {
+            return ['ok' => false, 'error' => $err];
         }
-
-        $containerFieldset = $container !== '' ? Fieldset::find($container) : null;
-        if (! $containerFieldset) {
-            $available = Fieldset::all()->map(fn ($fs) => (string) $fs->handle())->sort()->values()->implode(', ');
-
-            return ['ok' => false, 'error' => "Container fieldset \"{$container}\" not found. Available fieldsets: ".($available !== '' ? $available : '(none)')];
-        }
+        $containerFieldset = Fieldset::find($container);
 
         $setHandle = $this->stringArg($args, 'set_handle');
         if ($setHandle === '') {
@@ -98,25 +92,11 @@ class AddComponentSetTool extends AbstractAdvancedTool
         $contents = $containerFieldset->contents();
         $fields = is_array($contents['fields'] ?? null) ? $contents['fields'] : [];
 
-        // Locate the components/replicator field: the first field whose config
-        // carries a "sets" map (param-free so the model never has to know the
-        // container's internal field handle).
-        $fieldIndex = null;
-        foreach ($fields as $i => $row) {
-            if (is_array($row) && is_array($row['field'] ?? null) && is_array($row['field']['sets'] ?? null)) {
-                $fieldIndex = $i;
-                break;
-            }
-        }
+        $fieldIndex = $this->setsFieldIndex($fields);
 
         if ($fieldIndex === null) {
             return ['ok' => false, 'error' => "Fieldset \"{$container}\" has no field with \"sets\" — it is not a components container. Use list_fieldsets to find the fieldset whose field imports the component_* fieldsets."];
         }
-
-        $sets = $fields[$fieldIndex]['field']['sets'];
-
-        // Grouped format (sets → group → sets → set) vs flat (sets → set).
-        $grouped = $sets !== [] && collect($sets)->every(fn ($v) => is_array($v) && is_array($v['sets'] ?? null));
 
         $newSet = array_filter([
             'display' => $display,
@@ -124,33 +104,9 @@ class AddComponentSetTool extends AbstractAdvancedTool
             'fields' => [['import' => $component]],
         ]);
 
-        if ($grouped) {
-            $groupHandle = $this->stringArg($args, 'group');
-            if ($groupHandle === '') {
-                $groupHandle = (string) array_key_first($sets);
-            } elseif (! isset($sets[$groupHandle])) {
-                return ['ok' => false, 'error' => "Set group \"{$groupHandle}\" not found in \"{$container}\". Groups: ".implode(', ', array_map('strval', array_keys($sets)))];
-            }
-
-            foreach ($sets as $g => $groupConfig) {
-                if ($this->groupImportsComponent($groupConfig['sets'], $component)) {
-                    return ['ok' => false, 'error' => "Component \"{$component}\" is already registered in \"{$container}\" (group \"{$g}\")."];
-                }
-                if (isset($groupConfig['sets'][$setHandle])) {
-                    return ['ok' => false, 'error' => "Set \"{$setHandle}\" already exists in \"{$container}\" (group \"{$g}\"). Pass a different set_handle."];
-                }
-            }
-
-            $sets[$groupHandle]['sets'][$setHandle] = $newSet;
-        } else {
-            if ($this->groupImportsComponent($sets, $component)) {
-                return ['ok' => false, 'error' => "Component \"{$component}\" is already registered in \"{$container}\"."];
-            }
-            if (isset($sets[$setHandle])) {
-                return ['ok' => false, 'error' => "Set \"{$setHandle}\" already exists in \"{$container}\". Pass a different set_handle."];
-            }
-
-            $sets[$setHandle] = $newSet;
+        $sets = $this->addSet($fields[$fieldIndex]['field']['sets'], $component, $container, $setHandle, $newSet, $this->stringArg($args, 'group'));
+        if (is_string($sets)) {
+            return ['ok' => false, 'error' => $sets];
         }
 
         $context->reportActivity((string) __('Registering component :component in :container', [
@@ -171,6 +127,104 @@ class AddComponentSetTool extends AbstractAdvancedTool
             'set_handle' => $setHandle,
             'display' => $display,
         ];
+    }
+
+    private function fieldsetsError(string $component, string $container): ?string
+    {
+        if (! $component || ! Fieldset::find($component)) {
+            return "Component fieldset \"{$component}\" not found. Create it first with create_fieldset.";
+        }
+
+        if ($container === '' || ! Fieldset::find($container)) {
+            $available = Fieldset::all()->map(fn ($fs) => (string) $fs->handle())->sort()->values()->implode(', ');
+
+            return "Container fieldset \"{$container}\" not found. Available fieldsets: ".($available !== '' ? $available : '(none)');
+        }
+
+        return null;
+    }
+
+    /**
+     * Sets come grouped (sets → group → sets → set) or flat (sets → set).
+     *
+     * @param  array<string, mixed>  $sets
+     * @param  array<string, mixed>  $newSet
+     * @return array<string, mixed>|string
+     */
+    private function addSet(array $sets, string $component, string $container, string $setHandle, array $newSet, string $group): array|string
+    {
+        $grouped = $sets !== [] && collect($sets)->every(fn ($v) => is_array($v) && is_array($v['sets'] ?? null));
+
+        return $grouped
+            ? $this->addToGroupedSets($sets, $component, $container, $setHandle, $newSet, $group)
+            : $this->addToFlatSets($sets, $component, $container, $setHandle, $newSet);
+    }
+
+    /**
+     * The components/replicator field: the first field whose config carries a
+     * "sets" map (param-free so the model never has to know the container's
+     * internal field handle).
+     *
+     * @param  array<int, mixed>  $fields
+     */
+    private function setsFieldIndex(array $fields): ?int
+    {
+        foreach ($fields as $i => $row) {
+            if (is_array($row) && is_array($row['field'] ?? null) && is_array($row['field']['sets'] ?? null)) {
+                return $i;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Sets grouped as sets → group → sets → set. The set goes into $groupHandle
+     * (the first group when empty). The new sets, or why it cannot be added.
+     *
+     * @param  array<string, mixed>  $sets
+     * @param  array<string, mixed>  $newSet
+     * @return array<string, mixed>|string
+     */
+    private function addToGroupedSets(array $sets, string $component, string $container, string $setHandle, array $newSet, string $groupHandle): array|string
+    {
+        if ($groupHandle === '') {
+            $groupHandle = (string) array_key_first($sets);
+        } elseif (! isset($sets[$groupHandle])) {
+            return "Set group \"{$groupHandle}\" not found in \"{$container}\". Groups: ".implode(', ', array_map('strval', array_keys($sets)));
+        }
+
+        foreach ($sets as $g => $groupConfig) {
+            if ($this->groupImportsComponent($groupConfig['sets'], $component)) {
+                return "Component \"{$component}\" is already registered in \"{$container}\" (group \"{$g}\").";
+            }
+            if (isset($groupConfig['sets'][$setHandle])) {
+                return "Set \"{$setHandle}\" already exists in \"{$container}\" (group \"{$g}\"). Pass a different set_handle.";
+            }
+        }
+
+        $sets[$groupHandle]['sets'][$setHandle] = $newSet;
+
+        return $sets;
+    }
+
+    /**
+     * @param  array<string, mixed>  $sets
+     * @param  array<string, mixed>  $newSet
+     * @return array<string, mixed>|string
+     */
+    private function addToFlatSets(array $sets, string $component, string $container, string $setHandle, array $newSet): array|string
+    {
+        if ($this->groupImportsComponent($sets, $component)) {
+            return "Component \"{$component}\" is already registered in \"{$container}\".";
+        }
+        if (isset($sets[$setHandle])) {
+            return "Set \"{$setHandle}\" already exists in \"{$container}\". Pass a different set_handle.";
+        }
+
+        $sets[$setHandle] = $newSet;
+
+        return $sets;
     }
 
     /**

@@ -2,8 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
 
 /**
  * Translation through the configured LLM, used by DeeplService when no DeepL
@@ -103,7 +103,7 @@ class LlmTranslator
 
     /**
      * @param  array<int, string>  $texts
-     * @return array<int, string>|null  null when the reply is not a JSON list of the right length
+     * @return array<int, string>|null null when the reply is not a JSON list of the right length
      */
     private function requestTranslations(array $texts, ?string $sourceLocale, string $targetLocale, bool $html): ?array
     {

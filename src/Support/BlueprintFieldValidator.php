@@ -2,11 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Support;
 
-use Statamic\Exceptions\FieldtypeNotFoundException;
-use Statamic\Facades\Collection;
 use Statamic\Facades\Fieldset;
-use Statamic\Facades\Taxonomy;
-use Statamic\Fields\FieldtypeRepository;
 
 /**
  * Strict validation for LLM-provided blueprint field definitions (adapted from
@@ -23,14 +19,15 @@ use Statamic\Fields\FieldtypeRepository;
  */
 class BlueprintFieldValidator
 {
-    /** Common near-miss config keys LLMs send incorrectly. */
-    private const PARAM_CORRECTIONS = [
-        'taxonomy' => 'taxonomies',
-        'collection' => 'collections',
-        'field_type' => 'type',
-        'fieldtype' => 'type',
-        'name' => 'handle',
-    ];
+    private FieldsetReferenceRules $fieldsets;
+
+    private FieldConfigRules $configs;
+
+    public function __construct()
+    {
+        $this->fieldsets = new FieldsetReferenceRules;
+        $this->configs = new FieldConfigRules;
+    }
 
     /**
      * @param  array<int|string, mixed>  $fields
@@ -87,26 +84,9 @@ class BlueprintFieldValidator
                 return $this->error("Tab \"{$tabHandle}\" must have \"sections\": [{\"fields\": [...]}] with at least one section.");
             }
 
-            $sectionsOut = [];
-            foreach ($sections as $si => $section) {
-                if (! is_array($section) || ! is_array($section['fields'] ?? null)) {
-                    return $this->error("Tab \"{$tabHandle}\" section {$si} must be an object with a \"fields\" array.");
-                }
-
-                $result = $this->validateFieldList($section['fields'], $seenHandles);
-                if (! $result['ok']) {
-                    return $this->error("Tab \"{$tabHandle}\" section {$si}: {$result['error']}");
-                }
-
-                $sectionOut = [];
-                if (is_string($section['display'] ?? null) && trim($section['display']) !== '') {
-                    $sectionOut['display'] = $this->cleanLabel($section['display']);
-                }
-                if (is_string($section['instructions'] ?? null) && trim($section['instructions']) !== '') {
-                    $sectionOut['instructions'] = $this->cleanLabel($section['instructions']);
-                }
-                $sectionOut['fields'] = $result['fields'];
-                $sectionsOut[] = $sectionOut;
+            $sectionsOut = $this->validateSections($tabHandle, $sections, $seenHandles);
+            if (isset($sectionsOut['error'])) {
+                return $sectionsOut;
             }
 
             $tabOut = [];
@@ -118,6 +98,38 @@ class BlueprintFieldValidator
         }
 
         return ['ok' => true, 'tabs' => $normalized];
+    }
+
+    /**
+     * @param  array<int, mixed>  $sections
+     * @param  array<string, true>  $seenHandles
+     * @return array<int, array<string, mixed>>|array{ok: false, error: string}
+     */
+    private function validateSections(string $tabHandle, array $sections, array &$seenHandles): array
+    {
+        $sectionsOut = [];
+        foreach ($sections as $si => $section) {
+            if (! is_array($section) || ! is_array($section['fields'] ?? null)) {
+                return $this->error("Tab \"{$tabHandle}\" section {$si} must be an object with a \"fields\" array.");
+            }
+
+            $result = $this->validateFieldList($section['fields'], $seenHandles);
+            if (! $result['ok']) {
+                return $this->error("Tab \"{$tabHandle}\" section {$si}: {$result['error']}");
+            }
+
+            $sectionOut = [];
+            if (is_string($section['display'] ?? null) && trim($section['display']) !== '') {
+                $sectionOut['display'] = $this->cleanLabel($section['display']);
+            }
+            if (is_string($section['instructions'] ?? null) && trim($section['instructions']) !== '') {
+                $sectionOut['instructions'] = $this->cleanLabel($section['instructions']);
+            }
+            $sectionOut['fields'] = $result['fields'];
+            $sectionsOut[] = $sectionOut;
+        }
+
+        return $sectionsOut;
     }
 
     /**
@@ -134,193 +146,91 @@ class BlueprintFieldValidator
             return ['ok' => false, 'error' => 'Provide at least one field as {"handle": "...", "field": {"type": "..."}}.'];
         }
 
-        $fieldtypes = app(FieldtypeRepository::class);
         $validated = [];
 
         foreach (array_values($fields) as $index => $field) {
-            if (! is_array($field)) {
-                return $this->error("Field at index {$index} must be an object. Expected format: {\"handle\": \"title\", \"field\": {\"type\": \"text\", \"display\": \"Title\"}}");
+            $result = $this->validateFieldRow($field, $index, $seenHandles);
+
+            if (isset($result['error'])) {
+                return $result;
             }
 
-            // Fieldset import row: {"import": "hero", "prefix": "hero_"} pulls a
-            // whole existing fieldset in by reference — the preferred way to
-            // reuse shared field groups instead of redefining them.
-            if (array_key_exists('import', $field)) {
-                $importResult = $this->validateImportRow($field, $index);
-
-                if (isset($importResult['error'])) {
-                    return $importResult;
-                }
-
-                $validated[] = $importResult['row'];
-
-                continue;
-            }
-
-            if (! isset($field['handle']) || ! is_string($field['handle']) || trim($field['handle']) === '') {
-                $hint = isset($field['name']) ? ' Did you mean "handle"? You sent "name".' : '';
-
-                return $this->error("Field at index {$index} must have a \"handle\" key (string).{$hint} Example: {\"handle\": \"title\", \"field\": {\"type\": \"text\"}}");
-            }
-
-            $handle = trim($field['handle']);
-
-            if (preg_match('/^[a-z][a-z0-9_]*$/', $handle) !== 1) {
-                return $this->error("Field handle \"{$handle}\" is invalid. Handles are snake_case: lowercase letters, digits and underscores, starting with a letter (e.g. \"hero_title\").");
-            }
-
-            if (isset($seenHandles[$handle])) {
-                return $this->error("Duplicate field handle: \"{$handle}\". Each field must have a unique handle.");
-            }
-            $seenHandles[$handle] = true;
-
-            // Single-field reference: {"handle": "hero", "field": "hero.hero_title"}
-            // links one field from a fieldset instead of redefining it inline.
-            if (isset($field['field']) && is_string($field['field'])) {
-                $refError = $this->validateFieldReference($field['field'], $handle);
-
-                if ($refError !== null) {
-                    return $refError;
-                }
-
-                $validated[] = ['handle' => $handle, 'field' => trim($field['field'])];
-
-                continue;
-            }
-
-            if (! isset($field['field']) || ! is_array($field['field'])) {
-                $hint = array_key_exists('type', $field)
-                    ? ' It looks like you put "type" at the top level. Move it inside a "field" object.'
-                    : '';
-
-                return $this->error("Field \"{$handle}\" is missing the \"field\" key.{$hint} Correct format: {\"handle\": \"{$handle}\", \"field\": {\"type\": \"text\", \"display\": \"...\"}}, or reference a fieldset field with \"field\": \"<fieldset>.<field>\".");
-            }
-
-            $config = $field['field'];
-
-            foreach (self::PARAM_CORRECTIONS as $wrong => $correct) {
-                if (isset($config[$wrong]) && ! isset($config[$correct])) {
-                    return $this->error("Field \"{$handle}\" has \"{$wrong}\" in its config. Did you mean \"{$correct}\"? Rename \"{$wrong}\" to \"{$correct}\".");
-                }
-            }
-
-            $type = $config['type'] ?? null;
-            if (! is_string($type) || trim($type) === '') {
-                return $this->error("Field \"{$handle}\" is missing \"type\" in its field config. Example: {\"handle\": \"{$handle}\", \"field\": {\"type\": \"text\"}}");
-            }
-
-            try {
-                $fieldtypes->find($type);
-            } catch (FieldtypeNotFoundException) {
-                $available = $fieldtypes->handles()->values()->sort()->implode(', ');
-
-                return $this->error("Unknown field type \"{$type}\" for field \"{$handle}\". Available types: {$available}");
-            }
-
-            if (isset($config['taxonomies']) && is_array($config['taxonomies'])) {
-                foreach ($config['taxonomies'] as $taxHandle) {
-                    if (is_string($taxHandle) && ! Taxonomy::find($taxHandle)) {
-                        return $this->error("Field \"{$handle}\" references taxonomy \"{$taxHandle}\" which does not exist. Create it first with create_taxonomy.");
-                    }
-                }
-            }
-
-            if (isset($config['collections']) && is_array($config['collections'])) {
-                foreach ($config['collections'] as $colHandle) {
-                    if (is_string($colHandle) && ! Collection::find($colHandle)) {
-                        return $this->error("Field \"{$handle}\" references collection \"{$colHandle}\" which does not exist. Create it first with create_collection.");
-                    }
-                }
-            }
-
-            // Strip Antlers template expressions from string config values.
-            foreach ($config as $key => $value) {
-                if (is_string($value) && (str_contains($value, '{{') || str_contains($value, '{!!'))) {
-                    $config[$key] = strip_tags((string) preg_replace('/\{\{.*?\}\}|\{!!.*?!!\}/s', '', $value));
-                }
-            }
-
-            $validated[] = ['handle' => $handle, 'field' => $config];
+            $validated[] = $result['row'];
         }
 
         return ['ok' => true, 'fields' => $validated];
     }
 
     /**
-     * Validate an {"import": "<fieldset>", "prefix"?: "x_"} row.
+     * One field row: a fieldset import, a reference to a fieldset field, or an
+     * inline field config. ['row' => ...] or the error result.
      *
-     * @param  array<string, mixed>  $field
-     * @return array{row: array<string, string>}|array{ok: false, error: string}
+     * @param  array<string, true>  $seenHandles
+     * @return array<string, mixed>
      */
-    private function validateImportRow(array $field, int $index): array
+    private function validateFieldRow(mixed $field, int $index, array &$seenHandles): array
     {
-        $import = $field['import'] ?? null;
-
-        if (! is_string($import) || trim($import) === '') {
-            return $this->error("Field at index {$index}: \"import\" must be a fieldset handle string, e.g. {\"import\": \"hero\"}.");
+        if (! is_array($field)) {
+            return $this->error("Field at index {$index} must be an object. Expected format: {\"handle\": \"title\", \"field\": {\"type\": \"text\", \"display\": \"Title\"}}");
         }
 
-        $import = trim($import);
-
-        if (! Fieldset::find($import)) {
-            return $this->error("Fieldset \"{$import}\" not found. Available fieldsets: ".$this->availableFieldsets());
+        // Fieldset import row: {"import": "hero", "prefix": "hero_"} pulls a
+        // whole existing fieldset in by reference — the preferred way to
+        // reuse shared field groups instead of redefining them.
+        if (array_key_exists('import', $field)) {
+            return $this->fieldsets->validateImportRow($field, $index);
         }
 
-        $row = ['import' => $import];
+        if (! isset($field['handle']) || ! is_string($field['handle']) || trim($field['handle']) === '') {
+            $hint = isset($field['name']) ? ' Did you mean "handle"? You sent "name".' : '';
 
-        if (isset($field['prefix'])) {
-            $prefix = is_string($field['prefix']) ? trim($field['prefix']) : '';
+            return $this->error("Field at index {$index} must have a \"handle\" key (string).{$hint} Example: {\"handle\": \"title\", \"field\": {\"type\": \"text\"}}");
+        }
 
-            if ($prefix === '' || preg_match('/^[a-z][a-z0-9_]*$/', $prefix) !== 1) {
-                return $this->error("Import of \"{$import}\": \"prefix\" must be snake_case (e.g. \"hero_\").");
+        $handle = trim($field['handle']);
+
+        if (preg_match('/^[a-z][a-z0-9_]*$/', $handle) !== 1) {
+            return $this->error("Field handle \"{$handle}\" is invalid. Handles are snake_case: lowercase letters, digits and underscores, starting with a letter (e.g. \"hero_title\").");
+        }
+
+        if (isset($seenHandles[$handle])) {
+            return $this->error("Duplicate field handle: \"{$handle}\". Each field must have a unique handle.");
+        }
+        $seenHandles[$handle] = true;
+
+        // Single-field reference: {"handle": "hero", "field": "hero.hero_title"}
+        // links one field from a fieldset instead of redefining it inline.
+        if (isset($field['field']) && is_string($field['field'])) {
+            $refError = $this->fieldsets->validateFieldReference($field['field'], $handle);
+
+            if ($refError !== null) {
+                return $refError;
             }
 
-            $row['prefix'] = $prefix;
+            return ['row' => ['handle' => $handle, 'field' => trim($field['field'])]];
         }
 
-        return ['row' => $row];
-    }
+        if (! isset($field['field']) || ! is_array($field['field'])) {
+            $hint = array_key_exists('type', $field)
+                ? ' It looks like you put "type" at the top level. Move it inside a "field" object.'
+                : '';
 
-    /**
-     * Validate a "fieldset.field" string reference.
-     *
-     * @return array{ok: false, error: string}|null  Null when valid.
-     */
-    private function validateFieldReference(string $reference, string $handle): ?array
-    {
-        $reference = trim($reference);
-        $parts = explode('.', $reference, 2);
-
-        if (count($parts) !== 2 || $parts[0] === '' || $parts[1] === '') {
-            return $this->error("Field \"{$handle}\": a string \"field\" value must reference a fieldset field as \"<fieldset>.<field>\" (e.g. \"hero.hero_title\").");
+            return $this->error("Field \"{$handle}\" is missing the \"field\" key.{$hint} Correct format: {\"handle\": \"{$handle}\", \"field\": {\"type\": \"text\", \"display\": \"...\"}}, or reference a fieldset field with \"field\": \"<fieldset>.<field>\".");
         }
 
-        $fieldset = Fieldset::find($parts[0]);
+        $config = $field['field'];
 
-        if (! $fieldset) {
-            return $this->error("Field \"{$handle}\" references fieldset \"{$parts[0]}\" which does not exist. Available fieldsets: ".$this->availableFieldsets());
+        if ($error = $this->configs->configError($handle, $config)) {
+            return $error;
         }
 
-        $fieldsetHandles = $fieldset->fields()->all()->keys()->all();
-
-        if (! in_array($parts[1], $fieldsetHandles, true)) {
-            return $this->error("Field \"{$handle}\": fieldset \"{$parts[0]}\" has no field \"{$parts[1]}\". Its fields: ".implode(', ', $fieldsetHandles));
-        }
-
-        return null;
+        return ['row' => ['handle' => $handle, 'field' => $this->configs->withoutAntlers($config)]];
     }
 
     /** Tab/section labels get the same Antlers-stripping as field config strings. */
     private function cleanLabel(string $value): string
     {
-        return trim(strip_tags((string) preg_replace('/\{\{.*?\}\}|\{!!.*?!!\}/s', '', $value)));
-    }
-
-    private function availableFieldsets(): string
-    {
-        $handles = Fieldset::all()->map(fn ($fs) => (string) $fs->handle())->sort()->values()->all();
-
-        return $handles !== [] ? implode(', ', $handles) : '(none)';
+        return trim(strip_tags((string) preg_replace(FieldConfigRules::ANTLERS, '', $value)));
     }
 
     /**

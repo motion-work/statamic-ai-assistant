@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php -d memory_limit=1G \"${CLAUDE_PROJECT_DIR}/vendor/bin/sloppy\" hook post-edit"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php -d memory_limit=1G \"${CLAUDE_PROJECT_DIR}/vendor/bin/sloppy\" hook stop"
+          }
+        ]
+      }
+    ]
+  }
+}

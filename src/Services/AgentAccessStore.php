@@ -2,7 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Support\YamlFile;
 use Statamic\Facades\YAML;
 
 /**
@@ -132,22 +132,7 @@ class AgentAccessStore
      */
     private function readFile(): array
     {
-        $path = $this->storagePath();
-
-        if (! is_file($path)) {
-            return [];
-        }
-
-        try {
-            $raw = (string) file_get_contents($path);
-            $parsed = $raw !== '' ? YAML::parse($raw) : [];
-        } catch (\Throwable $e) {
-            Log::warning('Failed to parse access.yaml', ['error' => $e->getMessage()]);
-
-            return [];
-        }
-
-        return is_array($parsed) ? $parsed : [];
+        return YamlFile::read($this->storagePath());
     }
 
     /**

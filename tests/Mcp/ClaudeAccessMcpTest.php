@@ -2,11 +2,11 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Mcp;
 
+use Illuminate\Support\Facades\Cache;
 use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
 use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 use MotionWork\StatamicAiAssistant\Services\AgentAccessStore;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Cache;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;

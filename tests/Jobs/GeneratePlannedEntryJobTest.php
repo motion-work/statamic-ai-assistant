@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Jobs;
 
+use Illuminate\Support\Facades\Cache;
 use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
@@ -11,7 +12,6 @@ use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Cache;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
@@ -38,16 +38,10 @@ class GeneratePlannedEntryJobTest extends TestCase
             'default',
             null,
             'p',
-            false,
-            [
-                'appendix' => '',
-                'warnings' => [],
-                'preferred' => $preferred,
-                'appended_to_prompts' => false,
-            ],
             'pages',
             'page',
         );
+        $this->batch->appendPreferredAssetPaths($sid, $preferred->remainingEntries());
         $this->batch->addPlannedEntry($sid, [
             'id' => 'e1',
             'collection' => 'pages',
@@ -69,9 +63,7 @@ class GeneratePlannedEntryJobTest extends TestCase
                 string $locale,
                 ?string $attachmentContent,
                 ?callable $onStreamToken,
-                ?PreferredAssetPaths $preferredAssets,
                 ?array $prefetchedUrlAug,
-                ?callable $streamHeartbeat,
             ) {
                 $this->assertIsArray($prefetchedUrlAug);
                 $this->assertArrayHasKey('preferred', $prefetchedUrlAug);
@@ -104,13 +96,6 @@ class GeneratePlannedEntryJobTest extends TestCase
             'default',
             null,
             'p',
-            false,
-            [
-                'appendix' => '',
-                'warnings' => [],
-                'preferred' => new PreferredAssetPaths,
-                'appended_to_prompts' => false,
-            ],
             'pages',
             'page',
         );
@@ -168,13 +153,6 @@ class GeneratePlannedEntryJobTest extends TestCase
             'de',
             null,
             'übersetze diese seite auf English',
-            false,
-            [
-                'appendix' => '',
-                'warnings' => [],
-                'preferred' => new PreferredAssetPaths,
-                'appended_to_prompts' => false,
-            ],
             'stories',
             'article',
         );

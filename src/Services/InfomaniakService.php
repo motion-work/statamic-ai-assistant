@@ -2,9 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
 
 class InfomaniakService extends AbstractAiService
 {
@@ -44,7 +45,7 @@ class InfomaniakService extends AbstractAiService
     /**
      * Build a RuntimeException message from a failed HTTP response.
      */
-    private function failureException(\Illuminate\Http\Client\Response $response): \RuntimeException
+    private function failureException(Response $response): \RuntimeException
     {
         $hint = $response->json('error.message')
             ?? $response->json('message')
@@ -183,18 +184,15 @@ class InfomaniakService extends AbstractAiService
 
     /**
      * Call the Infomaniak API with the provided messages.
-     *
-     * @param array $messages
-     * @return string
      */
     protected function callApi(array $messages): string
     {
         $payload = [
-            'messages'    => $messages,
-            'model'       => config('statamic-ai-assistant.infomaniak_model'),
+            'messages' => $messages,
+            'model' => config('statamic-ai-assistant.infomaniak_model'),
             'temperature' => config('statamic-ai-assistant.temperature'),
-            'max_tokens'  => config('statamic-ai-assistant.max_tokens'),
-            'stream'      => false,
+            'max_tokens' => config('statamic-ai-assistant.max_tokens'),
+            'stream' => false,
             ...$this->thinkingParams((string) config('statamic-ai-assistant.infomaniak_model')),
         ];
 

@@ -2,11 +2,15 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Services\CpTranslationBatchRunner;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\EntryReferenceResolver;
 use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
+use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
+use MotionWork\StatamicAiAssistant\Services\TranslationBatchCompletion;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Support\ReferenceOrder;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
@@ -44,7 +48,7 @@ class TranslationReferenceReconcileTest extends TestCase
         $entry = Entry::make()
             ->collection('packages')
             ->locale($this->site)
-            ->slug(\Illuminate\Support\Str::slug($title))
+            ->slug(Str::slug($title))
             ->data(array_merge(['title' => $title], $data));
         $entry->save();
 
@@ -66,16 +70,8 @@ class TranslationReferenceReconcileTest extends TestCase
         $c = $this->makeEntry('Linked C');
         $a = $this->makeEntry('Page A', ['related' => [$b, $c]]);
 
-        $runner = new class($this->createStub(TranslationService::class)) extends CpTranslationBatchRunner
-        {
-            public function order($entries)
-            {
-                return $this->orderByReferences($entries);
-            }
-        };
-
         // Selection order puts the referencing page first — ordering must flip it.
-        $ordered = $runner->order(collect([Entry::find($a), Entry::find($b), Entry::find($c)]));
+        $ordered = ReferenceOrder::sort(collect([Entry::find($a), Entry::find($b), Entry::find($c)]));
         $ids = $ordered->map(fn ($e) => (string) $e->id())->all();
 
         $this->assertSame($a, end($ids), 'referencing entry must come last');
@@ -89,15 +85,7 @@ class TranslationReferenceReconcileTest extends TestCase
         Entry::find($a)->set('related', [$b])->save();
         Entry::find($b)->set('related', [$a])->save();
 
-        $runner = new class($this->createStub(TranslationService::class)) extends CpTranslationBatchRunner
-        {
-            public function order($entries)
-            {
-                return $this->orderByReferences($entries);
-            }
-        };
-
-        $ordered = $runner->order(collect([Entry::find($a), Entry::find($b)]));
+        $ordered = ReferenceOrder::sort(collect([Entry::find($a), Entry::find($b)]));
 
         $this->assertSame([$a, $b], $ordered->map(fn ($e) => (string) $e->id())->all());
     }
@@ -125,6 +113,34 @@ class TranslationReferenceReconcileTest extends TestCase
 
         $this->assertTrue($changed);
         $this->assertSame([(string) $localized->id()], Entry::find($page)->get('related'));
+    }
+
+    public function test_a_later_run_does_not_reuse_a_localization_deleted_since(): void
+    {
+        $linked = $this->makeEntry('Linked');
+        $localize = function (string $slug) use ($linked): string {
+            $entry = Entry::make()->collection('packages')->locale($this->site)->slug($slug)->origin($linked)->data(['title' => $slug]);
+            $entry->save();
+
+            return (string) $entry->id();
+        };
+
+        // One translator for both runs, like the singleton in a queue worker.
+        $translator = $this->translator();
+
+        $first = $localize('linked-first');
+        $pageA = $this->makeEntry('Page A', ['related' => [$linked]]);
+        $translator->remapEntryReferences(Entry::find($pageA));
+        $this->assertSame([$first], Entry::find($pageA)->get('related'));
+
+        // Between jobs the localization is deleted and translated again.
+        Entry::find($first)->delete();
+        $second = $localize('linked-second');
+
+        $pageB = $this->makeEntry('Page B', ['related' => [$linked]]);
+        $translator->remapEntryReferences(Entry::find($pageB));
+
+        $this->assertSame([$second], Entry::find($pageB)->get('related'));
     }
 
     public function test_remap_leaves_untranslated_references_and_records_them(): void
@@ -164,7 +180,7 @@ class TranslationReferenceReconcileTest extends TestCase
         // path and pass the sync result through with mode: sync.
         config(['queue.default' => 'sync']);
 
-        $syncService = $this->createStub(\MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService::class);
+        $syncService = $this->createStub(NavigationTreeSyncService::class);
         $syncService->method('sync')->willReturn(['results' => [['locale' => 'fr', 'success' => true, 'pages' => []]]]);
 
         $runner = new CpTranslationBatchRunner($this->createStub(TranslationService::class));
@@ -183,14 +199,6 @@ class TranslationReferenceReconcileTest extends TestCase
             [],
         ];
 
-        $runner = new class($this->createStub(TranslationService::class)) extends CpTranslationBatchRunner
-        {
-            public static function ids(array $rows): array
-            {
-                return self::linkedEntryIdsFromResults($rows);
-            }
-        };
-
-        $this->assertSame(['id-1', 'id-2'], $runner::ids($rows));
+        $this->assertSame(['id-1', 'id-2'], TranslationBatchCompletion::linkedEntryIdsFromResults($rows));
     }
 }

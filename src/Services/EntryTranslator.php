@@ -2,25 +2,29 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Mcp\ContentCommitter;
-use MotionWork\StatamicAiAssistant\Services\Concerns\TranslatesFields;
-use MotionWork\StatamicAiAssistant\Support\EntryLabel;
-use Statamic\Facades\User;
 use DeepL\TranslateTextOptions;
-use Illuminate\Support\Str;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use Statamic\Entries\Entry as StatamicEntry;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
 
 class EntryTranslator
 {
-    use TranslatesFields;
+    private FieldTextCollector $collector;
 
-    private const REFERENCE_TYPES = ['entries', 'link'];
+    private ReferenceRemapper $references;
+
+    /** The connector's in-place edits; shares this translator's text collector. */
+    public readonly EntryEditSegments $editSegments;
 
     private DeeplService $deepl;
 
     private EntryReferenceResolver $referenceResolver;
+
+    private LocalizationWriter $writer;
 
     private string $sourceLang;
 
@@ -34,7 +38,11 @@ class EntryTranslator
         EntryReferenceResolver $entryReferenceResolver,
     ) {
         $this->deepl = $deeplService;
+        $this->collector = new FieldTextCollector;
+        $this->references = new ReferenceRemapper($entryReferenceResolver);
+        $this->editSegments = new EntryEditSegments($this->collector);
         $this->referenceResolver = $entryReferenceResolver;
+        $this->writer = new LocalizationWriter;
         $this->referenceResolver->setEntryTranslator($this);
     }
 
@@ -51,15 +59,18 @@ class EntryTranslator
         // for the same (origin, site) pair — split-brain translations. The lock
         // serializes creation per pair; on timeout we degrade to today's
         // behavior rather than failing the job.
-        $lock = \Illuminate\Support\Facades\Cache::lock(
+        $lock = Cache::lock(
             'ai-translate:'.$originEntry->id().':'.$targetSite,
             600,
         );
 
-        $locked = false;
         try {
             $locked = $lock->block(30);
-        } catch (\Throwable) {
+        } catch (LockTimeoutException) {
+            Log::warning('[ai-translate] lock wait timed out, translating without it', [
+                'entry' => $originEntry->id(),
+                'site' => $targetSite,
+            ]);
             $locked = false;
         }
 
@@ -69,8 +80,10 @@ class EntryTranslator
             if ($locked) {
                 try {
                     $lock->release();
-                } catch (\Throwable) {
-                    // Lock expired during a long translation — nothing to release.
+                } catch (\Throwable $e) {
+                    // The translation is saved; a failed release (e.g. the database lock
+                    // store is unreachable) only lets the lock run out on its own.
+                    Log::warning('[ai-translate] lock release failed', ['error' => $e->getMessage()]);
                 }
             }
         }
@@ -85,7 +98,8 @@ class EntryTranslator
     ): StatamicEntry {
         if ($currentDepth === 0) {
             $this->linkedEntriesBuffer = [];
-            $this->skippedNonLocalizable = [];
+            $this->collector->policy->skippedNonLocalizable = [];
+            $this->referenceResolver->resetState();
         }
 
         $this->sourceLang = $originEntry->locale();
@@ -93,101 +107,63 @@ class EntryTranslator
 
         $blueprint = $originEntry->blueprint();
         $originData = $originEntry->data()->toArray();
-        $fields = $this->getFieldDefinitions($blueprint);
+        $fields = (new TranslatableFields)->getFieldDefinitions($blueprint);
 
         // Phase 1: Collect all translatable texts into a flat list
-        $this->resetCollector();
-        $dataWithPlaceholders = $this->collectFromEntryFields($originData, $fields, $currentDepth, $maxDepth);
+        $this->collector->segments->resetCollector();
+        $dataWithPlaceholders = $this->collector->collectFromEntryFields($originData, $fields, $currentDepth, $maxDepth);
 
         // Phase 2: One single API call for ALL texts in this entry
         $translatedTexts = [];
-        if (! empty($this->collectedTexts)) {
+        if (! empty($this->collector->segments->collectedTexts)) {
             $translatedTexts = $this->deepl->translateBatch(
-                $this->prepareTextsForApi(),
+                $this->collector->segments->prepareTextsForApi(),
                 $this->sourceLang,
                 $this->targetLang,
                 [TranslateTextOptions::TAG_HANDLING => 'html'],
             );
 
-            $translatedTexts = $this->decodeTranslatedTexts($translatedTexts);
+            $translatedTexts = $this->collector->segments->decodeTranslatedTexts($translatedTexts);
         }
 
         // Phase 3: Replace placeholders with translated texts
-        $translatedData = $this->replaceInFields($dataWithPlaceholders, $translatedTexts);
+        $translatedData = $this->collector->segments->replaceInFields($dataWithPlaceholders, $translatedTexts);
 
-        $translatedTitle = $translatedData['title'] ?? '';
-        if (is_string($translatedTitle) && $translatedTitle !== '') {
-            $translatedSlug = Str::slug($translatedTitle);
-        } else {
-            $translatedSlug = Str::slug($originEntry->slug());
-        }
+        $translatedSlug = $this->writer->slug($translatedData, $originEntry);
 
         // Resolve entry references (ID remapping, not translation)
-        $translatedData = $this->resolveReferences($translatedData, $fields, $targetSite, $currentDepth, $maxDepth);
+        $translatedData = $this->references->resolveReferences($translatedData, $fields, $targetSite, $currentDepth, $maxDepth);
 
-        $targetEntry = $existingTarget;
+        $targetEntry = $existingTarget ?? $this->writer->target(
+            $originEntry,
+            $targetSite,
+            $blueprint->handle(),
+            $this->referenceResolver->getCachedTargetId($originEntry->id(), $targetSite),
+        );
 
-        // Re-check for a localization created while we were translating or
-        // waiting on the lock (another worker, or a recursive resolution in a
-        // parallel job) — update it instead of creating a duplicate.
-        if (! $targetEntry) {
-            $targetEntry = Entry::query()
-                ->where('origin', $originEntry->id())
-                ->where('site', $targetSite)
-                ->first();
-        }
-
-        if (! $targetEntry) {
-            $cachedTargetId = $this->referenceResolver->getCachedTargetId($originEntry->id(), $targetSite);
-            if ($cachedTargetId) {
-                $targetEntry = Entry::find($cachedTargetId);
-                if (! $targetEntry) {
-                    $targetEntry = Entry::make()
-                        ->id($cachedTargetId)
-                        ->collection($originEntry->collectionHandle())
-                        ->blueprint($blueprint->handle())
-                        ->locale($targetSite)
-                        ->origin($originEntry->id());
-                }
-            }
-        }
-        if (! $targetEntry) {
-            $targetEntry = Entry::make()
-                ->collection($originEntry->collectionHandle())
-                ->blueprint($blueprint->handle())
-                ->locale($targetSite)
-                ->origin($originEntry->id());
-        }
-
-        // An existing localization keeps its slug, so re-translating never changes a live URL.
-        if (! $targetEntry->slug()) {
-            $targetEntry->slug($translatedSlug);
-        }
-        $targetEntry->data($translatedData);
-
-        if ($originEntry->published()) {
-            $targetEntry->published(true);
-        }
-
-        // Use saveQuietly to prevent EntrySaving/EntrySaved events from
-        // triggering side-effects in packages like stillat/relationships,
-        // which would otherwise sync bidirectional references and corrupt
-        // the origin (source-language) entries.
-        $targetEntry->saveQuietly();
-        $this->queueContentCommit($originEntry, $targetSite, $currentDepth);
+        $this->writer->save($targetEntry, $translatedData, $translatedSlug, $originEntry);
+        $this->writer->commit($originEntry, $targetSite, $currentDepth);
 
         if ($currentDepth > 0) {
-            $coll = Collection::findByHandle($targetEntry->collectionHandle());
-            $this->linkedEntriesBuffer[$targetEntry->id()] = [
-                'entry_id' => $targetEntry->id(),
-                'title' => EntryLabel::for($targetEntry),
-                'edit_url' => $targetEntry->editUrl(),
-                'collection_handle' => $targetEntry->collectionHandle(),
-                'collection_title' => $coll ? $coll->title() : $targetEntry->collectionHandle(),
-            ];
+            $this->recordLinkedEntry($targetEntry);
         }
 
         return $targetEntry;
+    }
+
+    /**
+     * A linked entry translated along the way, reported to the editor after the run.
+     */
+    private function recordLinkedEntry(mixed $targetEntry): void
+    {
+        $coll = Collection::findByHandle($targetEntry->collectionHandle());
+        $this->linkedEntriesBuffer[$targetEntry->id()] = [
+            'entry_id' => $targetEntry->id(),
+            'title' => EntryLabel::for($targetEntry),
+            'edit_url' => $targetEntry->editUrl(),
+            'collection_handle' => $targetEntry->collectionHandle(),
+            'collection_title' => $coll ? $coll->title() : $targetEntry->collectionHandle(),
+        ];
     }
 
     /**
@@ -206,10 +182,11 @@ class EntryTranslator
             return false;
         }
 
-        $fields = $this->getFieldDefinitions($blueprint);
+        $fields = (new TranslatableFields)->getFieldDefinitions($blueprint);
         $data = $localizedEntry->data()->toArray();
 
-        $remapped = $this->resolveReferences($data, $fields, (string) $localizedEntry->locale(), 0, 0);
+        $this->referenceResolver->resetState();
+        $remapped = $this->references->resolveReferences($data, $fields, (string) $localizedEntry->locale(), 0, 0);
 
         if ($remapped === $data) {
             return false;
@@ -229,138 +206,13 @@ class EntryTranslator
      */
     public function externalSegments(mixed $entry): array
     {
-        $this->resetCollector();
+        $this->collector->segments->resetCollector();
         $this->sourceLang = (string) $entry->locale();
         $blueprint = $entry->blueprint();
-        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
-        $this->collectFromEntryFields($entry->data()->toArray(), $fields, 0, 0);
+        $fields = $blueprint ? (new TranslatableFields)->getFieldDefinitions($blueprint) : [];
+        $this->collector->collectFromEntryFields($entry->data()->toArray(), $fields, 0, 0);
 
-        return $this->collectedSegments();
-    }
-
-    /**
-     * Every text the entry holds itself, for editing it in place. Unlike
-     * {@see externalSegments()}, fields marked localizable: false count too,
-     * because the edit writes back into the same entry.
-     *
-     * @return array<int, array{id: string, text: string, html: bool}>
-     */
-    public function editableSegments(mixed $entry): array
-    {
-        $this->collectForEdit($entry);
-
-        $segments = $this->collectedSegments();
-        foreach ($this->collectedValues as $index => $collected) {
-            $segments[] = $this->valueSegment($index, $collected);
-        }
-
-        return $segments;
-    }
-
-    /**
-     * Put edited text and values back into the same entry, keyed by the ids
-     * from {@see editableSegments()}. Segments left out keep their current
-     * value exactly. Values must already be validated. The entry is not saved.
-     *
-     * @param  array<string, mixed>  $editsById
-     */
-    public function applySegmentEdits(mixed $entry, array $editsById): StatamicEntry
-    {
-        [$data, $withPlaceholders] = $this->collectForEdit($entry);
-
-        $edits = [];
-        foreach ($editsById as $id => $new) {
-            $id = (string) $id;
-            if (str_starts_with($id, 'v') && array_key_exists((int) substr($id, 1), $this->collectedValues)) {
-                $this->valueEdits[(int) substr($id, 1)] = $new;
-            } elseif (isset($this->collectedTexts[(int) $id]) && is_string($new)) {
-                $edits[(int) $id] = $new;
-            }
-        }
-
-        $entry->data(array_merge($data, $this->replaceInFields($withPlaceholders, $edits)));
-
-        return $entry;
-    }
-
-    /**
-     * @return array{0: array<string, mixed>, 1: array<string, mixed>}
-     */
-    private function collectForEdit(mixed $entry): array
-    {
-        $this->resetCollector();
-        $blueprint = $entry->blueprint();
-        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
-        $data = $entry->data()->toArray();
-
-        $this->collectingValues = true;
-        try {
-            $withPlaceholders = $this->collectFromEntryFields($data, $fields, 0, 0, true)
-                + $this->collectMissingValueFields($data, $fields, $entry->hasOrigin());
-        } finally {
-            $this->collectingValues = false;
-        }
-
-        return [$data, $withPlaceholders];
-    }
-
-    /**
-     * @param  array{value: mixed, def: array<string, mixed>, set: string|null}  $collected
-     * @return array<string, mixed>
-     */
-    private function valueSegment(int $index, array $collected): array
-    {
-        $def = $collected['def'];
-        $type = $def['type'] ?? '';
-        $value = $collected['value'] === self::MISSING_VALUE ? null : $collected['value'];
-        $segment = [
-            'id' => 'v'.$index,
-            'kind' => match ($type) {
-                'toggle' => 'toggle',
-                'link' => 'link',
-                'assets' => 'asset',
-                default => 'choice',
-            },
-            'field' => $def['handle'] ?? null,
-            'label' => $def['display'] ?? null,
-            'location' => $collected['set'],
-            'value' => $value,
-        ];
-
-        if ($segment['kind'] === 'choice') {
-            $segment['options'] = $def['options'] ?? [];
-            $segment['multiple'] = (bool) ($def['multiple'] ?? false);
-            $segment['custom_values_allowed'] = (bool) ($def['taggable'] ?? false);
-        }
-        if ($segment['kind'] === 'asset') {
-            $segment['container'] = $def['container'] ?? null;
-            $segment['folder'] = $def['folder'] ?? '';
-            $segment['restrict_to_folder'] = (bool) ($def['restrict'] ?? false);
-            $segment['multiple'] = ($def['max_files'] ?? 0) !== 1;
-        }
-        if ($segment['kind'] === 'link' && is_string($value) && str_starts_with($value, 'entry::')) {
-            $linked = Entry::find(substr($value, 7));
-            $segment['linked_entry'] = $linked ? EntryLabel::for($linked) : null;
-        }
-
-        return $segment;
-    }
-
-    /**
-     * @return array<int, array{id: string, text: string, html: bool}>
-     */
-    private function collectedSegments(): array
-    {
-        $segments = [];
-        foreach ($this->collectedTexts as $index => $text) {
-            $segments[] = [
-                'id' => (string) $index,
-                'text' => $text,
-                'html' => isset($this->htmlTexts[$index]),
-            ];
-        }
-
-        return $segments;
+        return $this->editSegments->collectedSegments();
     }
 
     /**
@@ -377,17 +229,17 @@ class EntryTranslator
     {
         $originEntry = $originEntry ?? $textEntry;
         $this->linkedEntriesBuffer = [];
-        $this->skippedNonLocalizable = [];
-        $this->resetCollector();
+        $this->collector->policy->skippedNonLocalizable = [];
+        $this->collector->segments->resetCollector();
         $this->sourceLang = (string) $textEntry->locale();
         $this->targetLang = $targetSite;
 
         $blueprint = $textEntry->blueprint();
-        $fields = $blueprint ? $this->getFieldDefinitions($blueprint) : [];
-        $dataWithPlaceholders = $this->collectFromEntryFields($textEntry->data()->toArray(), $fields, 0, 0);
+        $fields = $blueprint ? (new TranslatableFields)->getFieldDefinitions($blueprint) : [];
+        $dataWithPlaceholders = $this->collector->collectFromEntryFields($textEntry->data()->toArray(), $fields, 0, 0);
 
         $translated = [];
-        foreach ($this->collectedTexts as $index => $unused) {
+        foreach ($this->collector->segments->collectedTexts as $index => $unused) {
             $key = (string) $index;
             if (! array_key_exists($key, $translationsById) || ! is_string($translationsById[$key])) {
                 throw new \InvalidArgumentException('Missing translation for segment '.$key.'.');
@@ -395,58 +247,15 @@ class EntryTranslator
             $translated[$index] = $translationsById[$key];
         }
 
-        $translatedData = $this->replaceInFields($dataWithPlaceholders, $translated);
-        $translatedData = $this->resolveReferences($translatedData, $fields, $targetSite, 0, 0);
+        $translatedData = $this->collector->segments->replaceInFields($dataWithPlaceholders, $translated);
+        $translatedData = $this->references->resolveReferences($translatedData, $fields, $targetSite, 0, 0);
 
-        $translatedTitle = $translatedData['title'] ?? '';
-        $translatedSlug = is_string($translatedTitle) && $translatedTitle !== ''
-            ? Str::slug($translatedTitle)
-            : Str::slug((string) $textEntry->slug());
+        $targetEntry = $existingTarget ?? $this->writer->target($originEntry, $targetSite, $blueprint?->handle());
 
-        $targetEntry = $existingTarget;
-        if (! $targetEntry) {
-            $targetEntry = Entry::query()
-                ->where('origin', $originEntry->id())
-                ->where('site', $targetSite)
-                ->first();
-        }
-        if (! $targetEntry) {
-            $targetEntry = Entry::make()
-                ->collection($originEntry->collectionHandle())
-                ->blueprint($blueprint?->handle())
-                ->locale($targetSite)
-                ->origin($originEntry->id());
-        }
-
-        if (! $targetEntry->slug()) {
-            $targetEntry->slug($translatedSlug);
-        }
-        $targetEntry->data($translatedData);
-
-        if ($originEntry->published()) {
-            $targetEntry->published(true);
-        }
-
-        $targetEntry->saveQuietly();
-        $this->queueContentCommit($originEntry, $targetSite, 0);
+        $this->writer->save($targetEntry, $translatedData, $this->writer->slug($translatedData, $textEntry), $originEntry);
+        $this->writer->commit($originEntry, $targetSite, 0);
 
         return $targetEntry;
-    }
-
-    /**
-     * Quiet saves skip Statamic's git listener. One commit at the top of a
-     * translation covers the entry and any linked localizations already written.
-     */
-    private function queueContentCommit(mixed $originEntry, string $targetSite, int $currentDepth): void
-    {
-        if ($currentDepth !== 0) {
-            return;
-        }
-
-        app(ContentCommitter::class)->commit(
-            'Translate "'.EntryLabel::for($originEntry).'" into '.$targetSite,
-            User::current(),
-        );
     }
 
     /**
@@ -476,227 +285,14 @@ class EntryTranslator
         return $this->referenceResolver->takeUnresolved();
     }
 
-    // ── Entry-specific collect (handles REFERENCE_TYPES pass-through) ─
-
     /**
-     * @param  array<string, mixed>  $data
-     * @param  array<string, array{type: string, localizable: bool, sets?: array, fields?: array}>  $fields
-     * @return array<string, mixed>
-     */
-    private function collectFromEntryFields(array $data, array $fields, int $currentDepth, int $maxDepth, bool $everyField = false): array
-    {
-        $result = [];
-
-        foreach ($data as $handle => $value) {
-            $isValueField = $this->collectingValues && in_array($fields[$handle]['type'] ?? null, self::VALUE_TYPES, true);
-            if (! $isValueField && ($value === null || $value === '')) {
-                $result[$handle] = $value;
-
-                continue;
-            }
-
-            $fieldDef = $fields[$handle] ?? null;
-
-            // Skip fields not defined in the blueprint (metadata like
-            // duplicated_from, updated_by, updated_at) — these should be
-            // inherited from the origin, not copied into the localization.
-            if ($fieldDef === null) {
-                continue;
-            }
-
-            $fieldType = $fieldDef['type'] ?? null;
-            $isLocalizable = $fieldDef['localizable'] ?? true;
-
-            if (! $everyField && ! $isLocalizable && ! $this->shouldForceTranslateField($handle, $fieldDef)) {
-                continue;
-            }
-
-            $result[$handle] = $this->collectFromField($value, $fieldType, $fieldDef);
-        }
-
-        return $result;
-    }
-
-    /**
-     * Value fields of the blueprint that the entry has never set, so an edit
-     * can set them. A localization does not own fields marked
-     * localizable: false, as in the Control Panel.
+     * Text fields left in the source language because they are not localizable
+     * (drained: each call returns the ones since the last).
      *
-     * @param  array<string, mixed>  $data
-     * @param  array<string, array<string, mixed>>  $fields
-     * @return array<string, mixed>
+     * @return array<int, string>
      */
-    private function collectMissingValueFields(array $data, array $fields, bool $isLocalization): array
+    public function takeSkippedNonLocalizable(): array
     {
-        $missing = [];
-        foreach ($fields as $handle => $fieldDef) {
-            if (array_key_exists($handle, $data) || ! in_array($fieldDef['type'] ?? null, self::VALUE_TYPES, true)) {
-                continue;
-            }
-            if ($isLocalization && ! ($fieldDef['localizable'] ?? true)) {
-                continue;
-            }
-            $missing[$handle] = $this->valuePlaceholder(self::MISSING_VALUE, $fieldDef);
-        }
-
-        return $missing;
-    }
-
-    // ── Phase 3b: Resolve entry references ───────────────────────────
-
-    /**
-     * @param  array<string, mixed>  $data
-     * @param  array<string, array{type: string, localizable: bool, sets?: array, fields?: array}>  $fields
-     * @return array<string, mixed>
-     */
-    private function resolveReferences(array $data, array $fields, string $targetSite, int $currentDepth, int $maxDepth): array
-    {
-        foreach ($data as $handle => &$value) {
-            if ($value === null || $value === '' || $value === []) {
-                continue;
-            }
-
-            $fieldDef = $fields[$handle] ?? null;
-            $fieldType = $fieldDef['type'] ?? null;
-            $isLocalizable = $fieldDef['localizable'] ?? true;
-
-            if (in_array($fieldType, self::REFERENCE_TYPES)) {
-                // Only resolve references for localizable fields — non-localizable
-                // references are inherited from the origin and must not be remapped.
-                if ($isLocalizable) {
-                    $value = $this->referenceResolver->resolve($value, $targetSite, $currentDepth, $maxDepth);
-                }
-
-                continue;
-            }
-
-            if (in_array($fieldType, self::BARD_TYPES) && is_array($value)) {
-                $value = $this->resolveBardEntryLinks($value, $targetSite, $currentDepth, $maxDepth);
-
-                continue;
-            }
-
-            if (in_array($fieldType, self::RECURSIVE_TYPES) && is_array($value)) {
-                $value = $this->resolveReplicatorReferences($value, $fieldDef, $targetSite, $currentDepth, $maxDepth);
-
-                continue;
-            }
-        }
-
-        return $data;
-    }
-
-    /**
-     * @param  array<mixed>  $nodes
-     * @return array<mixed>
-     */
-    private function resolveBardEntryLinks(array $nodes, string $targetSite, int $currentDepth, int $maxDepth): array
-    {
-        foreach ($nodes as &$node) {
-            if (! is_array($node)) {
-                continue;
-            }
-
-            if (isset($node['marks']) && is_array($node['marks'])) {
-                foreach ($node['marks'] as &$mark) {
-                    if (($mark['type'] ?? null) === 'link' && isset($mark['attrs']['href'])) {
-                        $mark['attrs']['href'] = (string) $this->referenceResolver->resolve(
-                            $mark['attrs']['href'],
-                            $targetSite,
-                            $currentDepth,
-                            $maxDepth,
-                        );
-                    }
-                }
-            }
-
-            if (isset($node['content']) && is_array($node['content'])) {
-                $node['content'] = $this->resolveBardEntryLinks($node['content'], $targetSite, $currentDepth, $maxDepth);
-            }
-        }
-
-        return $nodes;
-    }
-
-    /**
-     * @param  array<mixed>  $sets
-     * @param  array{sets?: array, fields?: array}|null  $fieldDef
-     * @return array<mixed>
-     */
-    private function resolveReplicatorReferences(array $sets, ?array $fieldDef, string $targetSite, int $currentDepth, int $maxDepth): array
-    {
-        $setsDefs = $fieldDef['sets'] ?? null;
-        $gridFieldsDefs = $fieldDef['fields'] ?? null;
-
-        foreach ($sets as &$set) {
-            if (! is_array($set)) {
-                continue;
-            }
-
-            $setType = $set['type'] ?? null;
-            $subFields = null;
-
-            if ($setsDefs !== null && $setType !== null) {
-                $subFields = $setsDefs[$setType] ?? null;
-            } elseif ($gridFieldsDefs !== null) {
-                $subFields = $gridFieldsDefs;
-            }
-
-            foreach ($set as $key => &$value) {
-                if (in_array($key, ['id', 'type', 'enabled']) || $value === null || $value === '' || $value === []) {
-                    continue;
-                }
-
-                if ($subFields !== null) {
-                    $subFieldType = $subFields[$key]['type'] ?? null;
-                    $subFieldDef = $subFields[$key] ?? null;
-
-                    if (in_array($subFieldType, self::REFERENCE_TYPES)) {
-                        $value = $this->referenceResolver->resolve($value, $targetSite, $currentDepth, $maxDepth);
-
-                        continue;
-                    }
-
-                    if (in_array($subFieldType, self::BARD_TYPES) && is_array($value)) {
-                        $value = $this->resolveBardEntryLinks($value, $targetSite, $currentDepth, $maxDepth);
-
-                        continue;
-                    }
-
-                    if (in_array($subFieldType, self::RECURSIVE_TYPES) && is_array($value)) {
-                        $value = $this->resolveReplicatorReferences($value, $subFieldDef, $targetSite, $currentDepth, $maxDepth);
-
-                        continue;
-                    }
-                } else {
-                    $value = $this->resolveReplicatorReferenceFallback($value, $targetSite, $currentDepth, $maxDepth);
-                }
-            }
-        }
-
-        return $sets;
-    }
-
-    private function resolveReplicatorReferenceFallback(mixed $value, string $targetSite, int $currentDepth, int $maxDepth): mixed
-    {
-        if (is_string($value) && $this->looksLikeEntryReference($value)) {
-            return (string) $this->referenceResolver->resolve($value, $targetSite, $currentDepth, $maxDepth);
-        }
-
-        if (is_array($value)) {
-            if ($this->isBardContent($value)) {
-                return $this->resolveBardEntryLinks($value, $targetSite, $currentDepth, $maxDepth);
-            }
-
-            if ($this->isUuidArray($value)) {
-                return $this->referenceResolver->resolve($value, $targetSite, $currentDepth, $maxDepth);
-            }
-
-            if ($this->isNestedSets($value)) {
-                return $this->resolveReplicatorReferences($value, null, $targetSite, $currentDepth, $maxDepth);
-            }
-        }
-
-        return $value;
+        return $this->collector->policy->takeSkippedNonLocalizable();
     }
 }

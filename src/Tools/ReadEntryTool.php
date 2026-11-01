@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools;
 
+use Illuminate\Support\Str;
 use Statamic\Facades\Entry;
 
 /**
@@ -23,7 +24,7 @@ class ReadEntryTool implements ChatTool
 
     /**
      * @param  (callable(?string, string, int): array<int, array<string, mixed>>)  $entryFinder
-     *         Resolves a title/slug query to entry rows (reuses the generator's shortlist search).
+     *                                                                                           Resolves a title/slug query to entry rows (reuses the generator's shortlist search).
      */
     public function __construct(private $entryFinder) {}
 
@@ -68,47 +69,118 @@ class ReadEntryTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
 
-        if (! is_array($args)) {
-            return ['ok' => false, 'error' => 'invalid_arguments_shape'];
+        $entry = $this->requestedEntry($args);
+        if (is_array($entry)) {
+            return $entry;
         }
 
+        $context->reportActivity((string) __('Reading entry :title', [
+            'title' => Str::limit((string) ($entry->value('title') ?? $entry->id()), 50),
+        ]));
+
+        $meta = $this->entryMeta($entry);
+        [$data, $missing] = $this->requestedFields($entry->data()->all(), $args['fields'] ?? null);
+
+        $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+
+        if ($encoded !== false && strlen($encoded) > self::MAX_DATA_BYTES) {
+            return [
+                'ok' => false,
+                'error' => 'entry_too_large',
+                'entry_id' => $meta['entry_id'],
+                'title' => $meta['title'],
+                'available_fields' => $this->fieldSizes($data),
+                'hint' => 'Repeat the call with "fields": [...] naming only the handles you need (sizes above are approximate JSON bytes).',
+            ];
+        }
+
+        $result = ['ok' => true] + $meta + ['data' => $data];
+
+        if ($missing !== []) {
+            $result['missing_fields'] = $missing;
+        }
+
+        return $result;
+    }
+
+    /**
+     * The entry named by entry_id, or by a query matching exactly one entry;
+     * otherwise the error result.
+     *
+     * @param  array<string, mixed>  $args
+     * @return \Statamic\Contracts\Entries\Entry|array<string, mixed>
+     */
+    private function requestedEntry(array $args): mixed
+    {
         $entryId = isset($args['entry_id']) && is_string($args['entry_id']) ? trim($args['entry_id']) : '';
         $query = isset($args['query']) && is_string($args['query']) ? trim($args['query']) : '';
 
         if ($entryId === '' && $query !== '') {
-            $matches = ($this->entryFinder)(null, $query, 5);
-
-            if ($matches === []) {
-                return ['ok' => false, 'error' => 'entry_not_found', 'query' => $query];
+            $found = $this->findByQuery($query);
+            if (is_array($found)) {
+                return $found;
             }
-
-            if (count($matches) > 1) {
-                // Ambiguous — let the model pick an id and retry.
-                return ['ok' => false, 'error' => 'multiple_matches', 'matches' => $matches];
-            }
-
-            $entryId = (string) $matches[0]['id'];
+            $entryId = $found;
         }
 
         if ($entryId === '') {
             return ['ok' => false, 'error' => 'entry_id_or_query_required'];
         }
 
-        $entry = Entry::find($entryId);
-        if (! $entry) {
-            return ['ok' => false, 'error' => 'entry_not_found', 'entry_id' => $entryId];
+        return Entry::find($entryId) ?? ['ok' => false, 'error' => 'entry_not_found', 'entry_id' => $entryId];
+    }
+
+    /**
+     * Only the requested handles (all when none are named), plus the named
+     * handles the entry has no value for.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{0: array<string, mixed>, 1: array<int, string>}
+     */
+    private function requestedFields(array $data, mixed $fields): array
+    {
+        $wanted = is_array($fields)
+            ? array_values(array_filter($fields, fn ($f) => is_string($f) && trim($f) !== ''))
+            : [];
+
+        if ($wanted === []) {
+            return [$data, []];
         }
 
-        $context->reportActivity((string) __('Reading entry :title', [
-            'title' => \Illuminate\Support\Str::limit((string) ($entry->value('title') ?? $entryId), 50),
-        ]));
+        return [array_intersect_key($data, array_flip($wanted)), array_values(array_diff($wanted, array_keys($data)))];
+    }
 
+    /**
+     * The id of the one entry matching $query, or the error result when none
+     * or several match (the model then picks an id and retries).
+     *
+     * @return string|array<string, mixed>
+     */
+    private function findByQuery(string $query): string|array
+    {
+        $matches = ($this->entryFinder)(null, $query, 5);
+
+        if ($matches === []) {
+            return ['ok' => false, 'error' => 'entry_not_found', 'query' => $query];
+        }
+
+        if (count($matches) > 1) {
+            return ['ok' => false, 'error' => 'multiple_matches', 'matches' => $matches];
+        }
+
+        return (string) $matches[0]['id'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function entryMeta($entry): array
+    {
         $meta = [
             'entry_id' => (string) $entry->id(),
             'title' => (string) ($entry->value('title') ?? ''),
@@ -124,47 +196,26 @@ class ReadEntryTool implements ChatTool
             $meta['date'] = (string) ($entry->date()?->toDateString() ?? '');
         }
 
-        $data = $entry->data()->all();
+        return $meta;
+    }
 
-        $wanted = isset($args['fields']) && is_array($args['fields'])
-            ? array_values(array_filter($args['fields'], fn ($f) => is_string($f) && trim($f) !== ''))
-            : [];
-
-        $missing = [];
-        if ($wanted !== []) {
-            $missing = array_values(array_diff($wanted, array_keys($data)));
-            $data = array_intersect_key($data, array_flip($wanted));
+    /**
+     * Approximate JSON size per field, largest first, so the model can
+     * re-request just the handles it needs when the entry is too large.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, int>
+     */
+    private function fieldSizes(array $data): array
+    {
+        $sizes = [];
+        foreach ($data as $handle => $value) {
+            $enc = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            $sizes[$handle] = $enc === false ? 0 : strlen($enc);
         }
+        arsort($sizes);
 
-        $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-
-        if ($encoded !== false && strlen($encoded) > self::MAX_DATA_BYTES) {
-            // Too big to return whole: hand back a size-sorted field index so the
-            // model can immediately re-request just the handles it needs.
-            $index = [];
-            foreach ($data as $handle => $value) {
-                $enc = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-                $index[$handle] = $enc === false ? 0 : strlen($enc);
-            }
-            arsort($index);
-
-            return [
-                'ok' => false,
-                'error' => 'entry_too_large',
-                'entry_id' => $meta['entry_id'],
-                'title' => $meta['title'],
-                'available_fields' => $index,
-                'hint' => 'Repeat the call with "fields": [...] naming only the handles you need (sizes above are approximate JSON bytes).',
-            ];
-        }
-
-        $result = ['ok' => true] + $meta + ['data' => $data];
-
-        if ($missing !== []) {
-            $result['missing_fields'] = $missing;
-        }
-
-        return $result;
+        return $sizes;
     }
 
     public function maxCalls(): ?int

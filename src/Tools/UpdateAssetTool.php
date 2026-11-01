@@ -41,10 +41,9 @@ class UpdateAssetTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
 
         $ref = isset($args['ref']) && is_string($args['ref']) ? trim($args['ref']) : '';
@@ -61,35 +60,7 @@ class UpdateAssetTool implements ChatTool
 
         $allowed = $asset->container()->blueprint()?->fields()->all()->keys()->all() ?? [];
 
-        $applied = [];
-        $rejected = [];
-        $unchanged = [];
-
-        foreach ($values as $handle => $value) {
-            if (! is_string($handle) || ! in_array($handle, $allowed, true)) {
-                $rejected[] = (string) $handle;
-
-                continue;
-            }
-
-            if (! is_scalar($value) && $value !== null) {
-                $rejected[] = $handle;
-
-                continue;
-            }
-
-            // Writing the value a field already holds (including "" over an
-            // empty field) is a no-op — never save it or report it as a change.
-            $current = $asset->get($handle);
-            if ((string) ($current ?? '') === (string) ($value ?? '')) {
-                $unchanged[] = $handle;
-
-                continue;
-            }
-
-            $asset->set($handle, $value);
-            $applied[] = $handle;
-        }
+        [$applied, $rejected, $unchanged] = $this->applyValues($asset, $values, $allowed);
 
         if ($applied === [] && $unchanged !== []) {
             return [
@@ -125,6 +96,49 @@ class UpdateAssetTool implements ChatTool
         }
 
         return $result;
+    }
+
+    /**
+     * Set each allowed scalar value on the asset (not saved yet). Values that
+     * match what the asset already holds are left alone.
+     *
+     * @param  array<mixed>  $values
+     * @param  array<int, string>  $allowed
+     * @return array{0: array<int, string>, 1: array<int, string>, 2: array<int, string>} applied, rejected, unchanged
+     */
+    private function applyValues($asset, array $values, array $allowed): array
+    {
+        $applied = [];
+        $rejected = [];
+        $unchanged = [];
+
+        foreach ($values as $handle => $value) {
+            if (! is_string($handle) || ! in_array($handle, $allowed, true)) {
+                $rejected[] = (string) $handle;
+
+                continue;
+            }
+
+            if (! is_scalar($value) && $value !== null) {
+                $rejected[] = $handle;
+
+                continue;
+            }
+
+            // Writing the value a field already holds (including "" over an
+            // empty field) is a no-op — never save it or report it as a change.
+            $current = $asset->get($handle);
+            if ((string) ($current ?? '') === (string) ($value ?? '')) {
+                $unchanged[] = $handle;
+
+                continue;
+            }
+
+            $asset->set($handle, $value);
+            $applied[] = $handle;
+        }
+
+        return [$applied, $rejected, $unchanged];
     }
 
     public function maxCalls(): ?int

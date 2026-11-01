@@ -2,9 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools;
 
+use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
 use MotionWork\StatamicAiAssistant\Support\HostAllowlist;
-use Illuminate\Support\Str;
 
 /**
  * ChatTool adapter over PromptUrlFetcher's fetch_page_content capability. The

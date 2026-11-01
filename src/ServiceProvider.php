@@ -2,17 +2,23 @@
 
 namespace MotionWork\StatamicAiAssistant;
 
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use MotionWork\StatamicAiAssistant\Actions\TranslateEntry;
 use MotionWork\StatamicAiAssistant\Controllers\PromptController;
-use MotionWork\StatamicAiAssistant\Controllers\TranslationController;
 use MotionWork\StatamicAiAssistant\Fieldtypes\AiText;
 use MotionWork\StatamicAiAssistant\Fieldtypes\AiTextarea;
 use MotionWork\StatamicAiAssistant\Fieldtypes\TranslationActionPreflight;
 use MotionWork\StatamicAiAssistant\Fieldtypes\TranslationTargetLanguages;
+use MotionWork\StatamicAiAssistant\Mcp\ClaudeTranslationBridge;
+use MotionWork\StatamicAiAssistant\Mcp\ContentCommitter;
+use MotionWork\StatamicAiAssistant\Mcp\ImageUploads;
+use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
+use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Services\AssetImageDownloader;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\EditorialGuidanceService;
-use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorAssetResolver;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorLinkFallback;
@@ -23,26 +29,20 @@ use MotionWork\StatamicAiAssistant\Services\FigmaContentFetcher;
 use MotionWork\StatamicAiAssistant\Services\FigmaOAuthService;
 use MotionWork\StatamicAiAssistant\Services\FigmaTokenStore;
 use MotionWork\StatamicAiAssistant\Services\GroqService;
+use MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator;
 use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
 use MotionWork\StatamicAiAssistant\Services\LlmTranslator;
 use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
-use MotionWork\StatamicAiAssistant\Services\AssetImageDownloader;
 use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
 use MotionWork\StatamicAiAssistant\Services\RemoteImageFetcher;
 use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
-use MotionWork\StatamicAiAssistant\Mcp\ClaudeTranslationBridge;
-use MotionWork\StatamicAiAssistant\Mcp\ContentCommitter;
-use MotionWork\StatamicAiAssistant\Mcp\ImageUploads;
-use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
-use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
+use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Route;
 use Statamic\Facades\CP\Nav;
 use Statamic\Providers\AddonServiceProvider;
 use Statamic\Statamic;
@@ -74,6 +74,43 @@ class ServiceProvider extends AddonServiceProvider
 
     protected $viewNamespace = 'statamic-ai-assistant';
 
+    /**
+     * Shared per request, built by the container from their constructors.
+     * Sharing matters: EntryReferenceResolver carries a run's state between
+     * the translator and its callers, and the generator's field catalog is
+     * read once per request.
+     */
+    private const SINGLETONS = [
+        // DeepL and the translation pipeline (entries, terms, navigation).
+        DeeplService::class,
+        EntryReferenceResolver::class,
+        EntryTranslator::class,
+        TranslationService::class,
+        TranslationGlossaryService::class,
+        TranslationStyleRulesService::class,
+        LlmTranslator::class,
+        NavigationTreeSyncService::class,
+        // The AI agent: set hints, the entry generator and planner.
+        SetHintsService::class,
+        EditorialGuidanceService::class,
+        EntryGeneratorService::class,
+        EntryGenerationPlanner::class,
+        // What the agent reads besides the prompt: URLs, images, assets, links, Figma.
+        EntryGeneratorAssetResolver::class,
+        EntryGeneratorLinkFallback::class,
+        PromptUrlFetcher::class,
+        ImageAltTextGenerator::class,
+        AssetImageDownloader::class,
+        RemoteImageFetcher::class,
+        FigmaOAuthService::class,
+        FigmaTokenStore::class,
+        FigmaContentFetcher::class,
+        // The Claude connector at /mcp.
+        McpOAuth::class,
+        ImageUploads::class,
+        ContentCommitter::class,
+    ];
+
     public function register(): void
     {
         parent::register();
@@ -81,165 +118,16 @@ class ServiceProvider extends AddonServiceProvider
         $this->app->singleton(AbstractAiService::class, function () {
             $provider = config('statamic-ai-assistant.provider_name');
 
-            return $provider === 'infomaniak' ? new InfomaniakService() : new GroqService();
+            return $provider === 'infomaniak' ? new InfomaniakService : new GroqService;
         });
 
-        $this->app->singleton(DeeplService::class, function () {
-            return new DeeplService();
-        });
-
-        $this->app->singleton(EntryReferenceResolver::class, function () {
-            return new EntryReferenceResolver();
-        });
-
-        $this->app->singleton(EntryTranslator::class, function ($app) {
-            return new EntryTranslator(
-                $app->make(DeeplService::class),
-                $app->make(EntryReferenceResolver::class),
-            );
-        });
-
-        $this->app->singleton(TranslationService::class, function ($app) {
-            return new TranslationService(
-                $app->make(EntryTranslator::class),
-                $app->make(\MotionWork\StatamicAiAssistant\Services\TermTranslator::class),
-            );
-        });
-
-        $this->app->singleton(TranslationGlossaryService::class, function ($app) {
-            return new TranslationGlossaryService($app->make(DeeplService::class));
-        });
-
-        $this->app->singleton(TranslationStyleRulesService::class, function ($app) {
-            return new TranslationStyleRulesService($app->make(DeeplService::class));
-        });
-
-        $this->app->singleton(LlmTranslator::class, function ($app) {
-            return new LlmTranslator(
-                $app->make(AbstractAiService::class),
-                $app->make(TranslationGlossaryService::class),
-                $app->make(TranslationStyleRulesService::class),
-            );
-        });
-
-        $this->app->singleton(EntryGeneratorAssetResolver::class, function () {
-            return new EntryGeneratorAssetResolver;
-        });
-
-        $this->app->singleton(EntryGeneratorLinkFallback::class, function () {
-            return new EntryGeneratorLinkFallback;
-        });
-
-        $this->app->singleton(PromptUrlFetcher::class, function () {
-            return new PromptUrlFetcher;
-        });
-
-        $this->app->singleton(\MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator::class, function ($app) {
-            return new \MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator(
-                $app->make(AbstractAiService::class),
-            );
-        });
-
-        $this->app->singleton(AssetImageDownloader::class, function ($app) {
-            return new AssetImageDownloader(
-                $app->make(\MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator::class),
-            );
-        });
-
-        $this->app->singleton(RemoteImageFetcher::class, function ($app) {
-            return new RemoteImageFetcher(
-                $app->make(AssetImageDownloader::class),
-            );
-        });
-
-        $this->app->singleton(FigmaOAuthService::class, function () {
-            return new FigmaOAuthService;
-        });
-
-        $this->app->singleton(FigmaTokenStore::class, function () {
-            return new FigmaTokenStore;
-        });
-
-        $this->app->singleton(FigmaContentFetcher::class, function ($app) {
-            return new FigmaContentFetcher(
-                $app->make(FigmaOAuthService::class),
-                $app->make(FigmaTokenStore::class),
-            );
-        });
-
-        $this->app->singleton(SetHintsService::class, function () {
-            return new SetHintsService;
-        });
-
-        $this->app->singleton(EditorialGuidanceService::class, function ($app) {
-            return new EditorialGuidanceService(
-                $app->make(TranslationGlossaryService::class),
-                $app->make(TranslationStyleRulesService::class),
-                $app->make(DeeplService::class),
-            );
-        });
-
-        $this->app->singleton(EntryGeneratorService::class, function ($app) {
-            return new EntryGeneratorService(
-                $app->make(AbstractAiService::class),
-                $app->make(EntryGeneratorAssetResolver::class),
-                $app->make(EntryGeneratorLinkFallback::class),
-                $app->make(PromptUrlFetcher::class),
-                $app->make(SetHintsService::class),
-                $app->make(FigmaContentFetcher::class),
-                $app->make(RemoteImageFetcher::class),
-                editorialGuidance: $app->make(EditorialGuidanceService::class),
-            );
-        });
-
-        $this->app->singleton(EntryGenerationPlanner::class, function ($app) {
-            return new EntryGenerationPlanner(
-                $app->make(AbstractAiService::class),
-                $app->make(EntryGeneratorService::class),
-                $app->make(PromptUrlFetcher::class),
-                $app->make(FigmaContentFetcher::class),
-                $app->make(EntryGenerationBatchService::class),
-                $app->make(\MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator::class),
-            );
-        });
-
-        $this->app->singleton(NavigationTreeSyncService::class, function ($app) {
-            return new NavigationTreeSyncService(
-                $app->make(TranslationService::class),
-                $app->make(DeeplService::class),
-            );
-        });
-
-        $this->app->singleton(McpOAuth::class, function () {
-            return new McpOAuth;
-        });
-
-        $this->app->singleton(ImageUploads::class, function () {
-            return new ImageUploads;
-        });
-
-        $this->app->singleton(ContentCommitter::class, function () {
-            return new ContentCommitter;
-        });
+        foreach (self::SINGLETONS as $class) {
+            $this->app->singleton($class);
+        }
 
         // Not singletons: the bridge holds the signed-in actor.
-        $this->app->bind(ClaudeTranslationBridge::class, function ($app) {
-            return new ClaudeTranslationBridge(
-                $app->make(EntryTranslator::class),
-                $app->make(\MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver::class),
-                $app->make(TranslationGlossaryService::class),
-                $app->make(TranslationStyleRulesService::class),
-                $app->make(ContentCommitter::class),
-                $app->make(ImageUploads::class),
-            );
-        });
-
-        $this->app->bind(TranslationMcpServer::class, function ($app) {
-            return new TranslationMcpServer(
-                $app->make(ClaudeTranslationBridge::class),
-            );
-        });
-
+        $this->app->bind(ClaudeTranslationBridge::class);
+        $this->app->bind(TranslationMcpServer::class);
     }
 
     public function bootAddon()
@@ -264,6 +152,24 @@ class ServiceProvider extends AddonServiceProvider
             __DIR__.'/../config/deepl.php' => config_path('deepl.php'),
         ], 'statamic-ai-assistant-config');
 
+        $this->defineAccessGates();
+
+        $this->registerLegacyPromptRoutes();
+
+        $this->extendCpNav();
+
+        Statamic::provideToScript([
+            'translationsActiv' => fn () => CpFeatures::translationsEnabled(),
+            'aiFeaturesEnabled' => fn () => CpFeatures::aiEnabled(),
+            // Closures are resolved per CP request (User::current() is null at boot).
+            'entryGeneratorEnabled' => fn () => $this->agentEnabledForCurrentUser(),
+            'entryCreationMax' => fn () => EntryCreationPolicy::maxPlanEntries(),
+            'entryCreationLimited' => fn () => EntryCreationPolicy::appliesTo(),
+        ]);
+    }
+
+    private function defineAccessGates(): void
+    {
         // Native Gate abilities backing the dashboard-managed access config, so
         // nav ->can(...) and route can: middleware enforce it. Super users pass
         // via AgentAccess::allows() itself.
@@ -274,8 +180,11 @@ class ServiceProvider extends AddonServiceProvider
         Gate::define(AgentAccess::manageGateAbility(), fn () => AgentAccess::canManage());
 
         GlossaryAccess::register();
+    }
 
-        // Legacy prompt routes
+    /** CP routes the Bard and text-field AI buttons have always called. */
+    private function registerLegacyPromptRoutes(): void
+    {
         $this->registerCpRoutes(function () {
             Route::post('/prompt', [PromptController::class, 'handle']);
         });
@@ -291,9 +200,14 @@ class ServiceProvider extends AddonServiceProvider
         $this->registerCpRoutes(function () {
             Route::get('/getLocalizations', [PromptController::class, 'getLocalizations']);
         });
+    }
 
-        // Everything this addon adds to the CP nav lives in one "AI assistant"
-        // section instead of being spread across Tools and Settings.
+    /**
+     * Everything this addon adds to the CP nav lives in one "AI assistant"
+     * section instead of being spread across Tools and Settings.
+     */
+    private function extendCpNav(): void
+    {
         $section = fn () => __('AI assistant');
 
         if (config('statamic-ai-assistant.translations', true)
@@ -349,15 +263,6 @@ class ServiceProvider extends AddonServiceProvider
                 ->icon('permissions')
                 ->can(AgentAccess::manageGateAbility());
         });
-
-        Statamic::provideToScript([
-            'translationsActiv' => fn () => CpFeatures::translationsEnabled(),
-            'aiFeaturesEnabled' => fn () => CpFeatures::aiEnabled(),
-            // Closures are resolved per CP request (User::current() is null at boot).
-            'entryGeneratorEnabled' => fn () => $this->agentEnabledForCurrentUser(),
-            'entryCreationMax' => fn () => \MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy::maxPlanEntries(),
-            'entryCreationLimited' => fn () => \MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy::appliesTo(),
-        ]);
     }
 
     /**

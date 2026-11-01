@@ -190,6 +190,12 @@ class EntryReferenceResolver
         return $out;
     }
 
+    /**
+     * Forget everything from earlier runs. The resolver is a singleton, so in a
+     * queue worker its cache would otherwise outlive the job and hand out ids of
+     * localizations deleted since. Called at the start of each top-level
+     * translation or remap; nested resolution within one run shares the state.
+     */
     public function resetState(): void
     {
         $this->inProgress = [];

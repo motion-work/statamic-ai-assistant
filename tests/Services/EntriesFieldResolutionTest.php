@@ -2,7 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\ReferenceValueMapper;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
@@ -36,7 +36,7 @@ class EntriesFieldResolutionTest extends TestCase
 
     private function map(string $fieldHandle, mixed $value, array &$warnings): mixed
     {
-        $service = app(EntryGeneratorService::class);
+        $service = app(ReferenceValueMapper::class);
         $field = Blueprint::find('collections.planes.plane')->field($fieldHandle);
         $m = new \ReflectionMethod($service, 'mapEntriesFieldValue');
         $m->setAccessible(true);

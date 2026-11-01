@@ -6,7 +6,7 @@ use Statamic\Fields\Fieldtype;
 
 class AiTextarea extends Fieldtype
 {
-  protected $icon = '<svg version="1.1"
+    protected $icon = '<svg version="1.1"
 	 viewBox="0 0 16.2 16.7" style="enable-background:new 0 0 16.2 16.7;" xml:space="preserve">
   <g transform="scale(.66667)">
       <path style="fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:2.6667;" d="
@@ -21,23 +21,25 @@ class AiTextarea extends Fieldtype
   </g>
 </svg>
 ';
-  public $categories = ['text'];
-  protected $keywords = ['ai', 'ia', 'text','textarea'];
 
-  protected function configFieldItems(): array
-  {
-    return [
-      [
-        'display' => __('AI assistant'),
-        'fields' => [
-          'max_words' => [
-            'display' => __('Maximum words'),
-            'instructions' => __('AI suggestions for this field stay within this many words. Leave empty for no limit.'),
-            'type' => 'integer',
-            'width' => '50',
-          ],
-        ],
-      ],
-    ];
-  }
+    public $categories = ['text'];
+
+    protected $keywords = ['ai', 'ia', 'text', 'textarea'];
+
+    protected function configFieldItems(): array
+    {
+        return [
+            [
+                'display' => __('AI assistant'),
+                'fields' => [
+                    'max_words' => [
+                        'display' => __('Maximum words'),
+                        'instructions' => __('AI suggestions for this field stay within this many words. Leave empty for no limit.'),
+                        'type' => 'integer',
+                        'width' => '50',
+                    ],
+                ],
+            ],
+        ];
+    }
 }

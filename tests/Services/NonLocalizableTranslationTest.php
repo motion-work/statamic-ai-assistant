@@ -5,6 +5,7 @@ namespace MotionWork\StatamicAiAssistant\Tests\Services;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\EntryReferenceResolver;
 use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
+use MotionWork\StatamicAiAssistant\Services\FieldTextCollector;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 /**
@@ -25,10 +26,10 @@ class NonLocalizableTranslationTest extends TestCase
 
     private function gate(string $handle, ?array $fieldDef): bool
     {
-        $ref = new \ReflectionMethod(EntryTranslator::class, 'shouldForceTranslateField');
-        $ref->setAccessible(true);
+        // The translator's own collector, so what it records is what the translator reports.
+        $collector = (fn (): FieldTextCollector => $this->collector)->call($this->translator);
 
-        return $ref->invoke($this->translator, $handle, $fieldDef);
+        return $collector->policy->shouldForceTranslateField($handle, $fieldDef);
     }
 
     public function test_exact_force_handles_still_match(): void

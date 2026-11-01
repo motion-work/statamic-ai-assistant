@@ -2,10 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Mcp;
 
+use Illuminate\Support\Facades\Cache;
 use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Cache;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
@@ -118,6 +118,22 @@ class ClaudeComposeEntryMcpTest extends TestCase
         $this->assertSame('bold', $entry->get('body')[0]['content'][1]['marks'][0]['type']);
         $this->assertSame('#vorteile', $entry->get('blocks')[1]['link']);
         $this->assertSame('Lea', $entry->get('blocks')[0]['author']);
+    }
+
+    public function test_a_new_entry_goes_under_a_parent_of_the_same_collection_and_site(): void
+    {
+        Role::find('mcp_composer')->addPermission('create mcp_compose entries')->save();
+        $server = $this->serverAs($this->user('mcp-composer'));
+        $parent = Entry::make()->collection('mcp_compose')->locale('de')->slug('ueber-uns')->data(['title' => 'Über uns']);
+        $parent->save();
+        $data = ['title' => 'Team'];
+
+        $unknown = $this->tool($server, 'preview_compose_entry', ['collection' => 'mcp_compose', 'parent_entry_id' => 'nope', 'data' => $data]);
+        $this->assertSame('invalid_parent', $unknown['error']);
+
+        $preview = $this->tool($server, 'preview_compose_entry', ['collection' => 'mcp_compose', 'parent_entry_id' => $parent->id(), 'data' => $data]);
+        $this->assertSame('create', $preview['mode']);
+        $this->assertStringContainsString('under "Über uns"', $preview['message']);
     }
 
     public function test_a_refactor_keeps_blocks_sent_back_by_id_exactly(): void

@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Support\ClaudeAccess;
 use Statamic\Contracts\Auth\User as UserContract;
 use Statamic\Facades\User;
 
@@ -130,8 +131,8 @@ class McpOAuth
         if ($user === null || ! $passwordMatches) {
             return ['error' => 'Those credentials were not accepted.'];
         }
-        if (! \MotionWork\StatamicAiAssistant\Support\ClaudeAccess::allows($user, 'read')) {
-            return ['error' => \MotionWork\StatamicAiAssistant\Support\ClaudeAccess::denial('read')];
+        if (! ClaudeAccess::allows($user, 'read')) {
+            return ['error' => ClaudeAccess::denial('read')];
         }
 
         $code = Str::random(48);

@@ -2,7 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\EntrySearch;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Statamic\Facades\Blueprint;
@@ -42,9 +42,9 @@ class FindEntriesShortlistTest extends TestCase
             ->save();
     }
 
-    private function service(): EntryGeneratorService
+    private function service(): EntrySearch
     {
-        return app(EntryGeneratorService::class);
+        return new EntrySearch;
     }
 
     /** @return array<int, string> */

@@ -2,7 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\FieldOptionCatalog;
+use MotionWork\StatamicAiAssistant\Services\ReferenceFieldSchema;
+use MotionWork\StatamicAiAssistant\Services\ReferenceValueMapper;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Form;
@@ -33,9 +35,14 @@ class FormFieldResolutionTest extends TestCase
         parent::tearDown();
     }
 
-    private function service(): EntryGeneratorService
+    private function mapper(): ReferenceValueMapper
     {
-        return app(EntryGeneratorService::class);
+        return app(ReferenceValueMapper::class);
+    }
+
+    private function schema(): ReferenceFieldSchema
+    {
+        return new ReferenceFieldSchema(new FieldOptionCatalog);
     }
 
     private function field(string $handle)
@@ -45,18 +52,16 @@ class FormFieldResolutionTest extends TestCase
 
     private function mapForm(string $fieldHandle, mixed $value, array &$warnings): mixed
     {
-        $m = new \ReflectionMethod($this->service(), 'mapFormFieldValue');
+        $m = new \ReflectionMethod($this->mapper(), 'mapFormFieldValue');
         $m->setAccessible(true);
         $args = [$value, $this->field($fieldHandle), &$warnings];
 
-        return $m->invokeArgs($this->service(), $args);
+        return $m->invokeArgs($this->mapper(), $args);
     }
 
     public function test_schema_lists_available_forms_for_the_model(): void
     {
-        $m = new \ReflectionMethod($this->service(), 'buildFormFieldSchemaPayload');
-        $m->setAccessible(true);
-        $payload = $m->invoke($this->service(), $this->field('form'), null);
+        $payload = $this->schema()->referenceSchemaPayload($this->field('form'), 'default', null);
 
         $this->assertSame('form_reference', $payload['type']);
         $handles = array_column($payload['forms'], 'handle');

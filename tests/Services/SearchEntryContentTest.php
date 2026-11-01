@@ -2,7 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Services\EntrySearch;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
@@ -36,14 +37,14 @@ class SearchEntryContentTest extends TestCase
     private function makeEntry(string $id, string $title, array $data = []): void
     {
         Entry::make()->id($id)->collection('packages')->locale($this->site)
-            ->slug(\Illuminate\Support\Str::slug($title))
+            ->slug(Str::slug($title))
             ->data(array_merge(['title' => $title], $data))
             ->save();
     }
 
-    private function service(): EntryGeneratorService
+    private function service(): EntrySearch
     {
-        return app(EntryGeneratorService::class);
+        return new EntrySearch;
     }
 
     public function test_finds_entry_by_a_phrase_split_across_rich_text_nodes(): void

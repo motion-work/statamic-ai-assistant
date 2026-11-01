@@ -4,6 +4,7 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
+use Smalot\PdfParser\Parser;
 
 /**
  * Single source of truth for "turn a document into LLM-readable text".
@@ -45,7 +46,7 @@ class DocumentTextExtractor
 
         try {
             $content = $extension === 'pdf'
-                ? (new \Smalot\PdfParser\Parser)->parseContent($bytes)->getText()
+                ? (new Parser)->parseContent($bytes)->getText()
                 : $bytes;
         } catch (\Throwable $e) {
             Log::warning('Document text extraction failed', [

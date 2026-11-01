@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Tools\Advanced;
 
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
+use Statamic\Facades\Blueprint;
 
 /**
  * Full field-level view of one blueprint — the inspection step before
@@ -66,7 +67,7 @@ class ReadBlueprintTool extends AbstractAdvancedTool
 
         $blueprint = $this->findBlueprintIn($ns['namespace'], $handle);
         if (! $blueprint) {
-            $available = \Statamic\Facades\Blueprint::in($ns['namespace'])->map(fn ($bp) => $bp->handle())->sort()->implode(', ');
+            $available = Blueprint::in($ns['namespace'])->map(fn ($bp) => $bp->handle())->sort()->implode(', ');
 
             return ['ok' => false, 'error' => "Blueprint \"{$handle}\" not found in {$ns['owner_type']} \"{$ns['owner']}\". Available: ".($available !== '' ? $available : '(none)')];
         }

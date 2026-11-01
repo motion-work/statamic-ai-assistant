@@ -2,6 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Support;
 
+use MotionWork\StatamicAiAssistant\Tools\SaveImageTool;
+use MotionWork\StatamicAiAssistant\Tools\UrlFetchTool;
+
 /**
  * Host-matching for the agent's outbound-URL provenance rules. A candidate URL
  * is "allowed" when its host matches one the user actually referenced — exactly,
@@ -9,8 +12,8 @@ namespace MotionWork\StatamicAiAssistant\Support;
  * variants of the same site the user pointed to).
  *
  * Shared by every tool that reaches out to a URL — page fetching
- * ({@see \MotionWork\StatamicAiAssistant\Tools\UrlFetchTool}) and image saving
- * ({@see \MotionWork\StatamicAiAssistant\Tools\SaveImageTool}) — so both apply the
+ * ({@see UrlFetchTool}) and image saving
+ * ({@see SaveImageTool}) — so both apply the
  * exact same rule instead of each rolling their own.
  */
 final class HostAllowlist

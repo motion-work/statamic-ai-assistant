@@ -2,12 +2,12 @@
 
 namespace MotionWork\StatamicAiAssistant\Controllers;
 
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use MotionWork\StatamicAiAssistant\Services\AgentAccessStore;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Statamic\Facades\Role;
 use Statamic\Facades\User;
 

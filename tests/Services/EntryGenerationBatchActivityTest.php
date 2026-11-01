@@ -2,10 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
-use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Support\Facades\Cache;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class EntryGenerationBatchActivityTest extends TestCase
 {
@@ -18,12 +17,7 @@ class EntryGenerationBatchActivityTest extends TestCase
         parent::setUp();
         Cache::flush();
         $this->batch = new EntryGenerationBatchService;
-        $this->sessionId = $this->batch->initPlanningSession('default', null, 'Create some entries', true, [
-            'appendix' => '',
-            'warnings' => [],
-            'preferred' => new PreferredAssetPaths,
-            'appended_to_prompts' => false,
-        ]);
+        $this->sessionId = $this->batch->initPlanningSession('default', null, 'Create some entries');
     }
 
     public function test_activity_lines_are_returned_once_then_drained(): void

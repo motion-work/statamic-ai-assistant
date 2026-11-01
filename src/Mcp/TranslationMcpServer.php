@@ -156,92 +156,11 @@ class TranslationMcpServer
     private function callTool(array $params): array
     {
         $name = (string) ($params['name'] ?? '');
-        $arguments = is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
         $level = self::TOOL_LEVELS[$name] ?? 'read';
-        $result = ! ClaudeAccess::allows($this->bridge->actor(), $level) ? ['error' => 'forbidden', 'message' => ClaudeAccess::denial($level).' Nothing was changed.'] : match ($name) {
-            'list_sites' => $this->bridge->listSites(),
-            'find_entries' => $this->bridge->findEntries(
-                (string) ($arguments['query'] ?? ''),
-                isset($arguments['collection']) ? (string) $arguments['collection'] : null,
-            ),
-            'read_entry' => $this->bridge->readEntry((string) ($arguments['entry_id'] ?? '')),
-            'preview_localization' => $this->bridge->previewLocalization(
-                (string) ($arguments['entry_id'] ?? ''),
-                (string) ($arguments['target_site'] ?? ''),
-            ),
-            'save_localization' => $this->bridge->saveLocalization(
-                (string) ($arguments['confirmation_token'] ?? ''),
-                is_array($arguments['translations'] ?? null) ? $arguments['translations'] : [],
-                (bool) ($arguments['confirmed'] ?? false),
-            ),
-            'preview_entry_edit' => $this->bridge->previewEntryEdit(
-                (string) ($arguments['entry_id'] ?? ''),
-                is_array($arguments['edits'] ?? null) ? $arguments['edits'] : [],
-                isset($arguments['slug']) ? (string) $arguments['slug'] : null,
-            ),
-            'save_entry_edit' => $this->bridge->saveEntryEdit(
-                (string) ($arguments['confirmation_token'] ?? ''),
-                (bool) ($arguments['confirmed'] ?? false),
-            ),
-            'duplicate_entry' => $this->bridge->duplicateEntry(
-                (string) ($arguments['entry_id'] ?? ''),
-                (bool) ($arguments['confirmed'] ?? false),
-            ),
-            'set_published' => $this->bridge->setPublished(
-                (string) ($arguments['entry_id'] ?? ''),
-                (bool) ($arguments['published'] ?? false),
-                (bool) ($arguments['confirmed'] ?? false),
-            ),
-            'get_content_model' => $this->bridge->contentModel(
-                isset($arguments['collection']) ? (string) $arguments['collection'] : null,
-                isset($arguments['blueprint']) ? (string) $arguments['blueprint'] : null,
-                isset($arguments['site']) ? (string) $arguments['site'] : null,
-                isset($arguments['entry_id']) ? (string) $arguments['entry_id'] : null,
-            ),
-            'get_block_schemas' => $this->bridge->blockSchemas(
-                isset($arguments['collection']) ? (string) $arguments['collection'] : null,
-                isset($arguments['blueprint']) ? (string) $arguments['blueprint'] : null,
-                isset($arguments['site']) ? (string) $arguments['site'] : null,
-                isset($arguments['entry_id']) ? (string) $arguments['entry_id'] : null,
-                is_array($arguments['blocks'] ?? null) ? $arguments['blocks'] : [],
-            ),
-            'preview_compose_entry' => $this->bridge->previewComposeEntry(
-                is_array($arguments['data'] ?? null) ? $arguments['data'] : [],
-                isset($arguments['collection']) ? (string) $arguments['collection'] : null,
-                isset($arguments['blueprint']) ? (string) $arguments['blueprint'] : null,
-                isset($arguments['site']) ? (string) $arguments['site'] : null,
-                isset($arguments['entry_id']) ? (string) $arguments['entry_id'] : null,
-                isset($arguments['mode']) ? (string) $arguments['mode'] : null,
-                isset($arguments['parent_entry_id']) ? (string) $arguments['parent_entry_id'] : null,
-            ),
-            'save_compose_entry' => $this->bridge->saveComposeEntry(
-                (string) ($arguments['confirmation_token'] ?? ''),
-                (bool) ($arguments['confirmed'] ?? false),
-            ),
-            'list_assets' => $this->bridge->listAssets(
-                isset($arguments['container']) ? (string) $arguments['container'] : null,
-                isset($arguments['folder']) ? (string) $arguments['folder'] : null,
-                isset($arguments['query']) ? (string) $arguments['query'] : null,
-            ),
-            'prepare_image_upload' => $this->bridge->prepareImageUpload(
-                isset($arguments['container']) ? (string) $arguments['container'] : null,
-                isset($arguments['folder']) ? (string) $arguments['folder'] : null,
-                isset($arguments['filename']) ? (string) $arguments['filename'] : null,
-                isset($arguments['alt']) ? (string) $arguments['alt'] : null,
-            ),
-            'check_image_upload' => $this->bridge->checkImageUpload((string) ($arguments['upload_id'] ?? '')),
-            'read_glossary' => $this->bridge->readGlossary(),
-            'save_glossary' => $this->bridge->saveGlossary(
-                is_array($arguments['entries'] ?? null) ? $arguments['entries'] : [],
-                (bool) ($arguments['confirmed'] ?? false),
-            ),
-            'read_style_rules' => $this->bridge->readStyleRules(),
-            'save_style_rules' => $this->bridge->saveStyleRules(
-                is_array($arguments['rules'] ?? null) ? $arguments['rules'] : [],
-                (bool) ($arguments['confirmed'] ?? false),
-            ),
-            default => ['error' => 'unknown_tool', 'message' => 'Unknown tool '.$name.'.'],
-        };
+
+        $result = ClaudeAccess::allows($this->bridge->actor(), $level)
+            ? $this->runTool($name, new McpArguments(is_array($params['arguments'] ?? null) ? $params['arguments'] : []))
+            : ['error' => 'forbidden', 'message' => ClaudeAccess::denial($level).' Nothing was changed.'];
 
         return [
             'content' => [[
@@ -251,6 +170,49 @@ class TranslationMcpServer
             ]],
             'isError' => isset($result['error']),
         ];
+    }
+
+    /**
+     * Each tool: the bridge part that runs it (null: the bridge itself), the
+     * method, and how its arguments are read, in parameter order (see
+     * McpArguments::read()).
+     */
+    private const HANDLERS = [
+        'list_sites' => [null, 'listSites', []],
+        'find_entries' => [null, 'findEntries', ['string:query', 'optional:collection']],
+        'read_entry' => ['localization', 'readEntry', ['string:entry_id']],
+        'preview_localization' => ['localization', 'previewLocalization', ['string:entry_id', 'string:target_site']],
+        'save_localization' => ['localization', 'saveLocalization', ['string:confirmation_token', 'list:translations', 'flag:confirmed']],
+        'preview_entry_edit' => ['edits', 'previewEntryEdit', ['string:entry_id', 'list:edits', 'optional:slug']],
+        'save_entry_edit' => ['edits', 'saveEntryEdit', ['string:confirmation_token', 'flag:confirmed']],
+        'duplicate_entry' => ['lifecycle', 'duplicateEntry', ['string:entry_id', 'flag:confirmed']],
+        'set_published' => ['lifecycle', 'setPublished', ['string:entry_id', 'flag:published', 'flag:confirmed']],
+        'get_content_model' => ['brief', 'contentModel', ['optional:collection', 'optional:blueprint', 'optional:site', 'optional:entry_id']],
+        'get_block_schemas' => ['brief', 'blockSchemas', ['optional:collection', 'optional:blueprint', 'optional:site', 'optional:entry_id', 'list:blocks']],
+        'preview_compose_entry' => ['compose', 'previewComposeEntry', ['list:data', 'optional:collection', 'optional:blueprint', 'optional:site', 'optional:entry_id', 'optional:mode', 'optional:parent_entry_id']],
+        'save_compose_entry' => ['composeSave', 'saveComposeEntry', ['string:confirmation_token', 'flag:confirmed']],
+        'list_assets' => ['assets', 'listAssets', ['optional:container', 'optional:folder', 'optional:query']],
+        'prepare_image_upload' => ['assets', 'prepareImageUpload', ['optional:container', 'optional:folder', 'optional:filename', 'optional:alt']],
+        'check_image_upload' => ['assets', 'checkImageUpload', ['string:upload_id']],
+        'read_glossary' => ['glossary', 'readGlossary', []],
+        'save_glossary' => ['glossary', 'saveGlossary', ['list:entries', 'flag:confirmed']],
+        'read_style_rules' => ['glossary', 'readStyleRules', []],
+        'save_style_rules' => ['glossary', 'saveStyleRules', ['list:rules', 'flag:confirmed']],
+    ];
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function runTool(string $name, McpArguments $args): array
+    {
+        if (! isset(self::HANDLERS[$name])) {
+            return ['error' => 'unknown_tool', 'message' => 'Unknown tool '.$name.'.'];
+        }
+
+        [$part, $method, $params] = self::HANDLERS[$name];
+        $target = $part === null ? $this->bridge : $this->bridge->{$part};
+
+        return $target->{$method}(...array_map(fn (string $spec) => $args->read($spec), $params));
     }
 
     /**

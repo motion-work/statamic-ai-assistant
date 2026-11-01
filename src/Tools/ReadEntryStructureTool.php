@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools;
 
+use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Services\EntryStructureSerializer;
 use Statamic\Facades\Entry;
 
@@ -20,7 +21,7 @@ class ReadEntryStructureTool implements ChatTool
 {
     /**
      * @param  (callable(?string, string, int): array<int, array{id: string, title: string, slug: string, collection: string}>)  $entryFinder
-     *         Resolves a title/slug query to entry rows (reuses the generator's shortlist search).
+     *                                                                                                                                         Resolves a title/slug query to entry rows (reuses the generator's shortlist search).
      */
     public function __construct(
         private EntryStructureSerializer $serializer,
@@ -62,14 +63,9 @@ class ReadEntryStructureTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
-        }
-
-        if (! is_array($args)) {
-            return ['ok' => false, 'error' => 'invalid_arguments_shape'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
 
         $entryId = isset($args['entry_id']) && is_string($args['entry_id']) ? trim($args['entry_id']) : '';
@@ -109,7 +105,7 @@ class ReadEntryStructureTool implements ChatTool
         }
 
         $context->reportActivity((string) __('Reading layout of :title', [
-            'title' => \Illuminate\Support\Str::limit((string) ($entry->value('title') ?? $entryId), 50),
+            'title' => Str::limit((string) ($entry->value('title') ?? $entryId), 50),
         ]));
 
         return [

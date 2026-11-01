@@ -2,13 +2,13 @@
 
 namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use MotionWork\StatamicAiAssistant\Services\FigmaOAuthService;
-use MotionWork\StatamicAiAssistant\Services\FigmaTokenStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
+use MotionWork\StatamicAiAssistant\Services\FigmaOAuthService;
+use MotionWork\StatamicAiAssistant\Services\FigmaTokenStore;
 use Statamic\Facades\User;
 
 class FigmaOAuthController

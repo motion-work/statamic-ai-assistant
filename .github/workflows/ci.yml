@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Sloppy compares the change against its base revision.
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          ini-values: memory_limit=1G
+          coverage: none
+
+      - run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Formatting (Pint)
+        run: vendor/bin/pint --test
+
+      - name: Code quality (Sloppy, new findings only)
+        run: vendor/bin/sloppy ci --fail-on=high
+
+      - name: Tests
+        run: vendor/bin/phpunit

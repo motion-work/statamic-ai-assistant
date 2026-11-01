@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Tools;
 
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
 use MotionWork\StatamicAiAssistant\Services\AssetImageDownloader;
 use MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator;
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
@@ -19,7 +20,7 @@ class SaveImageToolGateTest extends TestCase
         {
             public function __construct(private bool &$called)
             {
-                parent::__construct(new AssetImageDownloader(new ImageAltTextGenerator(app(\MotionWork\StatamicAiAssistant\Services\AbstractAiService::class))));
+                parent::__construct(new AssetImageDownloader(new ImageAltTextGenerator(app(AbstractAiService::class))));
             }
 
             public function executeChatTool(string $argumentsJson, PreferredAssetPaths $sink, ?string $containerHint, ?callable $onStreamToken, array &$warningsOut): string

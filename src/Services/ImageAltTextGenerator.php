@@ -92,11 +92,7 @@ class ImageAltTextGenerator
      */
     private function languageInstruction(): string
     {
-        try {
-            $locale = (string) Site::default()->locale();
-        } catch (\Throwable) {
-            $locale = '';
-        }
+        $locale = (string) Site::default()->locale();
 
         return $locale !== '' ? " Write it in the site language \"{$locale}\"." : '';
     }

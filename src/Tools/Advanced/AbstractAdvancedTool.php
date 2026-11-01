@@ -3,7 +3,9 @@
 namespace MotionWork\StatamicAiAssistant\Tools\Advanced;
 
 use MotionWork\StatamicAiAssistant\Tools\ChatTool;
+use MotionWork\StatamicAiAssistant\Tools\ToolArguments;
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
+use Statamic\Fields\Blueprint;
 
 /**
  * Base for the structural "advanced" tools (collections, blueprints,
@@ -19,14 +21,9 @@ abstract class AbstractAdvancedTool implements ChatTool
 {
     final public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
-        }
-
-        if (! is_array($args)) {
-            return ['ok' => false, 'error' => 'invalid_arguments_shape'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
 
         return $this->run($args, $context);
@@ -82,7 +79,7 @@ abstract class AbstractAdvancedTool implements ChatTool
      * setContents() forgets the fields Blink cache, so this always reflects the
      * blueprint's current contents (verified for both create and update paths).
      */
-    protected function blueprintResolutionError(\Statamic\Fields\Blueprint $blueprint): ?string
+    protected function blueprintResolutionError(Blueprint $blueprint): ?string
     {
         try {
             $blueprint->fields()->all();

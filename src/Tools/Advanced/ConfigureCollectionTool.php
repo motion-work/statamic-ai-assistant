@@ -60,45 +60,13 @@ class ConfigureCollectionTool extends AbstractAdvancedTool
             return ['ok' => false, 'error' => 'Provide at least one setting to change. Settable: '.implode(', ', self::SETTABLE)];
         }
 
-        if (isset($settings['taxonomies'])) {
-            $taxonomies = is_array($settings['taxonomies']) ? array_values(array_filter($settings['taxonomies'], 'is_string')) : null;
-
-            if ($taxonomies === null) {
-                return ['ok' => false, 'error' => '"taxonomies" must be an array of taxonomy handles.'];
-            }
-
-            foreach ($taxonomies as $tax) {
-                if (! Taxonomy::find($tax)) {
-                    return ['ok' => false, 'error' => "Taxonomy \"{$tax}\" does not exist. Available: ".Taxonomy::handles()->sort()->implode(', ').'. Create it first with create_taxonomy.'];
-                }
-            }
+        if ($err = $this->taxonomiesError($settings)) {
+            return ['ok' => false, 'error' => $err];
         }
 
         $context->reportActivity((string) __('Configuring collection :handle', ['handle' => $handle]));
 
-        $applied = [];
-        $ignored = [];
-
-        foreach ($settings as $key => $value) {
-            $wasApplied = match ($key) {
-                'title' => is_string($value) ? (bool) $collection->title($value) : false,
-                'route' => is_string($value) ? (bool) $collection->routes($value) : false,
-                'dated' => is_bool($value) ? (bool) $collection->dated($value) : false,
-                'template' => is_string($value) ? (bool) $collection->template($value) : false,
-                'layout' => is_string($value) ? (bool) $collection->layout($value) : false,
-                'sort_field' => is_string($value) ? (bool) $collection->sortField($value) : false,
-                'sort_direction' => is_string($value) ? (bool) $collection->sortDirection($value) : false,
-                'default_status' => in_array($value, ['published', 'draft'], true) ? (bool) $collection->defaultPublishState($value === 'published') : false,
-                'taxonomies' => is_array($value) ? (bool) $collection->taxonomies(array_values(array_filter($value, 'is_string'))) : false,
-                default => false,
-            };
-
-            if ($wasApplied) {
-                $applied[] = (string) $key;
-            } else {
-                $ignored[] = (string) $key;
-            }
-        }
+        [$applied, $ignored] = $this->applySettings($collection, $settings);
 
         if ($applied === []) {
             return ['ok' => false, 'error' => 'No valid settings applied. Settable keys (with correct value types): '.implode(', ', self::SETTABLE), 'ignored' => $ignored];
@@ -119,5 +87,68 @@ class ConfigureCollectionTool extends AbstractAdvancedTool
         }
 
         return $result;
+    }
+
+    /**
+     * Why the "taxonomies" setting cannot be applied, or null.
+     *
+     * @param  array<string, mixed>  $settings
+     */
+    private function taxonomiesError(array $settings): ?string
+    {
+        if (! isset($settings['taxonomies'])) {
+            return null;
+        }
+
+        if (! is_array($settings['taxonomies'])) {
+            return '"taxonomies" must be an array of taxonomy handles.';
+        }
+
+        foreach (array_filter($settings['taxonomies'], 'is_string') as $tax) {
+            if (! Taxonomy::find($tax)) {
+                return "Taxonomy \"{$tax}\" does not exist. Available: ".Taxonomy::handles()->sort()->implode(', ').'. Create it first with create_taxonomy.';
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     * @return array{0: array<int, string>, 1: array<int, string>} applied keys, ignored keys
+     */
+    private function applySettings(mixed $collection, array $settings): array
+    {
+        $applied = [];
+        $ignored = [];
+
+        foreach ($settings as $key => $value) {
+            if ($this->applySetting($collection, (string) $key, $value)) {
+                $applied[] = (string) $key;
+            } else {
+                $ignored[] = (string) $key;
+            }
+        }
+
+        return [$applied, $ignored];
+    }
+
+    /**
+     * Applies one setting when the key is settable and the value has the right type.
+     */
+    private function applySetting(mixed $collection, string $key, mixed $value): bool
+    {
+        return match ($key) {
+            'title' => is_string($value) ? (bool) $collection->title($value) : false,
+            'route' => is_string($value) ? (bool) $collection->routes($value) : false,
+            'dated' => is_bool($value) ? (bool) $collection->dated($value) : false,
+            'template' => is_string($value) ? (bool) $collection->template($value) : false,
+            'layout' => is_string($value) ? (bool) $collection->layout($value) : false,
+            'sort_field' => is_string($value) ? (bool) $collection->sortField($value) : false,
+            'sort_direction' => is_string($value) ? (bool) $collection->sortDirection($value) : false,
+            'default_status' => in_array($value, ['published', 'draft'], true) ? (bool) $collection->defaultPublishState($value === 'published') : false,
+            'taxonomies' => is_array($value) ? (bool) $collection->taxonomies(array_values(array_filter($value, 'is_string'))) : false,
+            default => false,
+        };
     }
 }

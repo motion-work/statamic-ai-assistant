@@ -2,7 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\UpdateAssetFields;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\Blueprint;
 
@@ -36,7 +36,7 @@ class UpdateAssetSchemaTest extends TestCase
             ],
         ]);
 
-        $service = app(EntryGeneratorService::class);
+        $service = app(UpdateAssetFields::class);
         $method = new \ReflectionMethod($service, 'augmentSchemaWithAssetFields');
         $method->setAccessible(true);
 

@@ -2,11 +2,13 @@
 
 namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
-use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Services\BlueprintHintTargets;
+use MotionWork\StatamicAiAssistant\Services\HintSuggestionContext;
+use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 
 class SetHintsController
 {
@@ -14,10 +16,16 @@ class SetHintsController
 
     private AbstractAiService $ai;
 
+    private BlueprintHintTargets $targets;
+
+    private HintSuggestionContext $context;
+
     public function __construct(SetHintsService $hints, AbstractAiService $ai)
     {
         $this->hints = $hints;
         $this->ai = $ai;
+        $this->targets = new BlueprintHintTargets($hints);
+        $this->context = new HintSuggestionContext($this->targets);
     }
 
     /**
@@ -26,8 +34,8 @@ class SetHintsController
     public function index(): JsonResponse
     {
         return response()->json([
-            'sets' => $this->hints->discoverSets(),
-            'fields' => $this->hints->discoverFields(),
+            'sets' => $this->targets->discoverSets(),
+            'fields' => $this->targets->discoverFields(),
             'site_instructions' => $this->hints->siteInstructions(),
         ]);
     }
@@ -72,8 +80,8 @@ class SetHintsController
 
         return response()->json([
             'success' => true,
-            'sets' => $this->hints->discoverSets(),
-            'fields' => $this->hints->discoverFields(),
+            'sets' => $this->targets->discoverSets(),
+            'fields' => $this->targets->discoverFields(),
             'site_instructions' => $this->hints->siteInstructions(),
         ]);
     }
@@ -89,31 +97,69 @@ class SetHintsController
             'kind' => 'sometimes|string|in:set,field',
         ]);
 
-        $kind = (string) ($data['kind'] ?? 'set');
+        $prompt = $this->generatePrompt((string) ($data['kind'] ?? 'set'), (string) $data['handle']);
+        if ($prompt instanceof JsonResponse) {
+            return $prompt;
+        }
+        [$context, $messages] = $prompt;
 
+        $parsed = $this->askForHint($messages, (string) $data['handle']);
+        if ($parsed instanceof JsonResponse) {
+            return $parsed;
+        }
+
+        [$description, $tips] = $this->suggestedHint($parsed);
+
+        if ($description === '' && $tips === []) {
+            return response()->json(['error' => __('The AI response did not contain any usable content.')], 502);
+        }
+
+        return response()->json([
+            'handle' => $context['handle'],
+            'ai_description' => $description,
+            'when_to_use' => $tips,
+        ]);
+    }
+
+    /**
+     * [context, prompt messages] for a set or field hint, or the 404.
+     *
+     * @return array{0: array<string, mixed>, 1: array<int, array<string, string>>}|JsonResponse
+     */
+    private function generatePrompt(string $kind, string $handle): array|JsonResponse
+    {
         if ($kind === 'field') {
-            $context = $this->hints->collectFieldContext((string) $data['handle']);
+            $context = $this->context->collectFieldContext($handle);
 
             if ($context === null) {
                 return response()->json(['error' => __('Field not found in any blueprint.')], 404);
             }
 
-            $messages = $this->buildFieldGeneratePromptMessages($context);
-        } else {
-            $context = $this->hints->collectSetContext((string) $data['handle']);
-
-            if ($context === null) {
-                return response()->json(['error' => __('Block not found in any blueprint.')], 404);
-            }
-
-            $messages = $this->buildGeneratePromptMessages($context);
+            return [$context, $this->buildFieldGeneratePromptMessages($context)];
         }
 
+        $context = $this->context->collectSetContext($handle);
+
+        if ($context === null) {
+            return response()->json(['error' => __('Block not found in any blueprint.')], 404);
+        }
+
+        return [$context, $this->buildGeneratePromptMessages($context)];
+    }
+
+    /**
+     * The model's parsed JSON suggestion, or the 502 to return.
+     *
+     * @param  array<int, array<string, string>>  $messages
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function askForHint(array $messages, string $handle): array|JsonResponse
+    {
         try {
             // Lightweight block-hint generation — use the fast model tier.
             $raw = $this->ai->usingFastModel(fn () => $this->ai->generateFromMessages($messages, 700));
         } catch (\Throwable $e) {
-            Log::error('AI generate hint failed', ['handle' => $data['handle'], 'error' => $e->getMessage()]);
+            Log::error('AI generate hint failed', ['handle' => $handle, 'error' => $e->getMessage()]);
 
             return response()->json(['error' => __('The AI request failed. Please try again.')], 502);
         }
@@ -130,6 +176,17 @@ class SetHintsController
             return response()->json(['error' => __('Could not read AI response. Please try again.')], 502);
         }
 
+        return $parsed;
+    }
+
+    /**
+     * [description, up to six unique tips] from the model's suggestion.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array{0: string, 1: array<int, string>}
+     */
+    private function suggestedHint(array $parsed): array
+    {
         $description = isset($parsed['ai_description']) && is_string($parsed['ai_description'])
             ? trim($parsed['ai_description'])
             : '';
@@ -150,15 +207,7 @@ class SetHintsController
         // Clamp to a sensible size
         $tips = array_slice(array_values(array_unique($tips)), 0, 6);
 
-        if ($description === '' && $tips === []) {
-            return response()->json(['error' => __('The AI response did not contain any usable content.')], 502);
-        }
-
-        return response()->json([
-            'handle' => $context['handle'],
-            'ai_description' => $description,
-            'when_to_use' => $tips,
-        ]);
+        return [$description, $tips];
     }
 
     /**

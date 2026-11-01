@@ -2,12 +2,12 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Controllers\PromptController;
-use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
-use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use MotionWork\StatamicAiAssistant\Controllers\PromptController;
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class FieldPromptContextTest extends TestCase
 {

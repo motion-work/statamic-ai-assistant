@@ -2,9 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use Illuminate\Support\Facades\Storage;
 use MotionWork\StatamicAiAssistant\Services\PromptAssetMentionResolver;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Storage;
 use Statamic\Facades\AssetContainer;
 
 class PromptAssetMentionResolverTest extends TestCase

@@ -2,21 +2,29 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Tools;
 
+use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use MotionWork\StatamicAiAssistant\Tools\Advanced\AddComponentSetTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\AdvancedToolset;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\ConfigureCollectionTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateBlueprintTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateCollectionTool;
+use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateFieldsetTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateTaxonomyTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\CreateTermsTool;
+use MotionWork\StatamicAiAssistant\Tools\Advanced\ListBlueprintsTool;
+use MotionWork\StatamicAiAssistant\Tools\Advanced\ListFieldsetsTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\ReadBlueprintTool;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\UpdateBlueprintTool;
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
+use Statamic\Facades\Fieldset;
+use Statamic\Facades\Form;
 use Statamic\Facades\Site;
 use Statamic\Facades\Taxonomy;
 use Statamic\Facades\Term;
+use Statamic\Facades\User;
 
 class AdvancedToolsTest extends TestCase
 {
@@ -38,7 +46,7 @@ class AdvancedToolsTest extends TestCase
             $taxonomy->delete();
         }
         foreach (['adv_hero', 'component_adv_slider', 'adv_main_components', 'adv_flat_components'] as $fs) {
-            \Statamic\Facades\Fieldset::find($fs)?->delete();
+            Fieldset::find($fs)?->delete();
         }
 
         parent::tearDown();
@@ -215,7 +223,7 @@ class AdvancedToolsTest extends TestCase
 
     public function test_blueprint_can_import_a_fieldset_and_updates_do_not_duplicate_the_import(): void
     {
-        \Statamic\Facades\Fieldset::make('adv_hero')->setContents([
+        Fieldset::make('adv_hero')->setContents([
             'title' => 'Adv Hero',
             'fields' => [
                 ['handle' => 'hero_title', 'field' => ['type' => 'text']],
@@ -265,11 +273,11 @@ class AdvancedToolsTest extends TestCase
 
     public function test_create_blueprint_with_tabs_mirrors_site_layout(): void
     {
-        \Statamic\Facades\Fieldset::make('adv_hero')->setContents([
+        Fieldset::make('adv_hero')->setContents([
             'title' => 'Adv Hero',
             'fields' => [['handle' => 'hero_title', 'field' => ['type' => 'text']]],
         ])->save();
-        \Statamic\Facades\Fieldset::make('adv_main_components')->setContents([
+        Fieldset::make('adv_main_components')->setContents([
             'title' => 'Adv Main Components',
             'fields' => [['handle' => 'components', 'field' => ['type' => 'replicator', 'sets' => []]]],
         ])->save();
@@ -371,7 +379,7 @@ class AdvancedToolsTest extends TestCase
     public function test_create_fieldset_and_register_it_as_component_in_grouped_container(): void
     {
         // Container in the grouped format real sites use (sets → group → sets).
-        \Statamic\Facades\Fieldset::make('adv_main_components')->setContents([
+        Fieldset::make('adv_main_components')->setContents([
             'title' => 'Main Components',
             'fields' => [[
                 'handle' => 'main_components',
@@ -389,13 +397,13 @@ class AdvancedToolsTest extends TestCase
                 ],
             ]],
         ])->save();
-        \Statamic\Facades\Fieldset::make('adv_hero')->setContents([
+        Fieldset::make('adv_hero')->setContents([
             'title' => 'Adv Hero',
             'fields' => [['handle' => 'hero_title', 'field' => ['type' => 'text']]],
         ])->save();
 
         // 1. Create the component fieldset.
-        $created = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\CreateFieldsetTool, [
+        $created = $this->invokeTool(new CreateFieldsetTool, [
             'handle' => 'component_adv_slider',
             'fields' => [
                 ['handle' => 'title', 'field' => ['type' => 'text', 'display' => 'Titel']],
@@ -406,19 +414,19 @@ class AdvancedToolsTest extends TestCase
         $this->assertStringContainsString('add_component_set', $created['next_step']);
 
         // Duplicate handle refused.
-        $dupe = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\CreateFieldsetTool, [
+        $dupe = $this->invokeTool(new CreateFieldsetTool, [
             'handle' => 'component_adv_slider',
             'fields' => [['handle' => 'title', 'field' => ['type' => 'text']]],
         ]);
         $this->assertFalse($dupe['ok']);
 
         // 2. The container is discoverable via list_fieldsets.
-        $list = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\ListFieldsetsTool, ['handle' => 'adv_main_components']);
+        $list = $this->invokeTool(new ListFieldsetsTool, ['handle' => 'adv_main_components']);
         $this->assertTrue($list['fieldsets'][0]['component_container']);
         $this->assertSame(['text'], $list['fieldsets'][0]['set_handles']);
 
         // 3. Register the component: set lands in the group, importing the fieldset.
-        $registered = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\AddComponentSetTool, [
+        $registered = $this->invokeTool(new AddComponentSetTool, [
             'component' => 'component_adv_slider',
             'container' => 'adv_main_components',
             'display' => 'Slider',
@@ -426,7 +434,7 @@ class AdvancedToolsTest extends TestCase
         $this->assertTrue($registered['ok'], $registered['error'] ?? '');
         $this->assertSame('adv_slider', $registered['set_handle']);
 
-        $sets = \Statamic\Facades\Fieldset::find('adv_main_components')->contents()['fields'][0]['field']['sets'];
+        $sets = Fieldset::find('adv_main_components')->contents()['fields'][0]['field']['sets'];
         $this->assertSame(
             ['display' => 'Slider', 'fields' => [['import' => 'component_adv_slider']]],
             $sets['default_group']['sets']['adv_slider'],
@@ -435,7 +443,7 @@ class AdvancedToolsTest extends TestCase
         $this->assertArrayHasKey('text', $sets['default_group']['sets']);
 
         // 4. Re-registering the same component is refused.
-        $again = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\AddComponentSetTool, [
+        $again = $this->invokeTool(new AddComponentSetTool, [
             'component' => 'component_adv_slider',
             'container' => 'adv_main_components',
         ]);
@@ -445,13 +453,13 @@ class AdvancedToolsTest extends TestCase
 
     public function test_add_component_set_supports_flat_containers_and_reports_missing_ones(): void
     {
-        \Statamic\Facades\Fieldset::make('component_adv_slider')->setContents([
+        Fieldset::make('component_adv_slider')->setContents([
             'title' => 'Adv Slider',
             'fields' => [['handle' => 'title', 'field' => ['type' => 'text']]],
         ])->save();
 
         // Flat sets format (no groups).
-        \Statamic\Facades\Fieldset::make('adv_flat_components')->setContents([
+        Fieldset::make('adv_flat_components')->setContents([
             'title' => 'Flat Components',
             'fields' => [[
                 'handle' => 'blocks',
@@ -459,22 +467,22 @@ class AdvancedToolsTest extends TestCase
             ]],
         ])->save();
 
-        $registered = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\AddComponentSetTool, [
+        $registered = $this->invokeTool(new AddComponentSetTool, [
             'component' => 'component_adv_slider',
             'container' => 'adv_flat_components',
         ]);
         $this->assertTrue($registered['ok'], $registered['error'] ?? '');
 
-        $sets = \Statamic\Facades\Fieldset::find('adv_flat_components')->contents()['fields'][0]['field']['sets'];
+        $sets = Fieldset::find('adv_flat_components')->contents()['fields'][0]['field']['sets'];
         $this->assertSame([['import' => 'component_adv_slider']], $sets['adv_slider']['fields']);
 
         // A fieldset without sets is called out as not-a-container.
-        \Statamic\Facades\Fieldset::make('adv_hero')->setContents([
+        Fieldset::make('adv_hero')->setContents([
             'title' => 'Adv Hero',
             'fields' => [['handle' => 'hero_title', 'field' => ['type' => 'text']]],
         ])->save();
 
-        $notContainer = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\AddComponentSetTool, [
+        $notContainer = $this->invokeTool(new AddComponentSetTool, [
             'component' => 'component_adv_slider',
             'container' => 'adv_hero',
         ]);
@@ -484,7 +492,7 @@ class AdvancedToolsTest extends TestCase
 
     public function test_form_blueprints_are_listable_readable_and_updatable(): void
     {
-        \Statamic\Facades\Form::make('adv_kontakt')->title('Adv Kontakt')->save();
+        Form::make('adv_kontakt')->title('Adv Kontakt')->save();
         Blueprint::make('adv_kontakt')->setNamespace('forms')->setContents([
             'title' => 'Adv Kontakt',
             'fields' => [
@@ -495,7 +503,7 @@ class AdvancedToolsTest extends TestCase
 
         try {
             // Discoverable.
-            $list = $this->invokeTool(new \MotionWork\StatamicAiAssistant\Tools\Advanced\ListBlueprintsTool, []);
+            $list = $this->invokeTool(new ListBlueprintsTool, []);
             $this->assertContains('adv_kontakt', array_column($list['forms'], 'form'));
 
             // Readable via the form parameter.
@@ -525,7 +533,7 @@ class AdvancedToolsTest extends TestCase
                     $bp->delete();
                 }
             }
-            \Statamic\Facades\Form::find('adv_kontakt')?->delete();
+            Form::find('adv_kontakt')?->delete();
         }
     }
 
@@ -539,22 +547,22 @@ class AdvancedToolsTest extends TestCase
 
     public function test_advanced_tools_require_grant_and_explicit_user_opt_in(): void
     {
-        $user = \Statamic\Facades\User::make()->email('adv-super@test.dev')->makeSuper();
+        $user = User::make()->email('adv-super@test.dev')->makeSuper();
         $user->save();
 
         try {
             // Granted (super) but NOT opted in → inactive. The opt-in toggle is
             // the safety catch for production sites.
-            $this->assertTrue(\MotionWork\StatamicAiAssistant\Support\AgentAccess::allows('advanced_tools', $user));
-            $this->assertFalse(\MotionWork\StatamicAiAssistant\Support\AgentAccess::advancedToolsActive($user));
+            $this->assertTrue(AgentAccess::allows('advanced_tools', $user));
+            $this->assertFalse(AgentAccess::advancedToolsActive($user));
 
             // Opted in → active.
-            $user->setPreference(\MotionWork\StatamicAiAssistant\Support\AgentAccess::ADVANCED_TOOLS_PREFERENCE, true)->save();
-            $this->assertTrue(\MotionWork\StatamicAiAssistant\Support\AgentAccess::advancedToolsActive($user));
+            $user->setPreference(AgentAccess::ADVANCED_TOOLS_PREFERENCE, true)->save();
+            $this->assertTrue(AgentAccess::advancedToolsActive($user));
 
             // Opted out again → inactive.
-            $user->setPreference(\MotionWork\StatamicAiAssistant\Support\AgentAccess::ADVANCED_TOOLS_PREFERENCE, false)->save();
-            $this->assertFalse(\MotionWork\StatamicAiAssistant\Support\AgentAccess::advancedToolsActive($user));
+            $user->setPreference(AgentAccess::ADVANCED_TOOLS_PREFERENCE, false)->save();
+            $this->assertFalse(AgentAccess::advancedToolsActive($user));
         } finally {
             $user->delete();
         }

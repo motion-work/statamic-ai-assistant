@@ -2,8 +2,6 @@
 
 namespace MotionWork\StatamicAiAssistant\Jobs;
 
-use MotionWork\StatamicAiAssistant\Support\EntryLabel;
-use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -11,6 +9,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use Statamic\Facades\Entry;
 
 class TranslateEntryJob implements ShouldQueue
@@ -34,11 +34,6 @@ class TranslateEntryJob implements ShouldQueue
 
     protected int $maxDepth;
 
-    /** 1-based position in this batch (for progress UI). */
-    protected int $jobIndex;
-
-    protected int $totalJobs;
-
     public function __construct(
         string $entryId,
         string $sourceLocale,
@@ -46,8 +41,6 @@ class TranslateEntryJob implements ShouldQueue
         bool $overwrite,
         string $translationBatchId,
         int $maxDepth,
-        int $jobIndex,
-        int $totalJobs,
     ) {
         $this->entryId = $entryId;
         $this->sourceLocale = $sourceLocale;
@@ -55,8 +48,6 @@ class TranslateEntryJob implements ShouldQueue
         $this->overwrite = $overwrite;
         $this->translationBatchId = $translationBatchId;
         $this->maxDepth = $maxDepth;
-        $this->jobIndex = $jobIndex;
-        $this->totalJobs = $totalJobs;
         $this->queue = config('statamic-ai-assistant.translation_queue', 'translations');
     }
 
@@ -73,12 +64,14 @@ class TranslateEntryJob implements ShouldQueue
             return;
         }
 
-        $translationService->updateBatchProgress(
+        // Laravel's batch counts finished jobs; this row names the page in progress.
+        $translationService->updateEntryStatus(
             $this->translationBatchId,
-            $this->jobIndex,
-            $this->totalJobs,
-            $entry,
+            $this->entryId,
             $this->destinationLocale,
+            'processing',
+            null,
+            ['origin_title' => EntryLabel::for($entry)],
         );
 
         $result = $translationService->translateEntry(
@@ -138,5 +131,4 @@ class TranslateEntryJob implements ShouldQueue
             ],
         );
     }
-
 }

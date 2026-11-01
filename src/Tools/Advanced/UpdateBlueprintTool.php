@@ -155,59 +155,61 @@ class UpdateBlueprintTool extends AbstractAdvancedTool
             }
         }
 
+        $updated = [];
+
         if (isset($contents['tabs']) && is_array($contents['tabs'])) {
-            $updated = [];
-
             foreach ($contents['tabs'] as $tabName => $tab) {
-                if (! is_array($tab['sections'] ?? null)) {
-                    continue;
-                }
-
-                foreach ($tab['sections'] as $si => $section) {
-                    if (! is_array($section['fields'] ?? null)) {
-                        continue;
-                    }
-
-                    foreach ($section['fields'] as $fi => $existing) {
-                        $h = is_array($existing) ? ($existing['handle'] ?? null) : null;
-
-                        if (is_string($h) && isset($newByHandle[$h])) {
-                            $contents['tabs'][$tabName]['sections'][$si]['fields'][$fi] = $newByHandle[$h];
-                            $updated[$h] = true;
-                        }
+                foreach ((is_array($tab['sections'] ?? null) ? $tab['sections'] : []) as $si => $section) {
+                    if (is_array($section['fields'] ?? null)) {
+                        $contents['tabs'][$tabName]['sections'][$si]['fields'] = $this->replaceByHandle($section['fields'], $newByHandle, $updated);
                     }
                 }
             }
 
             $remaining = array_merge(array_values(array_diff_key($newByHandle, $updated)), $appendImports);
+            $firstTab = array_key_first($contents['tabs']);
 
-            if ($remaining !== []) {
-                $firstTab = array_key_first($contents['tabs']);
-
-                if ($firstTab !== null) {
-                    if (! is_array($contents['tabs'][$firstTab]['sections'] ?? null) || $contents['tabs'][$firstTab]['sections'] === []) {
-                        $contents['tabs'][$firstTab]['sections'] = [['fields' => []]];
-                    }
-
-                    $firstSection = array_key_first($contents['tabs'][$firstTab]['sections']);
-
-                    if (! is_array($contents['tabs'][$firstTab]['sections'][$firstSection]['fields'] ?? null)) {
-                        $contents['tabs'][$firstTab]['sections'][$firstSection]['fields'] = [];
-                    }
-
-                    foreach ($remaining as $field) {
-                        $contents['tabs'][$firstTab]['sections'][$firstSection]['fields'][] = $field;
-                    }
-                }
+            if ($remaining === [] || $firstTab === null) {
+                return $contents;
             }
+
+            if (! is_array($contents['tabs'][$firstTab]['sections'] ?? null) || $contents['tabs'][$firstTab]['sections'] === []) {
+                $contents['tabs'][$firstTab]['sections'] = [['fields' => []]];
+            }
+
+            $firstSection = array_key_first($contents['tabs'][$firstTab]['sections']);
+            $sectionFields = $contents['tabs'][$firstTab]['sections'][$firstSection]['fields'] ?? null;
+
+            $contents['tabs'][$firstTab]['sections'][$firstSection]['fields'] = array_merge(
+                is_array($sectionFields) ? $sectionFields : [],
+                $remaining,
+            );
 
             return $contents;
         }
 
         // Flat `fields` shape (how create_blueprint stores them).
-        $fields = is_array($contents['fields'] ?? null) ? $contents['fields'] : [];
-        $updated = [];
+        $fields = $this->replaceByHandle(is_array($contents['fields'] ?? null) ? $contents['fields'] : [], $newByHandle, $updated);
 
+        $contents['fields'] = array_values(array_merge(
+            $fields,
+            array_values(array_diff_key($newByHandle, $updated)),
+            $appendImports,
+        ));
+
+        return $contents;
+    }
+
+    /**
+     * Swap each field row whose handle is in $newByHandle for its new definition.
+     *
+     * @param  array<int|string, mixed>  $fields
+     * @param  array<string, array<string, mixed>>  $newByHandle
+     * @param  array<string, true>  $updated  Handles replaced so far (added to)
+     * @return array<int|string, mixed>
+     */
+    private function replaceByHandle(array $fields, array $newByHandle, array &$updated): array
+    {
         foreach ($fields as $i => $existing) {
             $h = is_array($existing) ? ($existing['handle'] ?? null) : null;
 
@@ -217,13 +219,7 @@ class UpdateBlueprintTool extends AbstractAdvancedTool
             }
         }
 
-        foreach (array_merge(array_values(array_diff_key($newByHandle, $updated)), $appendImports) as $field) {
-            $fields[] = $field;
-        }
-
-        $contents['fields'] = array_values($fields);
-
-        return $contents;
+        return $fields;
     }
 
     /**
@@ -241,24 +237,34 @@ class UpdateBlueprintTool extends AbstractAdvancedTool
                 && ($row['prefix'] ?? null) === ($import['prefix'] ?? null);
         };
 
-        foreach (($contents['fields'] ?? []) as $row) {
+        foreach ($this->fieldRows($contents) as $row) {
             if ($matches($row)) {
                 return true;
             }
         }
 
-        if (is_array($contents['tabs'] ?? null)) {
-            foreach ($contents['tabs'] as $tab) {
-                foreach ((is_array($tab['sections'] ?? null) ? $tab['sections'] : []) as $section) {
-                    foreach ((is_array($section['fields'] ?? null) ? $section['fields'] : []) as $row) {
-                        if ($matches($row)) {
-                            return true;
-                        }
-                    }
+        return false;
+    }
+
+    /**
+     * Every field row of a blueprint's contents: the flat `fields` list and
+     * the fields of every tab section.
+     *
+     * @param  array<string, mixed>  $contents
+     * @return array<int, mixed>
+     */
+    private function fieldRows(array $contents): array
+    {
+        $rows = is_array($contents['fields'] ?? null) ? array_values($contents['fields']) : [];
+
+        foreach ((is_array($contents['tabs'] ?? null) ? $contents['tabs'] : []) as $tab) {
+            foreach ((is_array($tab['sections'] ?? null) ? $tab['sections'] : []) as $section) {
+                if (is_array($section['fields'] ?? null)) {
+                    array_push($rows, ...array_values($section['fields']));
                 }
             }
         }
 
-        return false;
+        return $rows;
     }
 }

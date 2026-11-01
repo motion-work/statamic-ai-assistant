@@ -2,7 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Support\YamlFile;
 use Statamic\Facades\User;
 use Statamic\Facades\YAML;
 
@@ -58,21 +58,9 @@ class FigmaTokenStore
      */
     public function getFor(string $userId): ?array
     {
-        $path = $this->pathFor($userId);
+        $data = YamlFile::read($this->pathFor($userId));
 
-        if (! is_file($path)) {
-            return null;
-        }
-
-        try {
-            $data = YAML::parse((string) file_get_contents($path));
-        } catch (\Throwable $e) {
-            Log::warning('Failed to parse figma token file', ['user' => $userId, 'error' => $e->getMessage()]);
-
-            return null;
-        }
-
-        if (! is_array($data) || empty($data['access_token'])) {
+        if (empty($data['access_token'])) {
             return null;
         }
 

@@ -2,21 +2,22 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Jobs;
 
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
 use MotionWork\StatamicAiAssistant\Jobs\PlanEntriesJob;
 use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
-use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Services\EntrySearch;
 use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Cache;
 use Statamic\Facades\Blueprint;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
+use Statamic\Facades\Taxonomy;
 
 class PlanEntriesJobTest extends TestCase
 {
@@ -51,7 +52,6 @@ class PlanEntriesJobTest extends TestCase
             $aiService,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             $decorator,
         );
@@ -60,8 +60,6 @@ class PlanEntriesJobTest extends TestCase
             'default',
             null,
             'Write the contact page.',
-            false,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
             'pages',
             'page',
         );
@@ -155,7 +153,6 @@ class PlanEntriesJobTest extends TestCase
             $aiService,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             $decorator,
         );
@@ -164,8 +161,6 @@ class PlanEntriesJobTest extends TestCase
             'default',
             null,
             'Create one entry per article on the news listing.',
-            true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
         );
 
         (new PlanEntriesJob($sid))->handle($this->batch, $planner, $generator, $decorator);
@@ -276,7 +271,6 @@ class PlanEntriesJobTest extends TestCase
             $aiService,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             $decorator,
         );
@@ -285,8 +279,6 @@ class PlanEntriesJobTest extends TestCase
             'default',
             null,
             'update "Salt & Stone" title to salts and stones',
-            true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
         );
 
         (new PlanEntriesJob($sid))->handle($this->batch, $planner, $generator, $decorator);
@@ -311,7 +303,8 @@ class PlanEntriesJobTest extends TestCase
         $generator->method('getCollectionsCatalog')->willReturn([
             ['handle' => 'packages', 'title' => 'Packages', 'blueprints' => [['handle' => 'package', 'title' => 'Package']]],
         ]);
-        $generator->method('searchEntryContent')->willReturn([
+        $search = $this->createStub(EntrySearch::class);
+        $search->method('searchEntryContent')->willReturn([
             ['id' => 'caee315a', 'title' => 'Yoga & Wellness with Nora Vega Marti', 'slug' => 'yoga', 'collection' => 'packages', 'snippet' => '…Kursleitung: Nora Vega Marti…'],
         ]);
 
@@ -364,17 +357,15 @@ class PlanEntriesJobTest extends TestCase
             $aiService,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             $decorator,
+            search: $search,
         );
 
         $sid = $this->batch->initPlanningSession(
             'default',
             null,
             'which entry contains: Kursleitung: Nora Vega Marti ?',
-            true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
         );
 
         (new PlanEntriesJob($sid))->handle($this->batch, $planner, $generator, $decorator);
@@ -425,7 +416,6 @@ class PlanEntriesJobTest extends TestCase
             $aiService,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             $decorator,
         );
@@ -434,8 +424,6 @@ class PlanEntriesJobTest extends TestCase
             'default',
             null,
             'update the Ghost Page',
-            true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
         );
 
         (new PlanEntriesJob($sid))->handle($this->batch, $planner, $generator, $decorator);
@@ -499,19 +487,59 @@ class PlanEntriesJobTest extends TestCase
         return $generator;
     }
 
-    private function makePlanner(AbstractAiService $ai, EntryGeneratorService $generator): EntryGenerationPlanner
+    private function makePlanner(AbstractAiService $ai, EntryGeneratorService $generator, ?EntrySearch $search = null): EntryGenerationPlanner
     {
         return new EntryGenerationPlanner(
-            $ai, $generator, new PromptUrlFetcher, null, $this->batch, new PlanEntryDecorator($generator),
+            $ai, $generator, new PromptUrlFetcher, $this->batch, new PlanEntryDecorator($generator), $search,
         );
     }
 
     private function initAgenticSession(string $prompt): string
     {
         return $this->batch->initPlanningSession(
-            'default', null, $prompt, true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            $prompt,
         );
+    }
+
+    public function test_structural_writes_count_as_work_and_no_ops_do_not(): void
+    {
+        $captured = [];
+        $sid = $this->batch->initPlanningSession(
+            'default',
+            null,
+            'Make a taxonomy',
+            advancedTools: true,
+        );
+        $ai = $this->mockAi([
+            $this->assistantToolCalls([
+                $this->toolCall('a', 'create_taxonomy', ['handle' => 'plan_topics', 'title' => 'Topics']),
+                $this->toolCall('b', 'create_terms', ['taxonomy' => 'plan_topics', 'terms' => ['Alpha', 'Beta']]),
+            ]),
+            $this->assistantToolCalls([
+                // Both change nothing: the terms exist already, the asset does not exist.
+                $this->toolCall('c', 'create_terms', ['taxonomy' => 'plan_topics', 'terms' => ['Alpha']]),
+                $this->toolCall('d', 'update_asset', ['ref' => 'ghost::x.jpg', 'values' => ['alt' => 'A']]),
+            ]),
+            $this->assistantText('Set up the taxonomy.'),
+        ], $captured);
+
+        try {
+            $this->makePlanner($ai, $this->catalogStub())->planAgentic($sid);
+            $snapshot = $this->batch->snapshotForProgress($sid);
+        } finally {
+            Taxonomy::find('plan_topics')?->delete();
+        }
+
+        $this->assertSame(
+            ['new taxonomy "plan_topics"', 'terms alpha, beta added to taxonomy "plan_topics"'],
+            array_column($snapshot['operations'], 'label'),
+        );
+        $this->assertSame(['taxonomy', 'taxonomy'], array_column($snapshot['operations'], 'kind'));
+        // No entries were dispatched, yet the run succeeds with the model's summary plus the applied list.
+        $this->assertStringContainsString('Set up the taxonomy.', end($snapshot['transcript'])['text']);
+        $this->assertStringContainsString('terms alpha, beta added', end($snapshot['transcript'])['text']);
     }
 
     public function test_first_turn_message_array_is_unchanged(): void
@@ -718,7 +746,8 @@ class PlanEntriesJobTest extends TestCase
         $generator->method('getCollectionsCatalog')->willReturn([
             ['handle' => 'events', 'title' => 'Events', 'blueprints' => [['handle' => 'event', 'title' => 'Event']]],
         ]);
-        $generator->method('findEntriesShortlist')->willReturn([
+        $search = $this->createStub(EntrySearch::class);
+        $search->method('findEntriesShortlist')->willReturn([
             ['id' => 'evt-1', 'title' => 'Summer Fair', 'slug' => 'summer-fair', 'collection' => 'events'],
         ]);
 
@@ -732,7 +761,7 @@ class PlanEntriesJobTest extends TestCase
         ], $captured);
 
         $sid = $this->initAgenticSession('which is the biggest entry in Event ?');
-        $this->makePlanner($ai, $generator)->planAgentic($sid);
+        $this->makePlanner($ai, $generator, $search)->planAgentic($sid);
 
         $session = $this->batch->getSession($sid);
         $this->assertSame('planned', $session['planning_status']);
@@ -752,7 +781,8 @@ class PlanEntriesJobTest extends TestCase
         $generator->method('getCollectionsCatalog')->willReturn([
             ['handle' => 'news', 'title' => 'News', 'blueprints' => [['handle' => 'news', 'title' => 'News']]],
         ]);
-        $generator->method('searchEntryContent')->willReturn([
+        $search = $this->createStub(EntrySearch::class);
+        $search->method('searchEntryContent')->willReturn([
             ['id' => 'a005745a-5620-4209-919f-0e85c1cf1b96', 'title' => 'Extended Company Report', 'slug' => 'top', 'collection' => 'news', 'snippet' => 'Long body…'],
         ]);
 
@@ -768,17 +798,15 @@ class PlanEntriesJobTest extends TestCase
             'default',
             null,
             'can you find the longest entry ?',
-            true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
         );
 
         $planner = new EntryGenerationPlanner(
             $ai,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             new PlanEntryDecorator($generator),
+            search: $search,
         );
 
         $planner->planAgentic($sid);
@@ -806,7 +834,8 @@ class PlanEntriesJobTest extends TestCase
         $generator->method('getCollectionsCatalog')->willReturn([
             ['handle' => 'pages', 'title' => 'Pages', 'blueprints' => [['handle' => 'page', 'title' => 'Page']]],
         ]);
-        $generator->method('findEntriesShortlist')->willReturn([
+        $search = $this->createStub(EntrySearch::class);
+        $search->method('findEntriesShortlist')->willReturn([
             ['id' => '8da2a1d6', 'title' => 'Services & Pricing', 'slug' => 'services-pricing', 'collection' => 'pages'],
         ]);
 
@@ -817,7 +846,7 @@ class PlanEntriesJobTest extends TestCase
         ], $captured);
 
         $sid = $this->initAgenticSession('do we have this on our website already ?');
-        $this->makePlanner($ai, $generator)->planAgentic($sid);
+        $this->makePlanner($ai, $generator, $search)->planAgentic($sid);
 
         $session = $this->batch->getSession($sid);
         $this->assertSame('planned', $session['planning_status']);
@@ -900,7 +929,6 @@ class PlanEntriesJobTest extends TestCase
             $aiService,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             $decorator,
         );
@@ -909,8 +937,6 @@ class PlanEntriesJobTest extends TestCase
             'default',
             null,
             'Make some entries.',
-            true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
         );
 
         (new PlanEntriesJob($sid))->handle($this->batch, $planner, $generator, $decorator);
@@ -937,7 +963,6 @@ class PlanEntriesJobTest extends TestCase
             $aiService,
             $generator,
             new PromptUrlFetcher,
-            null,
             $this->batch,
             $decorator,
         );
@@ -946,8 +971,6 @@ class PlanEntriesJobTest extends TestCase
             'default',
             null,
             'p',
-            true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
         );
         $this->batch->cancelSession($sid);
 

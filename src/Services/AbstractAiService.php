@@ -2,10 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Support\TrimAiOutput;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Support\TrimAiOutput;
 use Statamic\Facades\Site;
 
 abstract class AbstractAiService
@@ -13,10 +13,6 @@ abstract class AbstractAiService
     /** Whether calls inside withoutThinking() should ask the model to skip reasoning. */
     private bool $thinkingDisabled = false;
 
-    /**
-     * @param  array  $messages
-     * @return string
-     */
     abstract protected function callApi(array $messages): string;
 
     /**
@@ -92,6 +88,7 @@ abstract class AbstractAiService
      * the same model — so callers can always wrap lightweight tasks safely.
      *
      * @template T
+     *
      * @param  callable(): T  $fn
      * @return T
      */
@@ -130,6 +127,7 @@ abstract class AbstractAiService
      * quick_tasks_without_thinking is false.
      *
      * @template T
+     *
      * @param  callable(): T  $fn
      * @return T
      */
@@ -226,10 +224,8 @@ abstract class AbstractAiService
      * @param  array<int, array<string, mixed>>  $messages
      * @param  array<int, array<string, mixed>>  $tools
      * @param  string|array<string, mixed>  $toolChoice  'auto'|'required'|'none' or {type: 'function', function: {name: '...'}}
-     * @return array<string, mixed>
-     */
-    /**
      * @param  callable(): void|null  $streamHeartbeat  Throttled CP keepalive while the HTTP client receives the completion body.
+     * @return array<string, mixed>
      */
     public function createChatCompletion(array $messages, ?int $maxTokens, array $tools = [], string|array $toolChoice = 'auto', ?callable $streamHeartbeat = null): array
     {
@@ -244,24 +240,10 @@ abstract class AbstractAiService
         $currentLocale = optional(Site::selected())->locale() ?: 'en';
         $promptAdded = 'if not specified YOU NEED to write this article in this language: '.$currentLocale;
 
-        $messages = [];
-        $system = trim((config('statamic-ai-assistant.prompt_preface') ? config('statamic-ai-assistant.prompt_preface').$promptAdded : '')
-            ."\n\n".$this->fieldContextInstructions($context));
-        if ($system !== '') {
-            $messages[] = [
-                'role' => 'system',
-                'content' => $system,
-            ];
-        }
+        $system = (config('statamic-ai-assistant.prompt_preface') ? config('statamic-ai-assistant.prompt_preface').$promptAdded : '')
+            ."\n\n".$this->fieldContextInstructions($context);
 
-        $messages[] = [
-            'role' => 'user',
-            'content' => $prompt,
-        ];
-
-        $content = $this->withoutThinking(fn () => $this->callApi($messages));
-
-        return $this->cleanResult($content);
+        return $this->quickCompletion($system, $prompt);
     }
 
     /**
@@ -269,27 +251,7 @@ abstract class AbstractAiService
      */
     public function generateRefactorFromPrompt(string $textToRefactor, string $prompt, array $context = []): string
     {
-        $messages = [];
-        $system = trim((string) config('statamic-ai-assistant.prompt_refactor_preface')."\n\n".$this->fieldContextInstructions($context));
-        if ($system !== '') {
-            $messages[] = [
-                'role' => 'system',
-                'content' => $system,
-            ];
-        }
-
-        $combinedPrompt = "Please refactor the following text:\n\n"
-            .$textToRefactor
-            ."\n\nUser instructions for the refactoring: ".$prompt;
-
-        $messages[] = [
-            'role' => 'user',
-            'content' => $combinedPrompt,
-        ];
-
-        $content = $this->withoutThinking(fn () => $this->callApi($messages));
-
-        return $this->cleanResult($content);
+        return $this->refactor('prompt_refactor_preface', $textToRefactor, $prompt, $context);
     }
 
     /**
@@ -297,23 +259,31 @@ abstract class AbstractAiService
      */
     public function generateHtmlRefactorFromPrompt(string $textToRefactor, string $prompt, array $context = []): string
     {
-        $messages = [];
-        $system = trim((string) config('statamic-ai-assistant.prompt_html_refactor_preface')."\n\n".$this->fieldContextInstructions($context));
-        if ($system !== '') {
-            $messages[] = [
-                'role' => 'system',
-                'content' => $system,
-            ];
-        }
+        return $this->refactor('prompt_html_refactor_preface', $textToRefactor, $prompt, $context);
+    }
+
+    private function refactor(string $prefaceKey, string $textToRefactor, string $prompt, array $context): string
+    {
+        $system = config('statamic-ai-assistant.'.$prefaceKey)."\n\n".$this->fieldContextInstructions($context);
 
         $combinedPrompt = "Please refactor the following text:\n\n"
             .$textToRefactor
             ."\n\nUser instructions for the refactoring: ".$prompt;
 
-        $messages[] = [
-            'role' => 'user',
-            'content' => $combinedPrompt,
-        ];
+        return $this->quickCompletion($system, $combinedPrompt);
+    }
+
+    /**
+     * One quick, non-thinking completion: an optional system message plus the user's request.
+     */
+    private function quickCompletion(string $system, string $user): string
+    {
+        $messages = [];
+        $system = trim($system);
+        if ($system !== '') {
+            $messages[] = ['role' => 'system', 'content' => $system];
+        }
+        $messages[] = ['role' => 'user', 'content' => $user];
 
         $content = $this->withoutThinking(fn () => $this->callApi($messages));
 

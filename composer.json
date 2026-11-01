@@ -33,7 +33,25 @@
         "league/html-to-markdown": "^5.1"
     },
     "require-dev": {
-        "orchestra/testbench": "^10.0"
+        "orchestra/testbench": "^10.0",
+        "heyosseus/sloppy": "^1.8",
+        "rector/rector": "^2.8",
+        "laravel/pint": "^1.32"
+    },
+    "scripts": {
+        "test": "phpunit",
+        "format": "pint",
+        "lint": [
+            "pint --test",
+            "@php -d memory_limit=1G vendor/bin/sloppy"
+        ],
+        "fix": [
+            "@php -d memory_limit=1G vendor/bin/sloppy fix"
+        ],
+        "check": [
+            "@lint",
+            "@test"
+        ]
     },
     "config": {
         "allow-plugins": {
@@ -56,5 +74,12 @@
         }
     },
     "minimum-stability": "dev",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "scripts-descriptions": {
+        "test": "Run the PHPUnit suite (rewrites tests/__fixtures__; restore before committing).",
+        "format": "Format PHP with Pint.",
+        "lint": "Check formatting (Pint) and new code-quality findings (Sloppy, against .sloppy-baseline.json).",
+        "fix": "Apply Sloppy's automated fixes (Rector, then Pint on the rewritten files).",
+        "check": "lint + test, as CI runs them."
+    }
 }

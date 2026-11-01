@@ -2,16 +2,15 @@
 
 namespace MotionWork\StatamicAiAssistant\Jobs;
 
-use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
-use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
 
 /**
  * One queued job = one (navigation × destination locale) sync. Streams a
@@ -33,8 +32,6 @@ class SyncNavigationTreeJob implements ShouldQueue
         protected bool $overwrite,
         protected int $maxDepth,
         protected string $translationBatchId,
-        protected int $jobIndex,
-        protected int $totalJobs,
     ) {
         $this->onQueue(config('statamic-ai-assistant.translation_queue', 'translations'));
     }
@@ -84,12 +81,6 @@ class SyncNavigationTreeJob implements ShouldQueue
                 'navigation_warnings' => $result['warnings'] ?? [],
             ],
         );
-
-        // Monotonic-enough locale-level progress for the bar (rows carry the detail).
-        Cache::put("translation:batch:{$this->translationBatchId}:progress", array_merge(
-            Cache::get("translation:batch:{$this->translationBatchId}:progress", []),
-            ['current' => min($this->jobIndex, $this->totalJobs), 'total' => $this->totalJobs, 'status' => 'processing'],
-        ), now()->addHours(2));
     }
 
     public function failed(?\Throwable $exception): void

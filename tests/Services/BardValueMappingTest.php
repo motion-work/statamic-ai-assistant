@@ -2,7 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\FieldValueMapper;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Fields\Field;
 
@@ -14,12 +14,12 @@ use Statamic\Fields\Field;
  */
 class BardValueMappingTest extends TestCase
 {
-    private EntryGeneratorService $service;
+    private FieldValueMapper $mapper;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = app(EntryGeneratorService::class);
+        $this->mapper = app(FieldValueMapper::class);
     }
 
     /**
@@ -27,10 +27,10 @@ class BardValueMappingTest extends TestCase
      */
     private function invoke(string $method, array $args): mixed
     {
-        $ref = new \ReflectionMethod(EntryGeneratorService::class, $method);
+        $ref = new \ReflectionMethod(FieldValueMapper::class, $method);
         $ref->setAccessible(true);
 
-        return $ref->invokeArgs($this->service, $args);
+        return $ref->invokeArgs($this->mapper, $args);
     }
 
     private function bardField(): Field

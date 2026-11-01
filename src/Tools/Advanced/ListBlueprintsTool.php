@@ -4,6 +4,7 @@ namespace MotionWork\StatamicAiAssistant\Tools\Advanced;
 
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use Statamic\Facades\Collection;
+use Statamic\Facades\Form;
 use Statamic\Facades\Taxonomy;
 
 /**
@@ -91,7 +92,7 @@ class ListBlueprintsTool extends AbstractAdvancedTool
 
         // Form blueprints (contact forms etc.) — one blueprint per form, same
         // handle as the form. Address them via the "form" parameter.
-        $forms = \Statamic\Facades\Form::all()->map(fn ($form) => [
+        $forms = Form::all()->map(fn ($form) => [
             'form' => (string) $form->handle(),
             'title' => (string) $form->title(),
         ])->values()->all();

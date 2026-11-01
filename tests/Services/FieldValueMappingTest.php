@@ -2,7 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\FieldSchemaBuilder;
+use MotionWork\StatamicAiAssistant\Services\FieldValueMapper;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Fields\Field;
 
@@ -15,35 +16,14 @@ use Statamic\Fields\Field;
  */
 class FieldValueMappingTest extends TestCase
 {
-    private EntryGeneratorService $service;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $this->service = app(EntryGeneratorService::class);
-    }
-
-    /**
-     * @param  array<int, mixed>  $args
-     */
-    private function invoke(string $method, array $args): mixed
-    {
-        $ref = new \ReflectionMethod(EntryGeneratorService::class, $method);
-        $ref->setAccessible(true);
-
-        return $ref->invokeArgs($this->service, $args);
-    }
-
     private function map(mixed $value, Field $field, array &$warnings): mixed
     {
-        $args = [$value, $field, &$warnings, 'default'];
-
-        return $this->invoke('mapFieldValue', $args);
+        return app(FieldValueMapper::class)->mapFieldValue($value, $field, $warnings, 'default');
     }
 
     private function schemaEntry(Field $field): ?array
     {
-        return $this->invoke('buildFieldSchemaEntry', [$field, false, 'default']);
+        return app(FieldSchemaBuilder::class)->buildFieldSchemaEntry($field, false, 'default');
     }
 
     // ------------------------------------------------------------------

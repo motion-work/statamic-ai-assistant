@@ -2,9 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools\Advanced;
 
+use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Support\BlueprintFieldValidator;
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
-use Illuminate\Support\Str;
 use Statamic\Facades\Fieldset;
 
 /**

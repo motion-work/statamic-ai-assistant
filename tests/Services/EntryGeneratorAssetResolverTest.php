@@ -2,10 +2,11 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use Illuminate\Support\Facades\Storage;
+use MotionWork\StatamicAiAssistant\Services\AssetFieldFiller;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorAssetResolver;
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Storage;
 use Statamic\Facades\AssetContainer;
 use Statamic\Facades\Blueprint;
 
@@ -65,8 +66,8 @@ class EntryGeneratorAssetResolverTest extends TestCase
 
         $preferred = new PreferredAssetPaths([['container' => 'assets', 'path' => 'events/mission.jpg']]);
 
-        (new EntryGeneratorAssetResolver)
-            ->fillAssetFieldsWithRandom($data, $displayData, $blueprint, $warnings, $preferred);
+        (new AssetFieldFiller(new EntryGeneratorAssetResolver))
+            ->fillEmpty($data, $displayData, $blueprint, $warnings, $preferred);
 
         $this->assertSame('events/mission.jpg', $data['main'][0]['image'] ?? null);
     }
@@ -103,8 +104,8 @@ class EntryGeneratorAssetResolverTest extends TestCase
 
         $preferred = new PreferredAssetPaths([['container' => 'assets', 'path' => 'events/mission.jpg']]);
 
-        (new EntryGeneratorAssetResolver)
-            ->fillAssetFieldsWithRandom($data, $displayData, $blueprint, $warnings, $preferred);
+        (new AssetFieldFiller(new EntryGeneratorAssetResolver))
+            ->fillEmpty($data, $displayData, $blueprint, $warnings, $preferred);
 
         AssetContainer::findByHandle('other')?->delete();
 

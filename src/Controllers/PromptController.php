@@ -2,23 +2,21 @@
 
 namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
 use Statamic\Facades\Site;
 
 class PromptController
 {
-    public function __construct(private AbstractAiService $ai)
-    {
-    }
+    public function __construct(private AbstractAiService $ai) {}
 
     public function getLocalizations(): JsonResponse
     {
         $enableTranslations = config('statamic-ai-assistant.translations', true);
 
-        if (!$enableTranslations) {
-            return response()->json(new \stdClass());
+        if (! $enableTranslations) {
+            return response()->json(new \stdClass);
         }
 
         return response()->json(['content' => Site::all()]);
@@ -39,7 +37,7 @@ class PromptController
     public function handleRefactor(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'text'   => 'required|string',
+            'text' => 'required|string',
             'prompt' => 'required|string',
             ...$this->contextRules(),
         ]);
@@ -57,10 +55,10 @@ class PromptController
     public function handleHtmlRefactor(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'text'    => 'required_without:texts|string',
-            'texts'   => 'required_without:text|array|min:1|max:50',
+            'text' => 'required_without:texts|string',
+            'texts' => 'required_without:text|array|min:1|max:50',
             'texts.*' => 'string',
-            'prompt'  => 'required|string',
+            'prompt' => 'required|string',
             ...$this->contextRules(),
         ]);
 

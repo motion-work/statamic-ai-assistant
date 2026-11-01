@@ -2,9 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools\Advanced;
 
+use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Support\BlueprintFieldValidator;
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
-use Illuminate\Support\Str;
 use Statamic\Facades\Blueprint;
 
 /**
@@ -90,30 +90,11 @@ class CreateBlueprintTool extends AbstractAdvancedTool
             return $ns;
         }
 
-        $tabs = isset($args['tabs']) && is_array($args['tabs']) ? $args['tabs'] : [];
-        $fields = isset($args['fields']) && is_array($args['fields']) ? $args['fields'] : [];
-
-        if ($tabs !== [] && $fields !== []) {
-            return ['ok' => false, 'error' => 'Provide either "tabs" or "fields", not both — put the field rows inside the tab sections.'];
+        $validated = $this->validatedContents($args);
+        if (! $validated['ok']) {
+            return $validated;
         }
-
-        if ($tabs !== []) {
-            $validation = $this->validator->validateTabs($tabs);
-            if (! $validation['ok']) {
-                return $validation;
-            }
-            $fieldContents = ['tabs' => $validation['tabs']];
-            $fieldRows = collect($validation['tabs'])
-                ->flatMap(fn (array $tab) => collect($tab['sections'])->flatMap(fn (array $s) => $s['fields']))
-                ->all();
-        } else {
-            $validation = $this->validator->validate($fields);
-            if (! $validation['ok']) {
-                return $validation;
-            }
-            $fieldContents = ['fields' => $validation['fields']];
-            $fieldRows = $validation['fields'];
-        }
+        ['contents' => $fieldContents, 'rows' => $fieldRows] = $validated;
 
         $title = $this->stringArg($args, 'title');
         if ($title === '') {
@@ -121,22 +102,7 @@ class CreateBlueprintTool extends AbstractAdvancedTool
         }
 
         // File lock: queue workers can race on creating the same handle.
-        $lockPath = storage_path('framework/cache/blueprint-'.md5($ns['namespace'].'.'.$handle).'.lock');
-        $lockDir = dirname($lockPath);
-        if (! is_dir($lockDir)) {
-            @mkdir($lockDir, 0755, true);
-        }
-
-        $lock = fopen($lockPath, 'c');
-        if (! $lock || ! flock($lock, LOCK_EX)) {
-            if ($lock) {
-                fclose($lock);
-            }
-
-            return ['ok' => false, 'error' => 'Could not acquire lock for blueprint creation. Try again.'];
-        }
-
-        try {
+        return $this->locked('blueprint-'.md5($ns['namespace'].'.'.$handle), function () use ($ns, $handle, $title, $fieldContents, $fieldRows, $context) {
             if ($this->findBlueprintIn($ns['namespace'], $handle)) {
                 return ['ok' => false, 'error' => "Blueprint \"{$handle}\" already exists in {$ns['owner_type']} \"{$ns['owner']}\". Use update_blueprint to change it."];
             }
@@ -166,6 +132,68 @@ class CreateBlueprintTool extends AbstractAdvancedTool
             }
 
             return $result;
+        });
+    }
+
+    /**
+     * The blueprint contents from either "tabs" or flat "fields", validated,
+     * plus every field row (for the result).
+     *
+     * @param  array<string, mixed>  $args
+     * @return array<string, mixed>
+     */
+    private function validatedContents(array $args): array
+    {
+        $tabs = isset($args['tabs']) && is_array($args['tabs']) ? $args['tabs'] : [];
+        $fields = isset($args['fields']) && is_array($args['fields']) ? $args['fields'] : [];
+
+        if ($tabs !== [] && $fields !== []) {
+            return ['ok' => false, 'error' => 'Provide either "tabs" or "fields", not both — put the field rows inside the tab sections.'];
+        }
+
+        if ($tabs !== []) {
+            $validation = $this->validator->validateTabs($tabs);
+            if (! $validation['ok']) {
+                return $validation;
+            }
+
+            return ['ok' => true, 'contents' => ['tabs' => $validation['tabs']], 'rows' => collect($validation['tabs'])
+                ->flatMap(fn (array $tab) => collect($tab['sections'])->flatMap(fn (array $s) => $s['fields']))
+                ->all()];
+        }
+
+        $validation = $this->validator->validate($fields);
+        if (! $validation['ok']) {
+            return $validation;
+        }
+
+        return ['ok' => true, 'contents' => ['fields' => $validation['fields']], 'rows' => $validation['fields']];
+    }
+
+    /**
+     * Runs $fn while holding an exclusive file lock named $name.
+     *
+     * @return array<string, mixed>
+     */
+    private function locked(string $name, callable $fn): array
+    {
+        $lockPath = storage_path('framework/cache/'.$name.'.lock');
+        $lockDir = dirname($lockPath);
+        if (! is_dir($lockDir)) {
+            @mkdir($lockDir, 0755, true);
+        }
+
+        $lock = fopen($lockPath, 'c');
+        if (! $lock || ! flock($lock, LOCK_EX)) {
+            if ($lock) {
+                fclose($lock);
+            }
+
+            return ['ok' => false, 'error' => 'Could not acquire lock for blueprint creation. Try again.'];
+        }
+
+        try {
+            return $fn();
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);

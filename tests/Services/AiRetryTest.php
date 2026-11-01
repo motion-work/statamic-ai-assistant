@@ -2,12 +2,12 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
-use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
+use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class AiRetryTest extends TestCase
 {

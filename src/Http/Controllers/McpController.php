@@ -2,11 +2,11 @@
 
 namespace MotionWork\StatamicAiAssistant\Http\Controllers;
 
-use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
-use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Controller;
+use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
+use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 
 class McpController extends Controller
 {

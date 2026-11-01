@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -182,6 +183,8 @@ class FigmaOAuthService
         try {
             $response = Http::withToken($accessToken)->timeout(10)->get('https://api.figma.com/v1/me');
         } catch (\Throwable $e) {
+            Log::warning('[figma] profile request failed', ['error' => $e->getMessage()]);
+
             return ['id' => '', 'email' => '', 'handle' => '', 'img_url' => ''];
         }
 

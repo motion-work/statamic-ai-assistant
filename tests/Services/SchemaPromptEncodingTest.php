@@ -2,7 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\GenerationPrompt;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 /**
@@ -41,7 +41,7 @@ class SchemaPromptEncodingTest extends TestCase
 
     private function encode(array $schema): string
     {
-        $service = app(EntryGeneratorService::class);
+        $service = app(GenerationPrompt::class);
         $m = new \ReflectionMethod($service, 'encodeSchemaForPrompt');
         $m->setAccessible(true);
 

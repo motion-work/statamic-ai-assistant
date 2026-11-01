@@ -2,11 +2,11 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 use LucianoTonet\GroqLaravel\Facades\Groq;
 use LucianoTonet\GroqPHP\GroqException;
+use MotionWork\StatamicAiAssistant\Support\OpenAiChatCompletionStream;
 
 class GroqService extends AbstractAiService
 {
@@ -89,19 +89,16 @@ class GroqService extends AbstractAiService
 
     /**
      * Call the Groq API with the provided messages.
-     *
-     * @param array $messages
-     * @return string
      */
     protected function callApi(array $messages): string
     {
         $payload = [
-            'messages'   => $messages,
-            'model'      => config('statamic-ai-assistant.groq_model'),
-            'temperature'=> config('statamic-ai-assistant.temperature'),
+            'messages' => $messages,
+            'model' => config('statamic-ai-assistant.groq_model'),
+            'temperature' => config('statamic-ai-assistant.temperature'),
             'max_tokens' => config('statamic-ai-assistant.max_tokens'),
-            'stop'       => null,
-            'stream'     => false,
+            'stop' => null,
+            'stream' => false,
         ];
 
         try {

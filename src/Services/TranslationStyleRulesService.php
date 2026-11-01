@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Support\YamlFile;
 use Statamic\Facades\YAML;
 
 /**
@@ -58,20 +59,7 @@ class TranslationStyleRulesService
             return $this->cache;
         }
 
-        $path = $this->storagePath();
-
-        if (! is_file($path)) {
-            return $this->cache = [];
-        }
-
-        try {
-            $raw = (string) file_get_contents($path);
-            $parsed = $raw !== '' ? YAML::parse($raw) : [];
-        } catch (\Throwable $e) {
-            Log::warning('Failed to parse translation-style-rules.yaml', ['error' => $e->getMessage()]);
-
-            return $this->cache = [];
-        }
+        $parsed = YamlFile::read($this->storagePath());
 
         $rules = [];
 

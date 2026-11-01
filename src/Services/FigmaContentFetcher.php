@@ -486,7 +486,7 @@ class FigmaContentFetcher
     {
         $out = [];
 
-        $walk = function (array $n, int $d) use (&$walk, &$out, $limit, $node) {
+        $walk = function (array $n, int $d) use (&$walk, &$out, $limit) {
             if (count($out) >= $limit) {
                 return;
             }

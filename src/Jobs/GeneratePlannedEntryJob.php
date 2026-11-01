@@ -2,16 +2,16 @@
 
 namespace MotionWork\StatamicAiAssistant\Jobs;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
-use MotionWork\StatamicAiAssistant\Services\TranslationService;
-use Statamic\Facades\Entry;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
+use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use Statamic\Facades\Entry;
 
 /**
  * Generate one planned entry in a AI agent batch (chained so shared preferred
@@ -47,18 +47,8 @@ class GeneratePlannedEntryJob implements ShouldQueue
         }
 
         $session = $batch->getSession($this->sessionId);
-        if (! is_array($session) || ! isset($session['entries'][$this->entryId])) {
-            Log::notice('GeneratePlannedEntryJob: session or entry missing', [
-                'session_id' => $this->sessionId,
-                'entry_id' => $this->entryId,
-            ]);
-
-            return;
-        }
-
-        $row = $session['entries'][$this->entryId];
-        $entryStatus = (string) ($row['status'] ?? 'pending');
-        if ($entryStatus === 'ready' || $entryStatus === 'failed' || $entryStatus === 'saved') {
+        $row = $this->pendingRow($session);
+        if ($row === null) {
             return;
         }
 
@@ -94,31 +84,7 @@ class GeneratePlannedEntryJob implements ShouldQueue
                 $batch->recordStreamDelta($this->sessionId, $this->entryId, $delta);
             };
 
-            if ($statamicEntryId !== null) {
-                // Update path: kept fully separate from the create path so it can
-                // be removed/swapped without touching generateContent.
-                $result = $generator->generateUpdateForEntry(
-                    $statamicEntryId,
-                    (string) ($row['prompt'] ?? ''),
-                    $locale,
-                    $attachment,
-                    $streamSink,
-                    $prefetched,
-                    null,
-                );
-            } else {
-                $result = $generator->generateContent(
-                    (string) ($row['collection'] ?? ''),
-                    (string) ($row['blueprint'] ?? ''),
-                    (string) ($row['prompt'] ?? ''),
-                    $locale,
-                    $attachment,
-                    $streamSink,
-                    null,
-                    $prefetched,
-                    null,
-                );
-            }
+            $result = $this->generate($generator, $row, $statamicEntryId, $locale, $attachment, $streamSink, $prefetched);
 
             $batch->setPreferredPaths(
                 $this->sessionId,
@@ -131,23 +97,86 @@ class GeneratePlannedEntryJob implements ShouldQueue
                 'warnings' => $result['warnings'],
             ]);
         } catch (\Throwable $e) {
-            Log::warning('GeneratePlannedEntryJob failed', [
+            $this->recordFailure($batch, $e, $statamicEntryId !== null);
+        }
+    }
+
+    /**
+     * The plan row to generate, or null when the session is gone or the row
+     * is already done.
+     *
+     * @param  array<string, mixed>|null  $session
+     * @return array<string, mixed>|null
+     */
+    private function pendingRow(?array $session): ?array
+    {
+        if (! is_array($session) || ! isset($session['entries'][$this->entryId])) {
+            Log::notice('GeneratePlannedEntryJob: session or entry missing', [
                 'session_id' => $this->sessionId,
                 'entry_id' => $this->entryId,
-                'error' => $e->getMessage(),
-                'exception' => get_class($e),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString(),
-                'is_update' => $statamicEntryId !== null,
             ]);
 
-            $message = $e instanceof \RuntimeException
-                ? $e->getMessage()
-                : (string) __('Entry generation failed. Please try again.');
-
-            $batch->markEntryFailed($this->sessionId, $this->entryId, $message);
+            return null;
         }
+
+        $row = $session['entries'][$this->entryId];
+        $entryStatus = (string) ($row['status'] ?? 'pending');
+        if ($entryStatus === 'ready' || $entryStatus === 'failed' || $entryStatus === 'saved') {
+            return null;
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  array<string, mixed>  $prefetched
+     * @return array<string, mixed>
+     */
+    private function generate(EntryGeneratorService $generator, array $row, ?string $statamicEntryId, string $locale, ?string $attachment, callable $streamSink, array $prefetched): array
+    {
+        if ($statamicEntryId !== null) {
+            // Update path: kept fully separate from the create path so it can
+            // be removed/swapped without touching generateContent.
+            return $generator->generateUpdateForEntry(
+                $statamicEntryId,
+                (string) ($row['prompt'] ?? ''),
+                $locale,
+                $attachment,
+                $streamSink,
+                $prefetched,
+            );
+        }
+
+        return $generator->generateContent(
+            (string) ($row['collection'] ?? ''),
+            (string) ($row['blueprint'] ?? ''),
+            (string) ($row['prompt'] ?? ''),
+            $locale,
+            $attachment,
+            $streamSink,
+            $prefetched,
+        );
+    }
+
+    private function recordFailure(EntryGenerationBatchService $batch, \Throwable $e, bool $isUpdate): void
+    {
+        Log::warning('GeneratePlannedEntryJob failed', [
+            'session_id' => $this->sessionId,
+            'entry_id' => $this->entryId,
+            'error' => $e->getMessage(),
+            'exception' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace' => $e->getTraceAsString(),
+            'is_update' => $isUpdate,
+        ]);
+
+        $message = $e instanceof \RuntimeException
+            ? $e->getMessage()
+            : (string) __('Entry generation failed. Please try again.');
+
+        $batch->markEntryFailed($this->sessionId, $this->entryId, $message);
     }
 
     /**

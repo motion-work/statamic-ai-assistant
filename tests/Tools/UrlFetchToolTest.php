@@ -2,11 +2,11 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Tools;
 
+use Illuminate\Support\Facades\Http;
 use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use MotionWork\StatamicAiAssistant\Tools\UrlFetchTool;
-use Illuminate\Support\Facades\Http;
 
 class UrlFetchToolTest extends TestCase
 {

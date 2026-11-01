@@ -2,9 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
+use Illuminate\Support\Str;
 use Statamic\Entries\Entry as StatamicEntry;
 use Statamic\Fields\Blueprint;
-use Illuminate\Support\Str;
 
 /**
  * Serialises an entry's stored values into a compact, size-capped text block for
@@ -85,59 +85,45 @@ class EntryStructureSerializer
 
             $value = $raw[$handle];
 
-            if ($type === 'assets') {
-                $append(($value === null || $value === [] || $value === '')
-                    ? "{$handle}: (no asset set)"
-                    : "{$handle}: ".json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $line = $this->plainLine($handle, $type, $value, $textCap);
+            if ($line !== null) {
+                $append($line);
 
                 continue;
             }
 
-            if (is_string($value)) {
-                $append("{$handle}: ".json_encode(Str::limit($value, $textCap), JSON_UNESCAPED_UNICODE));
-
-                continue;
-            }
-
-            if (is_bool($value) || is_int($value) || is_float($value)) {
-                $append("{$handle}: ".json_encode($value, JSON_UNESCAPED_UNICODE));
-
-                continue;
-            }
-
-            if ($value === null) {
-                $append("{$handle}: null");
-
-                continue;
-            }
-
-            if (is_array($value)) {
-                $isList = array_is_list($value);
-                $label = $isList
-                    ? 'list — '.count($value).' item(s)'
-                    : 'object';
-                $encoded = $encode($value, $fieldCap);
-                if ($encoded === null || str_ends_with($encoded, '/* truncated */')) {
-                    $incompleteFields[] = $handle;
-                }
-                $append($encoded === null
-                    ? "{$handle}: ({$label}{$omit})"
-                    : "{$handle}: {$encoded}");
-                $usedTotal += $encoded === null ? 0 : strlen($encoded);
-
-                continue;
-            }
-
+            $label = match (true) {
+                is_array($value) && array_is_list($value) => 'list — '.count($value).' item(s)',
+                is_array($value) => 'object',
+                default => 'value omitted',
+            };
             $encoded = $encode($value, $fieldCap);
             if ($encoded === null || str_ends_with($encoded, '/* truncated */')) {
                 $incompleteFields[] = $handle;
             }
             $append($encoded === null
-                ? "{$handle}: (value omitted{$omit})"
+                ? "{$handle}: ({$label}{$omit})"
                 : "{$handle}: {$encoded}");
             $usedTotal += $encoded === null ? 0 : strlen($encoded);
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * The line for an asset, string, scalar or null value; null for arrays
+     * and other values, which go through the size caps.
+     */
+    private function plainLine(string $handle, string $type, mixed $value, int $textCap): ?string
+    {
+        return match (true) {
+            $type === 'assets' => ($value === null || $value === [] || $value === '')
+                ? "{$handle}: (no asset set)"
+                : "{$handle}: ".json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            is_string($value) => "{$handle}: ".json_encode(Str::limit($value, $textCap), JSON_UNESCAPED_UNICODE),
+            is_bool($value) || is_int($value) || is_float($value) => "{$handle}: ".json_encode($value, JSON_UNESCAPED_UNICODE),
+            $value === null => "{$handle}: null",
+            default => null,
+        };
     }
 }

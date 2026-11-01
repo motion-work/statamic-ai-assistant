@@ -32,10 +32,10 @@ class ChatToolRunner
     /**
      * @param  array<int, ChatTool>  $tools
      * @param  (callable(string $name, array<string, mixed> $result): void)|null  $onResult
-     *         Observer invoked with every dispatched tool's name + result array
-     *         (registered tools only, after budget/exception handling). Lets a
-     *         loop react to outcomes — e.g. the planner counting successful
-     *         structural writes — without parsing the JSON tool replies.
+     *                                                                                       Observer invoked with every dispatched tool's name + result array
+     *                                                                                       (registered tools only, after budget/exception handling). Lets a
+     *                                                                                       loop react to outcomes — e.g. the planner counting successful
+     *                                                                                       structural writes — without parsing the JSON tool replies.
      */
     public function __construct(array $tools, private ToolContext $context, private $onResult = null)
     {

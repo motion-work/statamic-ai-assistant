@@ -2,8 +2,12 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use MotionWork\StatamicAiAssistant\Services\BlueprintHintTargets;
+use MotionWork\StatamicAiAssistant\Services\HintSuggestionContext;
 use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
+use Statamic\Facades\Blueprint;
+use Statamic\Facades\Collection;
 
 class SetHintsServiceTest extends TestCase
 {
@@ -96,5 +100,84 @@ class SetHintsServiceTest extends TestCase
         // Empty string removes the key.
         $fresh->saveSiteInstructions('   ');
         $this->assertSame('', (new SetHintsService)->siteInstructions());
+    }
+
+    /**
+     * Discovery walks nested sets, grids and groups; this pins what the hints
+     * page and the "suggest" prompts see for one blueprint.
+     */
+    private function makeNestedBlueprint(): void
+    {
+        // Reuse the fixture 'packages' collection so the run leaves no new collection files.
+        Blueprint::make('package')->setNamespace('collections.packages')->setContents([
+            'tabs' => ['main' => ['sections' => [['fields' => [
+                ['handle' => 'title', 'field' => ['type' => 'text']],
+                ['handle' => 'teaser', 'field' => ['type' => 'group', 'display' => 'Teaser', 'fields' => [
+                    ['handle' => 'kicker', 'field' => ['type' => 'text', 'display' => 'Kicker']],
+                ]]],
+                ['handle' => 'blocks', 'field' => ['type' => 'replicator', 'display' => 'Blocks', 'sets' => [
+                    'main' => ['sets' => [
+                        'hero' => ['display' => 'Hero', 'instructions' => ' Big opener ', 'fields' => [
+                            ['handle' => 'headline', 'field' => ['type' => 'text', 'display' => 'Headline']],
+                            ['handle' => 'tone', 'field' => ['type' => 'select', 'options' => ['calm' => 'Calm', 'loud' => 'Loud']]],
+                        ]],
+                        'columns' => ['fields' => [
+                            ['handle' => 'inner', 'field' => ['type' => 'replicator', 'display' => 'Inner', 'sets' => [
+                                'main' => ['sets' => [
+                                    'hero' => ['display' => 'Nested hero', 'fields' => []],
+                                ]],
+                            ]]],
+                        ]],
+                    ]],
+                ]]],
+                ['handle' => 'rows', 'field' => ['type' => 'grid', 'display' => 'Rows', 'fields' => [
+                    ['handle' => 'cell', 'field' => ['type' => 'replicator', 'display' => 'Cell', 'sets' => [
+                        'main' => ['sets' => ['quote' => ['fields' => []]]],
+                    ]]],
+                ]]],
+            ]]]]],
+        ])->save();
+
+        Collection::make('packages')->title('Packages')->save();
+    }
+
+    public function test_discovery_walks_nested_sets_grids_and_groups(): void
+    {
+        $this->makeNestedBlueprint();
+        $service = new SetHintsService;
+        $service->save(['hero' => ['ai_description' => 'Big opener.', 'when_to_use' => ['On top']]]);
+        $at = fn (string $field) => ['collection' => 'Packages', 'blueprint' => 'Package', 'field' => $field];
+
+        $sets = collect((new BlueprintHintTargets($service))->discoverSets())->keyBy('handle');
+        $this->assertSame([
+            'handle' => 'hero',
+            'title' => 'Hero',
+            'ai_description' => 'Big opener.',
+            'when_to_use' => ['On top'],
+            'locations' => [$at('Blocks'), $at('Inner')],
+        ], $sets['hero']);
+        $this->assertSame([$at('Blocks')], $sets['columns']['locations']);
+        // A replicator inside a grid is found too.
+        $this->assertSame([$at('Cell')], $sets['quote']['locations']);
+
+        $fields = collect((new BlueprintHintTargets($service))->discoverFields())->keyBy('handle');
+        $this->assertSame([$at('Teaser › Kicker')], $fields['kicker']['locations']);
+        $this->assertSame('group', $fields['teaser']['type']);
+        // Fields inside replicator sets belong to block hints, not field hints.
+        $this->assertFalse($fields->has('headline'));
+
+        $this->assertSame([
+            'handle' => 'hero',
+            'title' => 'Hero',
+            'instructions' => 'Big opener',
+            'inner_fields' => [
+                ['handle' => 'headline', 'type' => 'text', 'display' => 'Headline', 'instructions' => '', 'options' => []],
+                ['handle' => 'tone', 'type' => 'select', 'display' => 'Tone', 'instructions' => '', 'options' => ['Calm', 'Loud']],
+            ],
+            'locations' => [$at('Blocks'), $at('Inner')],
+        ], (new HintSuggestionContext(new BlueprintHintTargets($service)))->collectSetContext('hero'));
+        $this->assertNull((new HintSuggestionContext(new BlueprintHintTargets($service)))->collectSetContext('nope'));
+
+        $this->assertSame([$at('Teaser')], (new HintSuggestionContext(new BlueprintHintTargets($service)))->collectFieldContext('teaser')['locations']);
     }
 }

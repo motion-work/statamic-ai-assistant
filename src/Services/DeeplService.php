@@ -4,34 +4,36 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use DeepL\DeepLClient;
 use DeepL\DeepLException;
-use DeepL\LanguageCode;
 use DeepL\MultilingualGlossaryDictionaryEntries;
+use DeepL\TextResult;
 use DeepL\TranslateTextOptions;
-use DeepL\Translator;
-use DeepL\TranslatorOptions;
-use DeepL\Usage;
-use DeepL\UsageDetail;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Statamic\Facades\Site;
 
 class DeeplService
 {
-    /**
-     * DeepL may return very large character_limit / document_limit values (e.g. 1e12) for
-     * Pro keys with no hard cap or internal metering; showing that raw limit in the CP is
-     * misleading, so treat it like unlimited for UI purposes.
-     */
-    private const USAGE_LIMIT_EFFECTIVELY_UNLIMITED = 1_000_000_000_000;
-
     private ?DeepLClient $client = null;
 
-    /** @var array<string, string> */
-    private array $languageMapping;
+    private DeeplLanguages $languages;
+
+    private DeeplRequestPlanner $requests;
 
     public function __construct()
     {
-        $this->languageMapping = config('deepl.language_mapping', []);
+        $this->languages = new DeeplLanguages;
+        $this->requests = new DeeplRequestPlanner($this->languages);
+    }
+
+    /** @see DeeplUsage::getUsageForApi() */
+    public function getUsageForApi(): array
+    {
+        return (new DeeplUsage)->getUsageForApi();
+    }
+
+    /** @see DeeplLanguages::mapLanguage() */
+    public function mapLanguage(string $localeOrHandle): string
+    {
+        return $this->languages->mapLanguage($localeOrHandle);
     }
 
     private function client(): DeepLClient
@@ -85,9 +87,9 @@ class DeeplService
      */
     public function translateBatch(array $texts, ?string $sourceLang, string $targetLang, array $options = []): array
     {
-        $targetLang = $this->resolveStatamicLocale($targetLang);
-        $mappedSource = $this->mapSourceLanguageForDeepL($sourceLang);
-        $mappedTarget = $this->normalizeDeepLTargetLanguage($this->mapLanguage($targetLang));
+        $targetLang = $this->languages->resolveStatamicLocale($targetLang);
+        $mappedSource = $this->languages->mapSourceLanguageForDeepL($sourceLang);
+        $mappedTarget = $this->languages->normalizeDeepLTargetLanguage($this->languages->mapLanguage($targetLang));
 
         $nonEmptyTexts = [];
         $indexMap = [];
@@ -107,7 +109,7 @@ class DeeplService
         if ($this->usesLlmFallback()) {
             $results = app(LlmTranslator::class)->translate(
                 $nonEmptyTexts,
-                $sourceLang !== null ? $this->resolveStatamicLocale($sourceLang) : null,
+                $sourceLang !== null ? $this->languages->resolveStatamicLocale($sourceLang) : null,
                 $targetLang,
                 ($options[TranslateTextOptions::TAG_HANDLING] ?? null) === 'html',
             );
@@ -125,7 +127,7 @@ class DeeplService
         // through this method. Explicit caller options always win. When a glossary
         // term and a style rule both apply, the batch is split so the term is
         // enforced on the classic model while the rest keeps the style rule.
-        $segments = $this->planTranslationSegments($nonEmptyTexts, $options, $mappedSource, $mappedTarget);
+        $segments = $this->requests->planTranslationSegments($nonEmptyTexts, $options, $mappedSource, $mappedTarget);
 
         $translated = $texts;
 
@@ -156,7 +158,7 @@ class DeeplService
      * @param  array<int, string>  $segmentTexts
      * @param  array<string, mixed>  $segmentOptions  enhanced options for this segment
      * @param  array<string, mixed>  $callerOptions  original caller options (retry fallback)
-     * @return array<int, \DeepL\TextResult>
+     * @return array<int, TextResult>
      */
     private function runTranslateSegment(array $segmentTexts, ?string $mappedSource, string $mappedTarget, array $segmentOptions, array $callerOptions): array
     {
@@ -182,166 +184,6 @@ class DeeplService
     }
 
     /**
-     * Decide how to split the batch across glossary/style translation profiles.
-     *
-     * Returns one or more segments, each with its own DeepL options and the list
-     * of positions (into $nonEmptyTexts) it covers. The common case is a single
-     * segment; the batch is only split when a glossary term AND a style rule both
-     * apply, because DeepL cannot enforce a glossary ("hard", classic model) while
-     * also applying a style rule (next-gen model, soft glossary) in one request.
-     *
-     * @param  array<int, string>  $nonEmptyTexts
-     * @param  array<string, mixed>  $options
-     * @return array<int, array{options: array<string, mixed>, positions: array<int, int>}>
-     */
-    private function planTranslationSegments(array $nonEmptyTexts, array $options, ?string $mappedSource, string $mappedTarget): array
-    {
-        $sourceBase = $mappedSource !== null
-            ? $this->primaryLanguageSubtag(strtolower(str_replace('_', '-', $mappedSource)))
-            : null;
-        $targetBase = $this->primaryLanguageSubtag(strtolower(str_replace('_', '-', $mappedTarget)));
-
-        $glossaryId = null;
-        $styleId = null;
-
-        if ($targetBase !== null) {
-            try {
-                if (! array_key_exists('glossary', $options) && $sourceBase !== null) {
-                    $glossaryId = app(TranslationGlossaryService::class)->glossaryIdFor($sourceBase, $targetBase);
-                }
-                if (! array_key_exists('style_id', $options)) {
-                    $styleId = app(TranslationStyleRulesService::class)->styleIdFor($targetBase);
-                }
-            } catch (\Throwable $e) {
-                Log::warning('[deepl] could not resolve glossary/style options', ['message' => $e->getMessage()]);
-            }
-        }
-
-        $allPositions = array_keys($nonEmptyTexts);
-
-        // No auto glossary+style conflict to resolve → one segment with whatever
-        // single-request enhancements apply (glossary hard, or style, or neither).
-        if ($glossaryId === null || $styleId === null || ! config('statamic-ai-assistant.prefer_glossary_over_style', true)) {
-            return [[
-                'options' => $this->buildSingleRequestOptions($options, $glossaryId, $styleId),
-                'positions' => $allPositions,
-            ]];
-        }
-
-        // Both a glossary and a style rule apply. Split by whether each text
-        // actually carries a glossary term.
-        $terms = app(TranslationGlossaryService::class)->sourceTermsFor((string) $sourceBase, $targetBase);
-
-        $termPositions = [];
-        $stylePositions = [];
-
-        foreach ($nonEmptyTexts as $pos => $text) {
-            if ($this->textContainsGlossaryTerm($text, $terms)) {
-                $termPositions[] = $pos;
-            } else {
-                $stylePositions[] = $pos;
-            }
-        }
-
-        if ($termPositions === []) {
-            // Nothing to enforce — keep everything on the style rule.
-            return [[
-                'options' => $this->withStyle($options, $styleId, $glossaryId),
-                'positions' => $allPositions,
-            ]];
-        }
-
-        $segments = [[
-            'options' => $this->withHardGlossary($options, $glossaryId),
-            'positions' => $termPositions,
-        ]];
-
-        if ($stylePositions !== []) {
-            $segments[] = [
-                'options' => $this->withStyle($options, $styleId, $glossaryId),
-                'positions' => $stylePositions,
-            ];
-        }
-
-        return $segments;
-    }
-
-    /**
-     * @param  array<int, string>  $terms
-     */
-    private function textContainsGlossaryTerm(string $text, array $terms): bool
-    {
-        foreach ($terms as $term) {
-            if ($term !== '' && mb_stripos($text, $term) !== false) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Options for a single request (no split): a glossary is enforced on the
-     * classic model; a lone style rule is applied on the next-gen model.
-     *
-     * @param  array<string, mixed>  $options
-     * @return array<string, mixed>
-     */
-    private function buildSingleRequestOptions(array $options, ?string $glossaryId, ?string $styleId): array
-    {
-        if ($glossaryId !== null) {
-            $options = $this->withHardGlossary($options, $glossaryId);
-        }
-
-        if ($styleId !== null && ! array_key_exists('style_id', $options)) {
-            $options[TranslateTextOptions::STYLE_ID] = $styleId;
-        }
-
-        return $options;
-    }
-
-    /**
-     * Attach the glossary and pin the classic model so DeepL enforces the terms
-     * ("hard" glossary). Removes any auto style_id — style forces the next-gen
-     * model, which downgrades glossaries to soft hints.
-     *
-     * @param  array<string, mixed>  $options
-     * @return array<string, mixed>
-     */
-    private function withHardGlossary(array $options, string $glossaryId): array
-    {
-        if (! array_key_exists('glossary', $options)) {
-            $options[TranslateTextOptions::GLOSSARY] = $glossaryId;
-        }
-
-        if (! array_key_exists('model_type', $options)) {
-            $options[TranslateTextOptions::MODEL_TYPE] = 'latency_optimized';
-        }
-
-        return $options;
-    }
-
-    /**
-     * Attach the style rule (next-gen model). A glossary can ride along but only
-     * as a soft hint on this model.
-     *
-     * @param  array<string, mixed>  $options
-     * @return array<string, mixed>
-     */
-    private function withStyle(array $options, string $styleId, ?string $glossaryId): array
-    {
-        if (! array_key_exists('style_id', $options)) {
-            $options[TranslateTextOptions::STYLE_ID] = $styleId;
-        }
-
-        if ($glossaryId !== null && ! array_key_exists('glossary', $options)) {
-            $options[TranslateTextOptions::GLOSSARY] = $glossaryId;
-        }
-
-        return $options;
-    }
-
-    /**
      * Translate a single text string via DeepL.
      * Pass null for $sourceLang to let DeepL detect the source language (omit source_lang in the API request).
      */
@@ -354,279 +196,6 @@ class DeeplService
         $results = $this->translateBatch([$text], $sourceLang, $targetLang, $options);
 
         return $results[0] ?? $text;
-    }
-
-    /**
-     * Current billing-period DeepL API usage (characters, documents) for display in the CP.
-     * Uses GET /v2/usage. Pro API returns account totals plus api_key_character_* for the key used;
-     * we prefer key-level numbers for the main meter when present.
-     *
-     * @return array{
-     *   character: ?array,
-     *   character_account: ?array,
-     *   character_is_api_key_scoped: bool,
-     *   document: ?array,
-     *   team_document: ?array,
-     *   any_limit_reached: bool,
-     *   billing: array{period_start?: string, period_end?: string},
-     *   estimated_cost: array{
-     *     enabled: bool,
-     *     base_fee_eur?: float,
-     *     per_million_chars_eur?: float,
-     *     account_character_count?: int,
-     *     estimated_total_eur?: float
-     *   }
-     * }
-     */
-    public function getUsageForApi(): array
-    {
-        $apiKey = config('deepl.api_key');
-        if (empty($apiKey)) {
-            throw new \RuntimeException('DeepL API key is not configured. Set DEEPL_API_KEY in your .env file.');
-        }
-
-        $body = $this->fetchUsageResponseBody($apiKey);
-        $usage = new Usage($body);
-        $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
-
-        // Per DeepL: start_time / end_time are only in some Pro responses.
-        // https://developers.deepl.com/api-reference/usage-and-quota
-        $billing = [];
-        $endRaw = $decoded['end_time'] ?? null;
-        $startRaw = $decoded['start_time'] ?? null;
-        if (is_string($endRaw) && trim($endRaw) !== '') {
-            $billing['period_end'] = trim($endRaw);
-        }
-        if (is_string($startRaw) && trim($startRaw) !== '') {
-            $billing['period_start'] = trim($startRaw);
-        }
-
-        $primaryChar = null;
-        $fromApiKey = isset($decoded['api_key_character_count'], $decoded['api_key_character_limit'])
-            && is_numeric($decoded['api_key_character_count'])
-            && is_numeric($decoded['api_key_character_limit']);
-        if ($fromApiKey) {
-            $primaryChar = $this->serializeUsagePair(
-                (int) $decoded['api_key_character_count'],
-                (int) $decoded['api_key_character_limit']
-            );
-        }
-        if ($primaryChar === null && $usage->character !== null) {
-            $primaryChar = $this->serializeUsageDetail($usage->character);
-        }
-
-        $accountChar = null;
-        if (isset($decoded['character_count'], $decoded['character_limit'])
-            && is_numeric($decoded['character_count'])
-            && is_numeric($decoded['character_limit'])) {
-            $accountChar = $this->serializeUsagePair(
-                (int) $decoded['character_count'],
-                (int) $decoded['character_limit']
-            );
-        }
-
-        $characterIsApiKeyScoped = $fromApiKey && $accountChar !== null;
-
-        $anyReached = $usage->anyLimitReached();
-        if ($primaryChar !== null && ! $primaryChar['unlimited']
-            && isset($primaryChar['limit']) && $primaryChar['limit'] !== null
-            && $primaryChar['count'] >= $primaryChar['limit']) {
-            $anyReached = true;
-        }
-
-        $estimatedCost = ['enabled' => false];
-        if (config('deepl.estimated_cost_enabled', true)
-            && isset($decoded['character_count'])
-            && is_numeric($decoded['character_count'])) {
-            $accountCount = (int) $decoded['character_count'];
-            $base = (float) config('deepl.estimated_monthly_base_fee_eur', 4.99);
-            $perM = (float) config('deepl.estimated_per_million_chars_eur', 20);
-            $variable = ($accountCount / 1_000_000.0) * $perM;
-            $estimatedCost = [
-                'enabled' => true,
-                'base_fee_eur' => $base,
-                'per_million_chars_eur' => $perM,
-                'account_character_count' => $accountCount,
-                'estimated_total_eur' => round($base + $variable, 2),
-            ];
-        }
-
-        return [
-            'character' => $primaryChar,
-            'character_account' => $characterIsApiKeyScoped ? $accountChar : null,
-            'character_is_api_key_scoped' => $characterIsApiKeyScoped,
-            'document' => $this->serializeUsageDetail($usage->document),
-            'team_document' => $this->serializeUsageDetail($usage->teamDocument),
-            'any_limit_reached' => $anyReached,
-            'billing' => $billing,
-            'estimated_cost' => $estimatedCost,
-        ];
-    }
-
-    /**
-     * Raw JSON body from GET /v2/usage (same host as the DeepL PHP client uses for free vs Pro keys).
-     */
-    protected function fetchUsageResponseBody(string $apiKey): string
-    {
-        $baseUrl = Translator::isAuthKeyFreeAccount($apiKey)
-            ? TranslatorOptions::DEFAULT_SERVER_URL_FREE
-            : TranslatorOptions::DEFAULT_SERVER_URL;
-
-        $response = Http::withHeaders([
-            'Authorization' => 'DeepL-Auth-Key '.$apiKey,
-            'User-Agent' => 'MotionWorkStatamicAiAssistant/1.0',
-        ])->timeout(20)->get($baseUrl.'/v2/usage');
-
-        if (! $response->successful()) {
-            throw new \RuntimeException('DeepL usage request failed (HTTP '.$response->status().').');
-        }
-
-        return $response->body();
-    }
-
-    /**
-     * @return array{count: int, limit: ?int, unlimited: bool, percent: ?int}|null
-     */
-    protected function serializeUsageDetail(?UsageDetail $detail): ?array
-    {
-        if ($detail === null) {
-            return null;
-        }
-
-        return $this->serializeUsagePair($detail->count, $detail->limit);
-    }
-
-    /**
-     * @return array{count: int, limit: ?int, unlimited: bool, percent: ?int}|null
-     */
-    protected function serializeUsagePair(int $count, int $limit): ?array
-    {
-        if ($limit <= 0 || $limit >= self::USAGE_LIMIT_EFFECTIVELY_UNLIMITED) {
-            return [
-                'count' => $count,
-                'limit' => null,
-                'unlimited' => true,
-                'percent' => null,
-            ];
-        }
-
-        return [
-            'count' => $count,
-            'limit' => $limit,
-            'unlimited' => false,
-            'percent' => min(100, (int) round(($count / $limit) * 100)),
-        ];
-    }
-
-    /**
-     * Turn a site handle (e.g. default, de_ch) into a Statamic locale (e.g. en, de-CH) when possible.
-     */
-    public function resolveStatamicLocale(string $handleOrLocale): string
-    {
-        $trimmed = trim($handleOrLocale);
-        if ($trimmed === '') {
-            return $trimmed;
-        }
-
-        $lower = strtolower($trimmed);
-        $normalizedLocale = strtolower(str_replace('_', '-', $trimmed));
-
-        $site = Site::all()->first(fn ($s) => strtolower($s->handle()) === $lower);
-        if ($site) {
-            return $site->locale();
-        }
-
-        $site = Site::all()->first(function ($s) use ($normalizedLocale) {
-            $loc = strtolower(str_replace('_', '-', $s->locale()));
-
-            return $loc === $normalizedLocale;
-        });
-        if ($site) {
-            return $site->locale();
-        }
-
-        $site = Site::all()->first(function ($s) use ($normalizedLocale) {
-            $lang = strtolower(str_replace('_', '-', (string) $s->lang()));
-
-            return $lang === $normalizedLocale;
-        });
-        if ($site) {
-            return $site->locale();
-        }
-
-        return $trimmed;
-    }
-
-    /**
-     * Map Statamic locale / site keys to DeepL language codes.
-     * Handles regional tags (de-CH), underscores (de_CH), and site handles via config.
-     */
-    public function mapLanguage(string $localeOrHandle): string
-    {
-        $normalized = strtolower(str_replace('_', '-', trim($localeOrHandle)));
-
-        $candidates = array_unique(array_filter([
-            $localeOrHandle,
-            $normalized,
-            $this->primaryLanguageSubtag($normalized),
-        ]));
-
-        foreach ($candidates as $key) {
-            if ($key !== null && $key !== '' && isset($this->languageMapping[$key])) {
-                return $this->languageMapping[$key];
-            }
-        }
-
-        $primary = $this->primaryLanguageSubtag($normalized);
-        if ($primary !== null && $primary !== '') {
-            return $primary;
-        }
-
-        return $localeOrHandle;
-    }
-
-    /**
-     * DeepL rejects ambiguous target codes: use en-GB/en-US and pt-PT/pt-BR (see Translator::buildBodyParams).
-     */
-    protected function normalizeDeepLTargetLanguage(string $mapped): string
-    {
-        $lower = strtolower(str_replace('_', '-', trim($mapped)));
-
-        if ($lower === 'en') {
-            return (string) config('deepl.english_target', 'en-GB');
-        }
-
-        if ($lower === 'pt') {
-            return (string) config('deepl.portuguese_target', 'pt-PT');
-        }
-
-        return $mapped;
-    }
-
-    /**
-     * Resolve and map source language for DeepL, or null for automatic detection.
-     *
-     * `language_mapping` may use target-only codes (e.g. en-GB, pt-PT). DeepL rejects those for
-     * `source_lang` — only base codes are valid (en, pt, de, …). Strip regional variants for sources.
-     *
-     * @see \DeepL\LanguageCode (e.g. ENGLISH_BRITISH is target-only)
-     */
-    protected function mapSourceLanguageForDeepL(?string $sourceLang): ?string
-    {
-        if ($sourceLang === null || trim($sourceLang) === '') {
-            return null;
-        }
-
-        $mapped = $this->mapLanguage($this->resolveStatamicLocale($sourceLang));
-        if ($mapped === '') {
-            return null;
-        }
-
-        try {
-            return LanguageCode::removeRegionalVariant($mapped);
-        } catch (DeepLException) {
-            return null;
-        }
     }
 
     /**
@@ -748,14 +317,5 @@ class DeeplService
         } catch (DeepLException $e) {
             Log::info('[deepl] delete style rule skipped', ['id' => $styleRuleId, 'message' => $e->getMessage()]);
         }
-    }
-
-    protected function primaryLanguageSubtag(string $normalized): ?string
-    {
-        if (preg_match('/^([a-z]{2,3})(?:[-_]|$)/', $normalized, $m)) {
-            return $m[1];
-        }
-
-        return null;
     }
 }

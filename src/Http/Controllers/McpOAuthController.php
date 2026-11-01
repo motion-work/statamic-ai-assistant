@@ -2,12 +2,12 @@
 
 namespace MotionWork\StatamicAiAssistant\Http\Controllers;
 
-use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Controller;
+use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
 
 class McpOAuthController extends Controller
 {

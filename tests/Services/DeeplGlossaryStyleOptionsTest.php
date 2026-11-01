@@ -2,6 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use MotionWork\StatamicAiAssistant\Services\DeeplLanguages;
+use MotionWork\StatamicAiAssistant\Services\DeeplRequestPlanner;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
@@ -36,10 +38,7 @@ class DeeplGlossaryStyleOptionsTest extends TestCase
      */
     private function plan(array $texts, array $options, ?string $source, string $target): array
     {
-        $method = new \ReflectionMethod($this->service, 'planTranslationSegments');
-        $method->setAccessible(true);
-
-        return $method->invoke($this->service, $texts, $options, $source, $target);
+        return (new DeeplRequestPlanner(new DeeplLanguages))->planTranslationSegments($texts, $options, $source, $target);
     }
 
     private function bindGlossary(?string $idForDeFr, array $termsForDeFr = []): void

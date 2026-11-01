@@ -2,8 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools\Advanced;
 
-use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use Statamic\Facades\Site;
 use Statamic\Facades\Taxonomy;
 use Statamic\Facades\Term;
@@ -79,25 +79,11 @@ class CreateTermsTool extends AbstractAdvancedTool
         $seen = [];
 
         foreach ($rawTerms as $index => $item) {
-            // Accept a bare string title as a convenience, or a {title, slug} object.
-            if (is_string($item)) {
-                $title = trim($item);
-                $slug = '';
-            } elseif (is_array($item)) {
-                $title = isset($item['title']) && is_string($item['title']) ? trim($item['title']) : '';
-                $slug = isset($item['slug']) && is_string($item['slug']) ? trim($item['slug']) : '';
-            } else {
-                return ['ok' => false, 'error' => "Term at index {$index} must be a string title or an object {\"title\": \"...\"}."];
+            $term = $this->parseTerm($index, $item);
+            if (is_string($term)) {
+                return ['ok' => false, 'error' => $term];
             }
-
-            if ($title === '') {
-                return ['ok' => false, 'error' => "Term at index {$index} is missing a non-empty \"title\"."];
-            }
-
-            $slug = Str::slug($slug !== '' ? $slug : $title);
-            if ($slug === '') {
-                return ['ok' => false, 'error' => "Term \"{$title}\" produced an empty slug — provide an explicit \"slug\"."];
-            }
+            [$title, $slug] = $term;
 
             // De-dupe within this call, then against what already exists on disk.
             if (isset($seen[$slug])) {
@@ -124,5 +110,35 @@ class CreateTermsTool extends AbstractAdvancedTool
             'created' => $created,
             'skipped' => $skipped,
         ];
+    }
+
+    /**
+     * A bare string title (a convenience) or a {title, slug} object: [title,
+     * slug], or why the term cannot be used.
+     *
+     * @return array{0: string, 1: string}|string
+     */
+    private function parseTerm(int|string $index, mixed $item): array|string
+    {
+        if (is_string($item)) {
+            $title = trim($item);
+            $slug = '';
+        } elseif (is_array($item)) {
+            $title = isset($item['title']) && is_string($item['title']) ? trim($item['title']) : '';
+            $slug = isset($item['slug']) && is_string($item['slug']) ? trim($item['slug']) : '';
+        } else {
+            return "Term at index {$index} must be a string title or an object {\"title\": \"...\"}.";
+        }
+
+        if ($title === '') {
+            return "Term at index {$index} is missing a non-empty \"title\".";
+        }
+
+        $slug = Str::slug($slug !== '' ? $slug : $title);
+        if ($slug === '') {
+            return "Term \"{$title}\" produced an empty slug — provide an explicit \"slug\".";
+        }
+
+        return [$title, $slug];
     }
 }

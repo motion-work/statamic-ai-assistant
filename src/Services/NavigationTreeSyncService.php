@@ -2,8 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Support\EntryLabel;
 use Facades\Statamic\Structures\BranchIds;
+use MotionWork\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Support\NavigationTree;
 use Statamic\Contracts\Entries\Entry;
 use Statamic\Facades\Entry as EntryFacade;
 use Statamic\Facades\Nav;
@@ -11,10 +12,14 @@ use Statamic\Facades\Site;
 
 class NavigationTreeSyncService
 {
+    protected NavigationBranchMapper $branches;
+
     public function __construct(
         protected TranslationService $translationService,
-        protected DeeplService $deepl,
-    ) {}
+        DeeplService $deepl,
+    ) {
+        $this->branches = new NavigationBranchMapper($deepl);
+    }
 
     /**
      * Preview copying the default site's navigation tree to other sites: missing localizations per destination.
@@ -49,14 +54,14 @@ class NavigationTreeSyncService
             throw new \InvalidArgumentException(__('This action requires at least two Statamic sites. Add another site in Sites configuration.'));
         }
 
-        $resolved = $this->resolveSourceNavigationTree($nav);
+        $resolved = NavigationTree::sourceTree($nav);
         $sourceSite = $resolved['site'];
         $tree = $resolved['tree'];
         $sourceSiteHandle = $sourceSite->handle();
         $urlOnlyNavigation = $resolved['url_only'] ?? false;
 
-        $branchCount = $this->countBranches($tree);
-        $entryIds = $this->collectEntryIdsFromBranches($tree);
+        $branchCount = NavigationTree::countBranches($tree);
+        $entryIds = NavigationTree::entryIds($tree);
 
         $allSites = Site::all()->values();
 
@@ -65,31 +70,11 @@ class NavigationTreeSyncService
             if ($site->handle() === $sourceSiteHandle) {
                 continue;
             }
-            $missing = [];
-            foreach ($entryIds as $entryId) {
-                $entry = EntryFacade::find($entryId);
-                if (! $entry) {
-                    continue;
-                }
-                $root = $entry->root();
-                if ($this->localizationForSite($root, $site->handle()) !== null) {
-                    continue;
-                }
-                $sourceRoot = $this->resolveRootInSite($root, $sourceSiteHandle);
-                if (! $sourceRoot) {
-                    continue;
-                }
-                $missing[] = [
-                    'source_entry_id' => $sourceRoot->id(),
-                    'title' => EntryLabel::for($sourceRoot),
-                ];
-            }
-            $unique = collect($missing)->unique('source_entry_id')->values()->all();
             $perDestination[] = [
                 'site_handle' => $site->handle(),
                 'site_name' => $site->name(),
                 'locale' => $site->locale(),
-                'missing_entries' => $unique,
+                'missing_entries' => NavigationTree::missingPages($entryIds, $site->handle(), $sourceSiteHandle),
             ];
         }
 
@@ -139,7 +124,7 @@ class NavigationTreeSyncService
             throw new \InvalidArgumentException(__('This action requires at least two Statamic sites. Add another site in Sites configuration.'));
         }
 
-        $resolved = $this->resolveSourceNavigationTree($nav);
+        $resolved = NavigationTree::sourceTree($nav);
         $sourceSite = $resolved['site'];
         $tree = $resolved['tree'];
         $sourceSiteHandle = $sourceSite->handle();
@@ -180,7 +165,7 @@ class NavigationTreeSyncService
             return ['locale' => $destLocale, 'success' => false, 'error' => __('Navigation not found.')];
         }
 
-        $resolved = $this->resolveSourceNavigationTree($nav);
+        $resolved = NavigationTree::sourceTree($nav);
         $sourceSite = $resolved['site'];
         $tree = $resolved['tree'];
         $sourceSiteHandle = $sourceSite->handle();
@@ -206,61 +191,14 @@ class NavigationTreeSyncService
         $pages = [];
 
         try {
-            $entryIds = $this->collectEntryIdsFromBranches($tree);
-            foreach ($entryIds as $entryId) {
-                $entry = EntryFacade::find($entryId);
-                if (! $entry) {
-                    continue;
-                }
-                $root = $entry->root();
-                $sourceRoot = $this->resolveRootInSite($root, $sourceSiteHandle);
-                if (! $sourceRoot) {
-                    continue;
-                }
-
-                if ($this->localizationForSite($root, $destSiteHandle) !== null) {
-                    continue;
-                }
-
-                if ($onPage) {
-                    $onPage('processing', [
-                        'source_entry_id' => (string) $sourceRoot->id(),
-                        'origin_title' => EntryLabel::for($sourceRoot),
-                    ]);
-                }
-
-                $res = $this->translationService->translateEntry(
-                    $sourceRoot,
-                    $sourceLocale,
-                    $destLocale,
-                    $overwrite,
-                    $maxDepth,
-                );
-
-                if (! ($res['success'] ?? false)) {
-                    throw new \RuntimeException($res['error'] ?? __('Translation failed.'));
-                }
-                $translated[] = EntryLabel::for($sourceRoot);
-
-                // Keep the full per-page outcome (incl. linked entries the
-                // translator auto-created) so the CP can render one progress
-                // row per translated page, exactly like entry translations.
-                $page = [
-                    'source_entry_id' => (string) $sourceRoot->id(),
-                    'entry_id' => $res['entry_id'] ?? null,
-                    'origin_title' => $res['origin_title'] ?? EntryLabel::for($sourceRoot),
-                    'target_title' => $res['target_title'] ?? null,
-                    'edit_url' => $res['edit_url'] ?? null,
-                    'linked_entries' => $res['linked_entries'] ?? [],
-                ];
-                $pages[] = $page;
-
-                if ($onPage) {
-                    $onPage('completed', $page);
+            foreach (NavigationTree::entryIds($tree) as $entryId) {
+                $done = $this->translateMissingPage($entryId, $sourceSite, $destSite, $overwrite, $maxDepth, $onPage);
+                if ($done !== null) {
+                    [$pages[], $translated[]] = $done;
                 }
             }
 
-            $mapped = $this->mapTreeForSite($tree, $destSiteHandle, $sourceLocale, $destLocale);
+            $mapped = $this->branches->mapTreeForSite($tree, $destSiteHandle, $sourceLocale, $destLocale);
             $mapped = BranchIds::ensure($mapped);
 
             $navTree = $nav->in($destSiteHandle) ?? $nav->makeTree($destSiteHandle);
@@ -292,184 +230,64 @@ class NavigationTreeSyncService
     }
 
     /**
-     * Prefer the default site's tree; if it is empty or has no page entries, use the first other site that does.
-     * This matches CP reality where e.g. English is default but only German has the nav built yet.
+     * Translates one page of the navigation that has no localization on the
+     * destination site yet: [page row, source title], or null when it has one
+     * (or no source entry).
      *
-     * @param  \Statamic\Contracts\Structures\Nav  $nav
-     * @return array{site: \Statamic\Sites\Site, tree: array<int, array<string, mixed>>, url_only: bool}
+     * @param  (callable(string $phase, array<string, mixed> $page): void)|null  $onPage
+     * @return array{0: array<string, mixed>, 1: string}|null
      */
-    protected function resolveSourceNavigationTree($nav): array
+    private function translateMissingPage(string $entryId, $sourceSite, $destSite, bool $overwrite, int $maxDepth, ?callable $onPage): ?array
     {
-        $candidateUrlOnly = null;
-
-        foreach ($this->siteHandlesOrderedDefaultFirst() as $handle) {
-            $navTree = $nav->in($handle);
-            if (! $navTree) {
-                continue;
-            }
-
-            $tree = $navTree->tree();
-            if ($tree === [] || $tree === null) {
-                continue;
-            }
-
-            $ids = $this->collectEntryIdsFromBranches($tree);
-            if ($ids !== []) {
-                $site = Site::get($handle);
-                if ($site) {
-                    return ['site' => $site, 'tree' => $tree, 'url_only' => false];
-                }
-            }
-            if ($this->countBranches($tree) > 0 && $candidateUrlOnly === null) {
-                $site = Site::get($handle);
-                if ($site) {
-                    $candidateUrlOnly = ['site' => $site, 'tree' => $tree, 'url_only' => true];
-                }
-            }
+        $entry = EntryFacade::find($entryId);
+        if (! $entry) {
+            return null;
+        }
+        $root = $entry->root();
+        $sourceRoot = NavigationTree::localization($root, $sourceSite->handle());
+        if (! $sourceRoot) {
+            return null;
         }
 
-        if ($candidateUrlOnly !== null) {
-            return $candidateUrlOnly;
+        if (NavigationTree::localization($root, $destSite->handle()) !== null) {
+            return null;
         }
 
-        throw new \InvalidArgumentException(__('The navigation has no linked pages in any site. Add entries in the control panel.'));
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    protected function siteHandlesOrderedDefaultFirst(): array
-    {
-        $defaultHandle = Site::default()->handle();
-        $handles = [$defaultHandle];
-
-        foreach (Site::all() as $site) {
-            if ($site->handle() !== $defaultHandle) {
-                $handles[] = $site->handle();
-            }
+        if ($onPage) {
+            $onPage('processing', [
+                'source_entry_id' => (string) $sourceRoot->id(),
+                'origin_title' => EntryLabel::for($sourceRoot),
+            ]);
         }
 
-        return $handles;
-    }
+        $res = $this->translationService->translateEntry(
+            $sourceRoot,
+            $sourceSite->locale(),
+            $destSite->locale(),
+            $overwrite,
+            $maxDepth,
+        );
 
-    /**
-     * @param  array<int, array<string, mixed>>  $branches
-     * @return array<int, array<string, mixed>>
-     */
-    protected function mapTreeForSite(
-        array $branches,
-        string $targetSiteHandle,
-        string $sourceLocale,
-        string $destLocale,
-    ): array {
-        $out = [];
-        foreach ($branches as $branch) {
-            $mapped = $this->mapBranchForSite($branch, $targetSiteHandle, $sourceLocale, $destLocale);
-            if ($mapped !== null) {
-                $out[] = $mapped;
-            }
+        if (! ($res['success'] ?? false)) {
+            throw new \RuntimeException($res['error'] ?? __('Translation failed.'));
         }
 
-        return $out;
-    }
+        // Keep the full per-page outcome (incl. linked entries the
+        // translator auto-created) so the CP can render one progress
+        // row per translated page, exactly like entry translations.
+        $page = [
+            'source_entry_id' => (string) $sourceRoot->id(),
+            'entry_id' => $res['entry_id'] ?? null,
+            'origin_title' => $res['origin_title'] ?? EntryLabel::for($sourceRoot),
+            'target_title' => $res['target_title'] ?? null,
+            'edit_url' => $res['edit_url'] ?? null,
+            'linked_entries' => $res['linked_entries'] ?? [],
+        ];
 
-    /**
-     * @param  array<string, mixed>  $branch
-     * @return array<string, mixed>|null
-     */
-    protected function mapBranchForSite(
-        array $branch,
-        string $targetSiteHandle,
-        string $sourceLocale,
-        string $destLocale,
-    ): ?array {
-        $copy = $branch;
-
-        unset($copy['id']);
-
-        if (! empty($branch['entry'])) {
-            $entry = EntryFacade::find($branch['entry']);
-            if (! $entry) {
-                throw new \RuntimeException(__('Navigation references a missing entry (:id).', ['id' => $branch['entry']]));
-            }
-            $root = $entry->root();
-            $localized = $this->localizationForSite($root, $targetSiteHandle);
-            if ($localized === null) {
-                throw new \RuntimeException(
-                    __('No localized page for ":title" in the target site. Run translation for that page first.', [
-                        'title' => EntryLabel::for($root),
-                    ])
-                );
-            }
-            $copy['entry'] = $localized->id();
-            unset($copy['title']);
-            $localizedTitle = $localized->value('title');
-            if (is_string($localizedTitle) && $localizedTitle !== '') {
-                $copy['title'] = $localizedTitle;
-            }
-        } elseif (! empty($branch['url'])) {
-            // Custom / external URL: keep URL; translate label for the target locale.
-            if (isset($copy['title']) && is_string($copy['title']) && trim($copy['title']) !== '') {
-                $copy['title'] = $this->deepl->translateText($copy['title'], $sourceLocale, $destLocale);
-            }
+        if ($onPage) {
+            $onPage('completed', $page);
         }
 
-        if (! empty($branch['children']) && is_array($branch['children'])) {
-            $copy['children'] = $this->mapTreeForSite($branch['children'], $targetSiteHandle, $sourceLocale, $destLocale);
-        }
-
-        return $copy;
-    }
-
-    protected function localizationForSite(Entry $root, string $targetSiteHandle): ?Entry
-    {
-        if ($root->locale() === $targetSiteHandle) {
-            return $root;
-        }
-
-        return $root->in($targetSiteHandle);
-    }
-
-    protected function resolveRootInSite(Entry $root, string $siteHandle): ?Entry
-    {
-        if ($root->locale() === $siteHandle) {
-            return $root;
-        }
-
-        return $root->in($siteHandle);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $branches
-     * @return array<int, string>
-     */
-    protected function collectEntryIdsFromBranches(array $branches): array
-    {
-        $ids = [];
-        foreach ($branches as $branch) {
-            if (! empty($branch['entry'])) {
-                $ids[] = $branch['entry'];
-            }
-            if (! empty($branch['children']) && is_array($branch['children'])) {
-                $ids = array_merge($ids, $this->collectEntryIdsFromBranches($branch['children']));
-            }
-        }
-
-        return array_values(array_unique($ids));
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $branches
-     */
-    protected function countBranches(array $branches): int
-    {
-        $n = count($branches);
-        foreach ($branches as $branch) {
-            if (! empty($branch['children']) && is_array($branch['children'])) {
-                $n += $this->countBranches($branch['children']);
-            }
-        }
-
-        return $n;
+        return [$page, EntryLabel::for($sourceRoot)];
     }
 }

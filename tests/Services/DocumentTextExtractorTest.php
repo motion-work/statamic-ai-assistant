@@ -2,9 +2,9 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use Illuminate\Http\UploadedFile;
 use MotionWork\StatamicAiAssistant\Services\DocumentTextExtractor;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Http\UploadedFile;
 
 class DocumentTextExtractorTest extends TestCase
 {

@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Mcp;
 
+use Illuminate\Support\Facades\Cache;
 use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Statamic\Facades\User;
@@ -104,12 +105,12 @@ class McpHttpTest extends TestCase
         $oauth = $this->app->make(McpOAuth::class);
 
         $shared = $oauth->registerClient([$callback]);
-        \Illuminate\Support\Facades\Cache::flush();
+        Cache::flush();
         $this->assertNull($oauth->redirectHost($shared['client_id'], $callback), 'In the default store a cache:clear signs the app out.');
 
         config(['cache.stores.mcp_test' => ['driver' => 'array'], 'statamic-ai-assistant.mcp_cache_store' => 'mcp_test']);
         $own = $oauth->registerClient([$callback]);
-        \Illuminate\Support\Facades\Cache::flush();
+        Cache::flush();
         $this->assertSame('claude.ai', $oauth->redirectHost($own['client_id'], $callback));
     }
 

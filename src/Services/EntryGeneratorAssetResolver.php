@@ -2,7 +2,6 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use Illuminate\Support\Collection;
 use Statamic\Assets\Asset as StatamicAsset;
 use Statamic\Contracts\Assets\Asset as AssetContract;
@@ -12,155 +11,6 @@ use Statamic\Fields\Field;
 
 class EntryGeneratorAssetResolver
 {
-    /** @var array<int, string> */
-    private const RECURSIVE_CONTAINER_TYPES = ['replicator', 'components', 'grid'];
-
-    /**
-     * Fill every assets field in the blueprint tree (groups, replicator sets, grids)
-     * when the value is empty. Assets are drawn from $preferred first (downloaded
-     * by the save_remote_image tool), then from random paths in the field's container.
-     *
-     * @param  array<string, mixed>  $data
-     * @param  array<string, mixed>  $displayData
-     */
-    public function fillAssetFieldsWithRandom(array &$data, array &$displayData, Blueprint $blueprint, array &$warnings, ?PreferredAssetPaths $preferred = null): void
-    {
-        foreach ($blueprint->fields()->all() as $field) {
-            $this->fillAssetsForField($field, $data, $displayData, $warnings, $preferred);
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $data
-     * @param  array<string, mixed>  $displayData
-     */
-    private function fillAssetsForField(Field $field, array &$data, array &$displayData, array &$warnings, ?PreferredAssetPaths $preferred): void
-    {
-        $handle = $field->handle();
-        $type = $field->type();
-
-        if ($type === 'section') {
-            return;
-        }
-
-        if ($type === 'assets') {
-            $this->fillSingleAssetField($field, $data, $displayData, $warnings, $preferred);
-
-            return;
-        }
-
-        if ($type === 'group') {
-            if (! isset($data[$handle]) || ! is_array($data[$handle])) {
-                $data[$handle] = [];
-            }
-            if (! isset($displayData[$handle]) || ! is_array($displayData[$handle])) {
-                $displayData[$handle] = $data[$handle];
-            }
-
-            foreach ($field->fieldtype()->fields()->all() as $child) {
-                $this->fillAssetsForField($child, $data[$handle], $displayData[$handle], $warnings, $preferred);
-            }
-
-            return;
-        }
-
-        if (in_array($type, self::RECURSIVE_CONTAINER_TYPES, true)) {
-            if (! isset($data[$handle]) || ! is_array($data[$handle])) {
-                return;
-            }
-            if (! isset($displayData[$handle]) || ! is_array($displayData[$handle])) {
-                $displayData[$handle] = $data[$handle];
-            }
-
-            $fieldtype = $field->fieldtype();
-
-            foreach ($data[$handle] as $idx => &$row) {
-                if (! is_array($row)) {
-                    continue;
-                }
-
-                if (! isset($displayData[$handle][$idx]) || ! is_array($displayData[$handle][$idx])) {
-                    $displayData[$handle][$idx] = $row;
-                }
-
-                if ($type === 'grid') {
-                    $subfields = $fieldtype->fields();
-
-                    foreach ($subfields->all() as $child) {
-                        $this->fillAssetsForField($child, $row, $displayData[$handle][$idx], $warnings, $preferred);
-                    }
-
-                    continue;
-                }
-
-                $setType = $row['type'] ?? null;
-
-                if (! $setType) {
-                    continue;
-                }
-
-                try {
-                    $setFields = $fieldtype->fields($setType);
-                } catch (\Exception) {
-                    continue;
-                }
-
-                foreach ($setFields->all() as $child) {
-                    $this->fillAssetsForField($child, $row, $displayData[$handle][$idx], $warnings, $preferred);
-                }
-            }
-            unset($row);
-
-            return;
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $data
-     * @param  array<string, mixed>  $displayData
-     */
-    private function fillSingleAssetField(Field $field, array &$data, array &$displayData, array &$warnings, ?PreferredAssetPaths $preferred): void
-    {
-        $handle = $field->handle();
-
-        $current = $data[$handle] ?? null;
-
-        $empty = $current === null || $current === '' || $current === [];
-
-        if (! $empty) {
-            return;
-        }
-
-        $config = $field->config();
-        $maxFiles = max(1, (int) ($config['max_files'] ?? 1));
-        $minFiles = max(0, (int) ($config['min_files'] ?? 0));
-        $count = max($maxFiles, $minFiles);
-
-        $picked = [];
-
-        // Drain matching downloaded paths first so migrated entries actually
-        // reference the page's own images instead of random container assets.
-        $containerHandle = $this->resolveContainerHandle($field);
-        if ($preferred !== null && is_string($containerHandle) && $containerHandle !== '') {
-            $picked = $preferred->takeForContainer($containerHandle, $count);
-        }
-
-        if (count($picked) < $count) {
-            $remaining = $count - count($picked);
-            $randomPaths = $this->pickRandomPathsForField($field, $warnings);
-            $picked = array_merge($picked, array_slice($randomPaths, 0, $remaining));
-        }
-
-        if ($picked === []) {
-            return;
-        }
-
-        $value = $maxFiles === 1 ? $picked[0] : array_slice($picked, 0, $maxFiles);
-
-        $data[$handle] = $value;
-        $displayData[$handle] = $value;
-    }
-
     /**
      * Handle of the first assets-field container found anywhere in the blueprint
      * tree (top-level fields, groups, replicator/components sets, grids). Used to
@@ -183,67 +33,46 @@ class EntryGeneratorAssetResolver
 
     private function findAssetContainerInField(Field $field): ?string
     {
-        $type = $field->type();
-
-        if ($type === 'assets') {
+        if ($field->type() === 'assets') {
             $handle = $this->resolveContainerHandle($field);
 
             return is_string($handle) && $handle !== '' ? $handle : null;
         }
 
-        if ($type === 'group') {
-            foreach ($field->fieldtype()->fields()->all() as $child) {
-                $handle = $this->findAssetContainerInField($child);
+        foreach ($this->nestedFields($field) as $child) {
+            $handle = $this->findAssetContainerInField($child);
 
-                if ($handle !== null) {
-                    return $handle;
-                }
+            if ($handle !== null) {
+                return $handle;
             }
-
-            return null;
-        }
-
-        if (in_array($type, self::RECURSIVE_CONTAINER_TYPES, true)) {
-            $fieldtype = $field->fieldtype();
-
-            if ($type === 'grid') {
-                foreach ($fieldtype->fields()->all() as $child) {
-                    $handle = $this->findAssetContainerInField($child);
-
-                    if ($handle !== null) {
-                        return $handle;
-                    }
-                }
-
-                return null;
-            }
-
-            foreach ($fieldtype->flattenedSetsConfig() as $setHandle => $setConfig) {
-                try {
-                    $setFields = $fieldtype->fields($setHandle);
-                } catch (\Exception) {
-                    continue;
-                }
-
-                foreach ($setFields->all() as $child) {
-                    $handle = $this->findAssetContainerInField($child);
-
-                    if ($handle !== null) {
-                        return $handle;
-                    }
-                }
-            }
-
-            return null;
         }
 
         return null;
     }
 
     /**
+     * A group's fields, a grid's row fields, or every set's fields in order.
+     *
+     * @return iterable<Field>
+     */
+    private function nestedFields(Field $field): iterable
+    {
+        $type = $field->type();
+
+        if ($type === 'group' || $type === 'grid') {
+            yield from $field->fieldtype()->fields()->all();
+        } elseif (in_array($type, FieldTypes::RECURSIVE_TYPES, true)) {
+            $fieldtype = $field->fieldtype();
+            foreach ($fieldtype->flattenedSetsConfig() as $setHandle => $setConfig) {
+                yield from $fieldtype->fields($setHandle)->all();
+            }
+        }
+    }
+
+    /**
      * @return array<int, string>
      */
-    private function pickRandomPathsForField(Field $field, array &$warnings): array
+    public function pickRandomPathsForField(Field $field, array &$warnings): array
     {
         $config = $field->config();
         $maxFiles = max(1, (int) ($config['max_files'] ?? 1));
@@ -317,7 +146,7 @@ class EntryGeneratorAssetResolver
      * min_files config. Single-file fields return a string path; multi-file
      * fields return an array of paths. Returns null when the container has no
      * candidates. Used by the AI agent UPDATE flow as a safe alternative to
-     * fillAssetFieldsWithRandom (which iterates the whole blueprint and would
+     * AssetFieldFiller::fillEmpty() (which iterates the whole blueprint and would
      * over-fill nested fields the user did not ask about).
      */
     public function pickReplacementForField(Field $field, array &$warnings, ?PreferredAssetPaths $preferred = null): mixed
@@ -361,7 +190,7 @@ class EntryGeneratorAssetResolver
      * through here fixes that for EVERY assets field in the blueprint tree
      * (top-level, groups, replicator/components sets, grids) — not one section.
      */
-    private function resolveContainerHandle(Field $field): ?string
+    public function resolveContainerHandle(Field $field): ?string
     {
         $handle = $field->config()['container'] ?? null;
 

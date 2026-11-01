@@ -60,13 +60,10 @@ class ReadNavTreeTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
-
-        $args = is_array($args) ? $args : [];
         $wantHandle = isset($args['handle']) && is_string($args['handle']) ? trim($args['handle']) : '';
         $site = isset($args['site']) && is_string($args['site']) ? trim($args['site']) : '';
         $maxDepth = isset($args['max_depth']) && is_numeric($args['max_depth'])
@@ -201,8 +198,10 @@ class ReadNavTreeTool implements ChatTool
                 $url = $entry->url();
             }
 
+            $fallbackTitle = $url ?: '(untitled)';
+
             $node = array_filter([
-                'title' => $title !== '' ? $title : ($url ?: '(untitled)'),
+                'title' => $title !== '' ? $title : $fallbackTitle,
                 'url' => $url,
                 'entry_id' => $entryId,
             ], fn ($v) => $v !== null);

@@ -2,8 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Support;
 
-use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 
 /**
  * Decorate planner-emitted plan rows with a stable id and human collection / blueprint titles.
@@ -24,24 +24,6 @@ class PlanEntryDecorator
     public function decorateOne(array $entry): array
     {
         return $this->buildDecorated($entry, $this->buildTitleMap($this->generator->getCollectionsCatalog()));
-    }
-
-    /**
-     * Decorate a list of plan rows (used by the controller for the non-agentic single entry).
-     *
-     * @param  array<int, array{collection: string, blueprint: string, prompt: string, label: string}>  $entries
-     * @return array<int, array{id: string, collection: string, blueprint: string, prompt: string, label: string, collection_title: string, blueprint_title: string}>
-     */
-    public function decorateMany(array $entries): array
-    {
-        $titleMap = $this->buildTitleMap($this->generator->getCollectionsCatalog());
-
-        $decorated = [];
-        foreach ($entries as $entry) {
-            $decorated[] = $this->buildDecorated($entry, $titleMap);
-        }
-
-        return $decorated;
     }
 
     /**

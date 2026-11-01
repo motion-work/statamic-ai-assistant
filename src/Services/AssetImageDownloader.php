@@ -6,6 +6,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Support\AssetUrl;
 use Statamic\Facades\AssetContainer;
 
 /**
@@ -78,7 +79,7 @@ class AssetImageDownloader
                 $existing = $container->asset($tentativePath) ?? $container->makeAsset($tentativePath);
                 $this->backfillAlt($existing, $altContext);
 
-                return ['path' => $tentativePath, 'public_url' => $this->safeUrl($existing)];
+                return ['path' => $tentativePath, 'public_url' => AssetUrl::relative($existing)];
             }
 
             $response = Http::timeout($timeout)
@@ -127,7 +128,7 @@ class AssetImageDownloader
 
             @unlink($tmp);
 
-            return ['path' => $path, 'public_url' => $this->safeUrl($asset)];
+            return ['path' => $path, 'public_url' => AssetUrl::relative($asset)];
         } catch (\Throwable $e) {
             Log::notice('Asset image download failed', [
                 'url' => $url,
@@ -185,16 +186,5 @@ class AssetImageDownloader
         $hash = substr(md5($url), 0, 8);
 
         return $base.'-'.$hash.'.'.$ext;
-    }
-
-    private function safeUrl($asset): ?string
-    {
-        try {
-            $url = $asset->url();
-
-            return is_string($url) && $url !== '' ? $url : null;
-        } catch (\Throwable) {
-            return null;
-        }
     }
 }

@@ -4,6 +4,7 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Support\YamlFile;
 use Statamic\Facades\Site;
 use Statamic\Facades\YAML;
 
@@ -282,20 +283,7 @@ class TranslationGlossaryService
             return $this->cache;
         }
 
-        $path = $this->storagePath();
-
-        if (! is_file($path)) {
-            return $this->cache = ['glossary_id' => null, 'entries' => []];
-        }
-
-        try {
-            $raw = (string) file_get_contents($path);
-            $parsed = $raw !== '' ? YAML::parse($raw) : [];
-        } catch (\Throwable $e) {
-            Log::warning('Failed to parse translation-glossary.yaml', ['error' => $e->getMessage()]);
-
-            return $this->cache = ['glossary_id' => null, 'entries' => []];
-        }
+        $parsed = YamlFile::read($this->storagePath());
 
         $glossaryId = isset($parsed['glossary_id']) && is_string($parsed['glossary_id']) && trim($parsed['glossary_id']) !== ''
             ? trim($parsed['glossary_id'])

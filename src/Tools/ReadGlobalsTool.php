@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools;
 
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Str;
 use Statamic\Facades\GlobalSet;
 use Statamic\Facades\Site;
@@ -52,13 +53,10 @@ class ReadGlobalsTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
-
-        $args = is_array($args) ? $args : [];
         $wantHandle = isset($args['handle']) && is_string($args['handle']) ? trim($args['handle']) : '';
         $site = isset($args['site']) && is_string($args['site']) ? trim($args['site']) : '';
 
@@ -137,7 +135,7 @@ class ReadGlobalsTool implements ChatTool
             return Str::limit($value, 600);
         }
 
-        if ($value instanceof \Illuminate\Contracts\Support\Arrayable) {
+        if ($value instanceof Arrayable) {
             $value = $value->toArray();
         }
 

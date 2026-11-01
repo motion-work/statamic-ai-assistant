@@ -2,10 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Tools;
 
+use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use MotionWork\StatamicAiAssistant\Services\RemoteImageFetcher;
 use MotionWork\StatamicAiAssistant\Support\HostAllowlist;
-use Illuminate\Support\Str;
 
 /**
  * ChatTool adapter over RemoteImageFetcher's save_remote_image capability. Pulls

@@ -2,10 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\DeeplService;
-use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use MotionWork\StatamicAiAssistant\Services\DeeplService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class LlmTranslationFallbackTest extends TestCase
 {

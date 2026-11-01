@@ -2,10 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use Illuminate\Support\Facades\Http;
 use MotionWork\StatamicAiAssistant\Services\HtmlReadableExtractor;
 use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Http;
 
 class PromptUrlFetcherTest extends TestCase
 {

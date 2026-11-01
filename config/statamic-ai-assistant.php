@@ -1,5 +1,7 @@
 <?php
 
+use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
+
 return [
 
     /*
@@ -590,7 +592,7 @@ return [
         // The default lives on PromptUrlFetcher so code and config can't drift.
         'remove_selector' => env(
             'STATAMIC_AI_ASSISTANT_REMOVE_SELECTOR',
-            \MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher::DEFAULT_REMOVE_SELECTOR,
+            PromptUrlFetcher::DEFAULT_REMOVE_SELECTOR,
         ),
 
         // Fetch order for reading a page. By default the Jina reader is tried

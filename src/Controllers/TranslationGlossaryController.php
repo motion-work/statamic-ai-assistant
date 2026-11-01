@@ -2,12 +2,12 @@
 
 namespace MotionWork\StatamicAiAssistant\Controllers;
 
-use MotionWork\StatamicAiAssistant\Services\DeeplService;
-use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
-use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Services\DeeplService;
+use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
+use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
 

@@ -2,7 +2,6 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -320,6 +319,32 @@ class PromptUrlFetcher
      */
     public function executeChatTool(string $argumentsJson, ?callable $onStreamToken, array &$warningsOut): string
     {
+        $parsed = $this->parseToolArguments($argumentsJson);
+        if (is_string($parsed)) {
+            return $parsed;
+        }
+        [$url, $reason, $scope] = $parsed;
+
+        if ($onStreamToken) {
+            $onStreamToken("\n\n[".__('Fetching: :url', ['url' => $url])." — {$reason}]\n\n");
+        }
+
+        $result = $this->fetchSingle($url, $scope);
+
+        if (! $result['ok']) {
+            return $this->failedFetch($url, $reason, $result['error'] ?? __('unavailable or blocked'), $warningsOut);
+        }
+
+        return $this->fetchedContent($url, $reason, $result);
+    }
+
+    /**
+     * [url, reason, scope], or the JSON error the model gets for bad arguments.
+     *
+     * @return array{0: string, 1: string, 2: string}|string
+     */
+    private function parseToolArguments(string $argumentsJson): array|string
+    {
         try {
             $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
@@ -355,34 +380,38 @@ class PromptUrlFetcher
             ], JSON_UNESCAPED_UNICODE);
         }
 
-        if ($onStreamToken) {
-            $onStreamToken("\n\n[".__('Fetching: :url', ['url' => $url])." — {$reason}]\n\n");
-        }
+        return [$url, $reason, $scope];
+    }
 
-        $result = $this->fetchSingle($url, $scope);
+    /**
+     * @param  array<int, string>  $warningsOut
+     */
+    private function failedFetch(string $url, string $reason, string $err, array &$warningsOut): string
+    {
+        Log::warning('[entry-gen-tool] fetch failed', [
+            'url' => $url,
+            'reason' => $reason,
+            'error' => $err,
+        ]);
 
-        if (! $result['ok']) {
-            $err = $result['error'] ?? __('unavailable or blocked');
+        $warningsOut[] = __('Could not fetch :url: :reason', [
+            'url' => $url,
+            'reason' => $err,
+        ]);
 
-            Log::warning('[entry-gen-tool] fetch failed', [
-                'url' => $url,
-                'reason' => $reason,
-                'error' => $err,
-            ]);
+        return json_encode([
+            'ok' => false,
+            'url' => $url,
+            'reason_echo' => $reason,
+            'error' => $err,
+        ], JSON_UNESCAPED_UNICODE);
+    }
 
-            $warningsOut[] = __('Could not fetch :url: :reason', [
-                'url' => $url,
-                'reason' => $err,
-            ]);
-
-            return json_encode([
-                'ok' => false,
-                'url' => $url,
-                'reason_echo' => $reason,
-                'error' => $err,
-            ], JSON_UNESCAPED_UNICODE);
-        }
-
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function fetchedContent(string $url, string $reason, array $result): string
+    {
         $maxChars = max(500, (int) config('statamic-ai-assistant.prompt_url_fetch.max_chars_per_url', 12000));
         $body = Str::limit($result['body'], $maxChars);
         $headline = ! empty($result['headline']) ? (string) $result['headline'] : null;

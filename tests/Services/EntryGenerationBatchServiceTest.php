@@ -2,10 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
+use Illuminate\Support\Facades\Cache;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
-use Illuminate\Support\Facades\Cache;
 
 class EntryGenerationBatchServiceTest extends TestCase
 {
@@ -24,13 +24,6 @@ class EntryGenerationBatchServiceTest extends TestCase
             'default',
             null,
             'Create one entry per article on https://example.com/news',
-            true,
-            [
-                'appendix' => '',
-                'warnings' => [],
-                'preferred' => new PreferredAssetPaths,
-                'appended_to_prompts' => false,
-            ],
         );
 
         $snap = $this->batch->snapshotForProgress($sid);
@@ -80,8 +73,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_add_planned_entry_appends_and_respects_cap_and_duplicates(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
 
         $row = fn (string $id, string $label = 'A') => [
@@ -112,9 +106,12 @@ class EntryGenerationBatchServiceTest extends TestCase
     private function initSession(string $prompt = 'Write the contact page.', ?int $cap = null): string
     {
         return $this->batch->initPlanningSession(
-            'default', null, $prompt, true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
-            null, null, $cap,
+            'default',
+            null,
+            $prompt,
+            null,
+            null,
+            $cap,
         );
     }
 
@@ -231,8 +228,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_init_planning_session_persists_resolved_entry_cap(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
             null,
             null,
             1,
@@ -244,8 +242,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_init_planning_session_defaults_entry_cap_to_null(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
 
         $this->assertNull($this->batch->getSession($sid)['max_plan_entries']);
@@ -254,8 +253,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_add_planned_entry_rejected_after_cancel(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
 
         $this->batch->cancelSession($sid);
@@ -278,8 +278,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_planning_status_gates_completion(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
 
         // Before any entry is added, the session must NOT auto-complete just because
@@ -314,8 +315,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_mark_planning_failed_records_error_and_exposes_in_snapshot(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
 
         $this->batch->markPlanningFailed($sid, 'Cannot proceed: ambiguous request.');
@@ -330,8 +332,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_append_planner_warning_collects_unique_lines(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
 
         $this->batch->appendPlannerWarning($sid, 'fetch limit reached');
@@ -345,8 +348,9 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_cancel_session(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths, 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
 
         $this->batch->cancelSession($sid);
@@ -356,9 +360,11 @@ class EntryGenerationBatchServiceTest extends TestCase
     public function test_full_entry_lifecycle_with_streaming_delta(): void
     {
         $sid = $this->batch->initPlanningSession(
-            'default', null, 'p', true,
-            ['appendix' => '', 'warnings' => [], 'preferred' => new PreferredAssetPaths(['container' => 'images', 'path' => 'hero.jpg']), 'appended_to_prompts' => false],
+            'default',
+            null,
+            'p',
         );
+        $this->batch->appendPreferredAssetPaths($sid, (new PreferredAssetPaths(['container' => 'images', 'path' => 'hero.jpg']))->remainingEntries());
 
         $this->batch->addPlannedEntry($sid, [
             'id' => 'entry-uuid-1',

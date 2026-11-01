@@ -2,10 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
-use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
-use MotionWork\StatamicAiAssistant\Tests\TestCase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
+use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class QuickTaskThinkingTest extends TestCase
 {

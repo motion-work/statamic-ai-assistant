@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Tools;
 
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Statamic\Facades\AssetContainer;
 
 /**
@@ -46,27 +47,15 @@ class ListAssetsTool implements ChatTool
 
     public function handle(string $argumentsJson, ToolContext $context): array
     {
-        try {
-            $args = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return ['ok' => false, 'error' => 'invalid_arguments_json'];
-        }
-
-        if (! is_array($args)) {
-            return ['ok' => false, 'error' => 'invalid_arguments_shape'];
+        $args = ToolArguments::decode($argumentsJson, $this->name());
+        if ($args === null) {
+            return ToolArguments::invalid();
         }
 
         $containerHandle = isset($args['container']) && is_string($args['container']) ? trim($args['container']) : '';
 
         if ($containerHandle === '') {
-            return [
-                'ok' => true,
-                'containers' => AssetContainer::all()->map(fn ($c) => [
-                    'handle' => (string) $c->handle(),
-                    'title' => (string) $c->title(),
-                    'folders' => collect($c->folders())->take(40)->map(fn ($f) => (string) $f)->values()->all(),
-                ])->values()->all(),
-            ];
+            return $this->listContainers();
         }
 
         $container = AssetContainer::findByHandle($containerHandle);
@@ -79,12 +68,7 @@ class ListAssetsTool implements ChatTool
 
         $context->reportActivity((string) __('Browsing assets in :target', ['target' => $containerHandle.($folder !== '' ? '/'.$folder : '')]));
 
-        $assets = $container->assets($folder !== '' ? $folder : '/', $recursive);
-
-        $search = isset($args['search']) && is_string($args['search']) ? mb_strtolower(trim($args['search'])) : '';
-        if ($search !== '') {
-            $assets = $assets->filter(fn ($asset) => str_contains(mb_strtolower($asset->basename()), $search))->values();
-        }
+        $assets = $this->folderAssets($container, $folder, $recursive, $args['search'] ?? null);
 
         $total = $assets->count();
 
@@ -93,6 +77,43 @@ class ListAssetsTool implements ChatTool
         // text?" and resorts to probing with update_asset writes.
         $metaFields = $container->blueprint()?->fields()->all()->keys()->values()->all() ?? [];
 
+        $rows = $this->assetRows($assets->take(self::MAX_ASSETS), $container, $metaFields, $context);
+
+        $result = [
+            'ok' => true,
+            'container' => $containerHandle,
+            'folder' => $folder,
+            'assets' => $rows,
+            'subfolders' => $this->folderNames($container->folders($folder !== '' ? $folder : '/')),
+            'meta_fields' => $metaFields,
+            'meta_note' => 'Each asset row includes its non-empty meta values under "meta". A handle absent from "meta" is EMPTY for that asset — answer read-only questions from this, never by writing.',
+        ];
+
+        if ($total > self::MAX_ASSETS) {
+            $result['note'] = 'Showing '.self::MAX_ASSETS." of {$total} assets — narrow the folder to see the rest.";
+        }
+
+        return $result;
+    }
+
+    private function folderAssets(mixed $container, string $folder, bool $recursive, mixed $search): Collection
+    {
+        $assets = $container->assets($folder !== '' ? $folder : '/', $recursive);
+
+        $search = is_string($search) ? mb_strtolower(trim($search)) : '';
+        if ($search !== '') {
+            $assets = $assets->filter(fn ($asset) => str_contains(mb_strtolower($asset->basename()), $search))->values();
+        }
+
+        return $assets;
+    }
+
+    /**
+     * @param  array<int, string>  $metaFields
+     * @return array<int, array<string, mixed>>
+     */
+    private function assetRows(Collection $assets, mixed $container, array $metaFields, ToolContext $context): array
+    {
         // Which assets already have a persisted .meta file (cached container
         // listing — one in-memory lookup, no per-asset I/O). We read meta ONLY
         // for those: calling ->get()/->meta() on an asset WITHOUT a meta file
@@ -104,7 +125,7 @@ class ListAssetsTool implements ChatTool
         // by filename and analyze_image reads content when it actually needs it.
         $existingMeta = $container->metaFiles();
 
-        $rows = $assets->take(self::MAX_ASSETS)->map(function ($asset) use ($metaFields, $existingMeta, $context) {
+        return $assets->map(function ($asset) use ($metaFields, $existingMeta, $context) {
             // Keep the stream/queue job alive and cancellable across a long
             // listing — there is no other checkpoint inside this single call.
             $context->heartbeat();
@@ -115,47 +136,59 @@ class ListAssetsTool implements ChatTool
                 'is_image' => (bool) $asset->isImage(),
             ];
 
-            if ($metaFields !== [] && $existingMeta->contains($asset->metaPath())) {
-                // One meta read per asset (reads the existing yaml, no
-                // generation), then pull handles from the in-memory data map —
-                // never a per-field ->get() that could regenerate.
-                $data = Arr::get($asset->meta(), 'data', []);
-                $meta = [];
-                foreach ($metaFields as $handle) {
-                    $value = is_array($data) ? ($data[$handle] ?? null) : null;
-                    if (is_string($value) && trim($value) !== '') {
-                        $meta[$handle] = $value;
-                    }
-                }
-                if ($meta !== []) {
-                    $row['meta'] = $meta;
-                }
+            $meta = $existingMeta->contains($asset->metaPath()) ? $this->storedMeta($asset, $metaFields) : [];
+            if ($meta !== []) {
+                $row['meta'] = $meta;
             }
 
             return $row;
         })->values()->all();
+    }
 
-        $subfolders = collect($container->folders($folder !== '' ? $folder : '/'))
-            ->take(40)
-            ->map(fn ($f) => (string) $f)
-            ->values()
-            ->all();
-
-        $result = [
+    /**
+     * @return array<string, mixed>
+     */
+    private function listContainers(): array
+    {
+        return [
             'ok' => true,
-            'container' => $containerHandle,
-            'folder' => $folder,
-            'assets' => $rows,
-            'subfolders' => $subfolders,
-            'meta_fields' => $metaFields,
-            'meta_note' => 'Each asset row includes its non-empty meta values under "meta". A handle absent from "meta" is EMPTY for that asset — answer read-only questions from this, never by writing.',
+            'containers' => AssetContainer::all()->map(fn ($c) => [
+                'handle' => (string) $c->handle(),
+                'title' => (string) $c->title(),
+                'folders' => $this->folderNames($c->folders()),
+            ])->values()->all(),
         ];
+    }
 
-        if ($total > self::MAX_ASSETS) {
-            $result['note'] = 'Showing '.self::MAX_ASSETS." of {$total} assets — narrow the folder to see the rest.";
+    /**
+     * @return array<int, string>
+     */
+    private function folderNames(iterable $folders): array
+    {
+        return collect($folders)->take(40)->map(fn ($f) => (string) $f)->values()->all();
+    }
+
+    /**
+     * Non-empty meta values of an asset that has a meta file. One meta read
+     * (the existing yaml, no generation), then handles are pulled from the
+     * in-memory data map — never a per-field ->get() that could regenerate.
+     *
+     * @param  array<int, string>  $metaFields
+     * @return array<string, string>
+     */
+    private function storedMeta($asset, array $metaFields): array
+    {
+        $data = $metaFields !== [] ? Arr::get($asset->meta(), 'data', []) : [];
+        $meta = [];
+
+        foreach ($metaFields as $handle) {
+            $value = is_array($data) ? ($data[$handle] ?? null) : null;
+            if (is_string($value) && trim($value) !== '') {
+                $meta[$handle] = $value;
+            }
         }
 
-        return $result;
+        return $meta;
     }
 
     public function maxCalls(): ?int

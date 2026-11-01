@@ -2,11 +2,12 @@
 
 namespace MotionWork\StatamicAiAssistant\Mcp;
 
-use MotionWork\StatamicAiAssistant\Support\ClaudeAccess;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Support\AssetUrl;
+use MotionWork\StatamicAiAssistant\Support\ClaudeAccess;
 use Statamic\Assets\AssetUploader;
 use Statamic\Contracts\Assets\Asset as AssetContract;
 use Statamic\Contracts\Auth\User as UserContract;
@@ -145,7 +146,7 @@ class ImageUploads
         $record['path'] = $path;
         Cache::put($this->key($id), $record, now()->addMinutes(self::TTL_MINUTES));
 
-        return ['uploaded' => true, 'container' => $container->handle(), 'path' => $path, 'url' => $this->publicUrl($asset)];
+        return ['uploaded' => true, 'container' => $container->handle(), 'path' => $path, 'url' => AssetUrl::absolute($asset)];
     }
 
     /**
@@ -171,7 +172,7 @@ class ImageUploads
             'uploaded' => true,
             'container' => $record['container'],
             'path' => $record['path'],
-            'url' => $asset ? $this->publicUrl($asset) : null,
+            'url' => $asset ? AssetUrl::absolute($asset) : null,
             'alt' => $record['alt'],
             'message' => 'Use the path as the value of the asset segment in preview_entry_edit, or as an assets field\'s value in preview_compose_entry.',
         ];
@@ -198,15 +199,6 @@ class ImageUploads
         }
 
         return $path;
-    }
-
-    private function publicUrl(AssetContract $asset): ?string
-    {
-        try {
-            return $asset->absoluteUrl();
-        } catch (\Throwable) {
-            return null;
-        }
     }
 
     private function key(string $id): string

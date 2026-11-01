@@ -1,6 +1,11 @@
 <?php
 
+use Illuminate\Support\Facades\Route;
 use MotionWork\StatamicAiAssistant\Controllers\AgentAccessController;
+use MotionWork\StatamicAiAssistant\Controllers\AgentPickerController;
+use MotionWork\StatamicAiAssistant\Controllers\AgentPreferenceController;
+use MotionWork\StatamicAiAssistant\Controllers\AgentSessionController;
+use MotionWork\StatamicAiAssistant\Controllers\BulkTranslationController;
 use MotionWork\StatamicAiAssistant\Controllers\EntryGeneratorController;
 use MotionWork\StatamicAiAssistant\Controllers\FigmaOAuthController;
 use MotionWork\StatamicAiAssistant\Controllers\SetHintsController;
@@ -8,7 +13,6 @@ use MotionWork\StatamicAiAssistant\Controllers\TranslationController;
 use MotionWork\StatamicAiAssistant\Controllers\TranslationGlossaryController;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
-use Illuminate\Support\Facades\Route;
 
 Route::prefix('ai-generate')->name('statamic-ai-assistant.generate.')
     ->middleware('can:'.AgentAccess::gateAbility('agent'))
@@ -19,20 +23,20 @@ Route::prefix('ai-generate')->name('statamic-ai-assistant.generate.')
             return view('statamic-ai-assistant::entry-generator');
         })->name('page');
 
-        Route::get('/collections', [EntryGeneratorController::class, 'collections'])->name('collections');
-        Route::get('/entry-search', [EntryGeneratorController::class, 'entrySearch'])->name('entry-search');
-        Route::get('/open-entry', [EntryGeneratorController::class, 'openEntry'])->name('open-entry');
-        Route::get('/asset-preview', [EntryGeneratorController::class, 'assetPreview'])->name('asset-preview');
-        Route::get('/asset-browser', [EntryGeneratorController::class, 'assetBrowser'])->name('asset-browser');
-        Route::get('/blueprint-fields', [EntryGeneratorController::class, 'blueprintFields'])->name('blueprint-fields');
+        Route::get('/collections', [AgentPickerController::class, 'collections'])->name('collections');
+        Route::get('/entry-search', [AgentPickerController::class, 'entrySearch'])->name('entry-search');
+        Route::get('/open-entry', [AgentPickerController::class, 'openEntry'])->name('open-entry');
+        Route::get('/asset-preview', [AgentPickerController::class, 'assetPreview'])->name('asset-preview');
+        Route::get('/asset-browser', [AgentPickerController::class, 'assetBrowser'])->name('asset-browser');
+        Route::get('/blueprint-fields', [AgentPickerController::class, 'blueprintFields'])->name('blueprint-fields');
         Route::post('/generate', [EntryGeneratorController::class, 'generate'])->name('generate');
-        Route::post('/generate-stream', [EntryGeneratorController::class, 'generateStream'])->name('generate-stream');
-        Route::get('/generate-progress/{sessionId}', [EntryGeneratorController::class, 'generateBatchProgress'])->name('generate-progress');
-        Route::post('/generate-cancel/{sessionId}', [EntryGeneratorController::class, 'generateBatchCancel'])->name('generate-cancel');
-        Route::post('/generate-continue/{sessionId}', [EntryGeneratorController::class, 'generateContinue'])->name('generate-continue');
-        Route::post('/generate-resume', [EntryGeneratorController::class, 'generateResume'])->name('generate-resume');
-        Route::get('/advanced-tools', [EntryGeneratorController::class, 'advancedToolsPreference'])->name('advanced-tools');
-        Route::post('/advanced-tools', [EntryGeneratorController::class, 'saveAdvancedToolsPreference'])->name('advanced-tools.save');
+        Route::post('/generate-stream', [AgentSessionController::class, 'generateStream'])->name('generate-stream');
+        Route::get('/generate-progress/{sessionId}', [AgentSessionController::class, 'generateBatchProgress'])->name('generate-progress');
+        Route::post('/generate-cancel/{sessionId}', [AgentSessionController::class, 'generateBatchCancel'])->name('generate-cancel');
+        Route::post('/generate-continue/{sessionId}', [AgentSessionController::class, 'generateContinue'])->name('generate-continue');
+        Route::post('/generate-resume', [AgentSessionController::class, 'generateResume'])->name('generate-resume');
+        Route::get('/advanced-tools', [AgentPreferenceController::class, 'advancedToolsPreference'])->name('advanced-tools');
+        Route::post('/advanced-tools', [AgentPreferenceController::class, 'saveAdvancedToolsPreference'])->name('advanced-tools.save');
         Route::post('/create-entry', [EntryGeneratorController::class, 'createEntry'])->name('create-entry');
         Route::post('/regenerate-field', [EntryGeneratorController::class, 'regenerateField'])->name('regenerate-field');
     });
@@ -50,11 +54,11 @@ Route::prefix('ai-block-hints')->name('statamic-ai-assistant.block-hints.')
         Route::post('/save', [SetHintsController::class, 'save'])->name('save');
         Route::post('/generate', [SetHintsController::class, 'generate'])->name('generate');
 
-    Route::get('/figma/status', [FigmaOAuthController::class, 'status'])->name('figma.status');
-    Route::get('/figma/connect', [FigmaOAuthController::class, 'connect'])->name('figma.connect');
-    Route::get('/figma/callback', [FigmaOAuthController::class, 'callback'])->name('figma.callback');
-    Route::post('/figma/disconnect', [FigmaOAuthController::class, 'disconnect'])->name('figma.disconnect');
-});
+        Route::get('/figma/status', [FigmaOAuthController::class, 'status'])->name('figma.status');
+        Route::get('/figma/connect', [FigmaOAuthController::class, 'connect'])->name('figma.connect');
+        Route::get('/figma/callback', [FigmaOAuthController::class, 'callback'])->name('figma.callback');
+        Route::post('/figma/disconnect', [FigmaOAuthController::class, 'disconnect'])->name('figma.disconnect');
+    });
 
 // "Who has access" — dedicated settings screen, super-admins only.
 Route::prefix('ai-agent-access')->name('statamic-ai-assistant.access.')
@@ -98,11 +102,11 @@ Route::prefix('ai-translations')->name('statamic-ai-assistant.')->group(function
             return view('statamic-ai-assistant::translations');
         })->name('translations');
 
-        Route::post('/bulk', [TranslationController::class, 'translateBulk'])->name('translate.bulk');
-        Route::get('/collection-entries', [TranslationController::class, 'collectionEntries'])->name('translate.collection-entries');
-        Route::get('/taxonomy-terms', [TranslationController::class, 'taxonomyTerms'])->name('translate.taxonomy-terms');
-        Route::post('/term', [TranslationController::class, 'translateTerm'])->name('translate.term');
-        Route::get('/navigation-entries', [TranslationController::class, 'navigationEntries'])->name('translate.navigation-entries');
-        Route::post('/navigation-sync', [TranslationController::class, 'navigationSync'])->name('translate.navigation-sync');
+        Route::post('/bulk', [BulkTranslationController::class, 'translateBulk'])->name('translate.bulk');
+        Route::get('/collection-entries', [BulkTranslationController::class, 'collectionEntries'])->name('translate.collection-entries');
+        Route::get('/taxonomy-terms', [BulkTranslationController::class, 'taxonomyTerms'])->name('translate.taxonomy-terms');
+        Route::post('/term', [BulkTranslationController::class, 'translateTerm'])->name('translate.term');
+        Route::get('/navigation-entries', [BulkTranslationController::class, 'navigationEntries'])->name('translate.navigation-entries');
+        Route::post('/navigation-sync', [BulkTranslationController::class, 'navigationSync'])->name('translate.navigation-sync');
     });
 });
