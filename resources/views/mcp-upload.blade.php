@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex">
-    <title>{{ __('Upload an image for Claude') }}</title>
+    <title>{{ __('Upload a file for Claude') }}</title>
     <style>
         body { margin: 0; font: 16px/1.45 system-ui, sans-serif; background: #f4f4f5; color: #18181b; }
         main { max-width: 26rem; margin: 8vh auto; padding: 1.5rem; background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; }
@@ -23,20 +23,20 @@
 </head>
 <body>
 <main>
-    <h1>{{ __('Upload an image for Claude') }}</h1>
+    <h1>{{ __('Upload a file for Claude') }}</h1>
     @if ($record === null)
         <p class="error">{{ __('This upload link is unknown or has expired. Ask Claude for a new one.') }}</p>
     @elseif ($record['path'] !== null)
         <p class="done">{{ __('Uploaded as :path. You can go back to Claude and say it is done.', ['path' => $record['path']]) }}</p>
     @else
-        <p>{{ __('The image goes into :folder in the :container assets of :site. Claude then shows you where it will be placed before anything on a page changes.', ['folder' => $record['folder'] !== '' ? $record['folder'] : '/', 'container' => $record['container'], 'site' => $site]) }}</p>
+        <p>{{ __('The file goes into :folder in the :container assets of :site. Claude then shows you where it will be placed before anything on a page changes.', ['folder' => $record['folder'] !== '' ? $record['folder'] : '/', 'container' => $record['container'], 'site' => $site]) }}</p>
         <form id="upload">
             <label class="drop" id="drop">
                 <img id="preview" alt="" hidden>
-                <span id="label">{{ __('Drop the image here or choose a file.') }}</span>
-                <input type="file" name="file" id="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/svg+xml">
+                <span id="label">{{ __('Drop the file here or choose one.') }}</span>
+                <input type="file" name="file" id="file">
             </label>
-            <p class="hint">{{ __('One image, up to :size MB (JPG, PNG, GIF, WebP, AVIF or SVG).', ['size' => $maxMegabytes]) }}</p>
+            <p class="hint">{{ __('One file, up to :size MB. The asset container decides which types are allowed.', ['size' => $maxMegabytes]) }}</p>
             <p id="status" role="status"></p>
             <button type="submit" id="submit" disabled>{{ __('Upload') }}</button>
         </form>
@@ -55,8 +55,13 @@
                     if (!picked) return;
                     file = picked;
                     label.textContent = picked.name;
-                    preview.src = URL.createObjectURL(picked);
-                    preview.hidden = false;
+                    if (picked.type.startsWith('image/')) {
+                        preview.src = URL.createObjectURL(picked);
+                        preview.hidden = false;
+                    } else {
+                        preview.removeAttribute('src');
+                        preview.hidden = true;
+                    }
                     submit.disabled = false;
                     status.textContent = '';
                 };

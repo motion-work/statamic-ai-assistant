@@ -2,8 +2,10 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
+use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Support\LlmDate;
 use Statamic\Facades\Form;
+use Statamic\Facades\Site;
 use Statamic\Fields\Field;
 use Statamic\Fields\Fields;
 
@@ -29,6 +31,26 @@ final class ScalarValueMapper
         $text = is_string($value) ? $value : (string) $value;
 
         return strip_tags($this->aiService->cleanResult($text));
+    }
+
+    /**
+     * A slug field stores the hyphenated form, in the site's language, the
+     * way the Control Panel generates it.
+     *
+     * @param  array<int, string>  $warnings
+     */
+    public function mapSlugValue(mixed $value, Field $field, array &$warnings, string $siteHandle): ?string
+    {
+        if (! is_string($value) && ! is_scalar($value)) {
+            $this->warnNonScalarDrop($field, $warnings);
+
+            return null;
+        }
+
+        $lang = Site::get($siteHandle)?->lang() ?? app()->getLocale();
+        $slug = Str::slug(trim((string) $value), '-', $lang);
+
+        return $slug !== '' ? $slug : null;
     }
 
     public function mapMultipleChoiceValue(mixed $value, Field $field, array &$warnings): ?array

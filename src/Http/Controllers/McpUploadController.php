@@ -10,7 +10,7 @@ use MotionWork\StatamicAiAssistant\Mcp\ImageUploads;
 use Statamic\Facades\User;
 
 /**
- * The upload link from prepare_image_upload: a page to drop one image on, and
+ * The upload link from prepare_image_upload: a page to drop one file on, and
  * the endpoint it (or curl) posts to. The link itself is the credential.
  */
 class McpUploadController extends Controller

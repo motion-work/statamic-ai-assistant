@@ -90,7 +90,7 @@ class ClaudeImageMcpTest extends TestCase
         $this->assertStringStartsWith('https://cms.example/mcp/upload/', $prepared['upload_url']);
         $this->assertFalse($this->tool($editor, 'check_image_upload', ['upload_id' => $prepared['upload_id']])['uploaded']);
 
-        $this->get('/mcp/upload/'.$prepared['upload_id'])->assertOk()->assertSee('Upload an image for Claude');
+        $this->get('/mcp/upload/'.$prepared['upload_id'])->assertOk()->assertSee('Upload a file for Claude');
         $this->post('/mcp/upload/'.$prepared['upload_id'], ['file' => UploadedFile::fake()->image('IMG_0042.JPG', 40, 30)], ['Accept' => 'application/json'])
             ->assertCreated()
             ->assertJsonPath('path', 'hero/neues-hero.jpg');
@@ -155,7 +155,7 @@ class ClaudeImageMcpTest extends TestCase
         $prepared = $this->tool($editor, 'prepare_image_upload', ['folder' => 'hero']);
         $this->assertSame('assets', $prepared['container'], 'The only container the role may upload to is the default.');
 
-        $this->post('/mcp/upload/'.$prepared['upload_id'], ['file' => UploadedFile::fake()->create('notes.pdf', 10, 'application/pdf')], ['Accept' => 'application/json'])
+        $this->post('/mcp/upload/'.$prepared['upload_id'], ['file' => UploadedFile::fake()->create('notes.exe', 10, 'application/octet-stream')], ['Accept' => 'application/json'])
             ->assertStatus(422);
         $this->post('/mcp/upload/'.$prepared['upload_id'], ['file' => UploadedFile::fake()->image('alt.jpg')], ['Accept' => 'application/json'])
             ->assertCreated()
@@ -166,6 +166,19 @@ class ClaudeImageMcpTest extends TestCase
             ->assertStatus(409);
         $this->assertSame('expired', $this->tool($writer, 'check_image_upload', ['upload_id' => $prepared['upload_id']])['error'], 'Another account cannot read the upload.');
         $this->get('/mcp/upload/'.str_repeat('a', 40))->assertNotFound();
+    }
+
+    public function test_a_container_may_receive_a_glb_model(): void
+    {
+        config(['statamic.assets.additional_uploadable_extensions' => ['glb']]);
+        $editor = $this->serverAs($this->user('mcp-image', 'mcp_image_editor'));
+        $prepared = $this->tool($editor, 'prepare_image_upload', ['container' => 'assets', 'folder' => 'offerten/sideboard-ellen', 'filename' => 'sideboard-variante-b']);
+
+        $this->post('/mcp/upload/'.$prepared['upload_id'], [
+            'file' => UploadedFile::fake()->create('sideboard.glb', 20, 'model/gltf-binary'),
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('path', 'offerten/sideboard-ellen/sideboard-variante-b.glb');
     }
 
     public function test_an_editor_lists_the_files_of_a_folder(): void

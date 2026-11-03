@@ -125,6 +125,13 @@ final class FieldSchemaBuilder
         $instructions = $field->instructions();
         $siteHandle = $siteHandle ?? Site::current()?->handle() ?? Site::default()->handle();
 
+        // The entry address is the entry's slug, which composing generates
+        // from the title. A slug field with any other handle is content
+        // (a route segment such as client_slug) and is filled like text.
+        if ($type === 'slug' && $field->handle() === 'slug' && ! $insideReplicatorComponentsOrGridRow) {
+            return null;
+        }
+
         if ($insideReplicatorComponentsOrGridRow && $type === 'assets') {
             return $this->finalizeSchemaEntry($field, [
                 'label' => $display,

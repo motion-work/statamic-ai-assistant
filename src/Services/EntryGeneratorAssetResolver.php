@@ -142,6 +142,45 @@ class EntryGeneratorAssetResolver
     }
 
     /**
+     * A path named for an assets field, when the container's disk has that
+     * file and the field allows it. The field's folder is only a limit when
+     * the field restricts to it; otherwise it is where the Control Panel
+     * browser starts. Images and other files (a GLB, a PDF) both count.
+     * Returns null when this field cannot store that path.
+     */
+    public function usableAssetPath(Field $field, string $path): ?string
+    {
+        $path = ltrim(trim($path), '/');
+        $handle = $this->resolveContainerHandle($field);
+        if ($path === '' || str_contains($path, '..') || ! is_string($handle)) {
+            return null;
+        }
+
+        $container = AssetContainer::find($handle);
+        if (! $container) {
+            return null;
+        }
+
+        $prefix = $container->handle().'::';
+        if (str_starts_with($path, $prefix)) {
+            $path = ltrim(substr($path, strlen($prefix)), '/');
+        }
+        if ($path === '' || ! $container->disk()->exists($path) || $container->disk()->isDirectory($path)) {
+            return null;
+        }
+
+        $folder = $field->config()['folder'] ?? '';
+        if (($field->config()['restrict'] ?? false) === true && is_string($folder) && trim($folder, '/') !== '') {
+            $folder = trim($folder, '/');
+            if (! str_starts_with($path, $folder.'/')) {
+                return null;
+            }
+        }
+
+        return $path;
+    }
+
+    /**
      * Pick a replacement value for ONE asset field, respecting its max_files /
      * min_files config. Single-file fields return a string path; multi-file
      * fields return an array of paths. Returns null when the container has no

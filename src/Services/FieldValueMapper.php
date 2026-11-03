@@ -56,7 +56,7 @@ final class FieldValueMapper
             $handle = $field->handle();
             $type = $field->type();
 
-            if (! array_key_exists($handle, $parsedData)) {
+            if (! array_key_exists($handle, $parsedData) || ($type === 'slug' && $handle === 'slug')) {
                 continue;
             }
 
@@ -116,6 +116,7 @@ final class FieldValueMapper
         [['terms'], 'references', 'mapTermsFieldValue'],
         [['entries'], 'references', 'mapEntriesFieldValue'],
         [['form'], 'references', 'mapFormFieldValue'],
+        [['slug'], 'scalars', 'mapSlugValue'],
         [FieldTypes::RECURSIVE_TYPES, null, 'mapRecursiveValue'],
     ];
 

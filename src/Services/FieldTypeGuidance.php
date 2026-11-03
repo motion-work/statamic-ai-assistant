@@ -15,6 +15,7 @@ final class FieldTypeGuidance
      * instructions, for fieldtypes that need nothing else.
      */
     private const TYPE_GUIDANCE = [
+        'slug' => ['text', 'A URL slug: lowercase words separated by hyphens, as the Control Panel would generate it.'],
         'link' => ['link', 'Provide a full URL (https://...), a path starting with /, entry::UUID for an internal entry, asset::... for an asset, or @child when applicable.'],
         'video' => ['video_url', 'YouTube or video page URL (https://...) or empty string.'],
         'markdown' => ['markdown', 'Plain markdown string (**bold**, *italic*, [links](url), lists, ## headings). Do NOT return HTML tags or a JSON node tree — a string only.'],

@@ -17,10 +17,11 @@ use Statamic\Fields\Validator as FieldValidator;
 use Statamic\Rules\AllowedFile;
 
 /**
- * Images for the Claude connector. Claude cannot hand a chat attachment to a
- * tool, so a tool call opens an upload link for one image; the user (or
+ * Files for the Claude connector. Claude cannot hand a chat attachment to a
+ * tool, so a tool call opens an upload link for one file; the user (or
  * Claude's own sandbox) posts the file there, and Claude places the stored
- * path with a normal entry edit.
+ * path with a normal entry edit. The container decides the allowed types,
+ * the same way the Control Panel does, so a GLB model uploads like an image.
  *
  * The link is the credential: random, single-use, bound to the account that
  * asked for it, valid for 30 minutes. The account's "upload {container}
@@ -29,8 +30,6 @@ use Statamic\Rules\AllowedFile;
 class ImageUploads
 {
     private const TTL_MINUTES = 30;
-
-    private const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'svg'];
 
     /**
      * @return array<string, mixed>
@@ -97,7 +96,7 @@ class ImageUploads
     }
 
     /**
-     * Store the posted image as an asset, as the account that made the link.
+     * Store the posted file as an asset, as the account that made the link.
      * An existing file is never overwritten: the name gets a number instead.
      *
      * @return array<string, mixed>
@@ -121,7 +120,7 @@ class ImageUploads
         $rules = collect($container->validationRules())->map(fn ($rule) => FieldValidator::parse($rule))->all();
         $validator = Validator::make(['file' => $file], [
             'file' => array_merge(
-                ['required', 'file', new AllowedFile, 'mimes:'.implode(',', self::IMAGE_EXTENSIONS), 'max:'.(int) floor($this->maxBytes() / 1024)],
+                ['required', 'file', new AllowedFile, 'max:'.(int) floor($this->maxBytes() / 1024)],
                 $rules,
             ),
         ]);
@@ -162,7 +161,7 @@ class ImageUploads
             return [
                 'uploaded' => false,
                 'upload_url' => $this->url($id),
-                'message' => 'No image has arrived yet. Ask the user to open the link, drop the image there, and tell you when it is done.',
+                'message' => 'No file has arrived yet. Ask the user to open the link, drop the file there, and tell you when it is done.',
             ];
         }
 
