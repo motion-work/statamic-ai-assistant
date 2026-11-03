@@ -34,6 +34,8 @@ class ClaudeTranslationBridge
 
     public readonly AssetTools $assets;
 
+    public readonly AssetAltTools $assetAlts;
+
     public readonly ComposeBrief $brief;
 
     public readonly ComposeTools $compose;
@@ -55,6 +57,11 @@ class ClaudeTranslationBridge
         $this->edits = new EntryEditTools($this->context, $translator);
         $this->lifecycle = new EntryLifecycleTools($this->context);
         $this->assets = new AssetTools($this->context, $images);
+        $altMeta = new AssetAltMeta($this->context);
+        $this->assetAlts = new AssetAltTools(
+            new AssetAltReview($this->context, new AssetAltLocaleResolver, new AssetReviewThumbnail),
+            new AssetAltConfirmation($this->context, $altMeta),
+        );
         $this->brief = new ComposeBrief($this->context);
         $this->compose = new ComposeTools($this->context);
         $this->composeSave = new ComposeSaver($this->context);

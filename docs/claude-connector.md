@@ -26,7 +26,8 @@ Second, every tool follows Statamic's own policies for the actor, rechecked at s
 | translate | `view` on the source, `edit` on the localization; a new one is checked on the unsaved `makeLocalization()`, so access to the target site counts |
 | duplicate, compose new | `create` with `[Entry::class, $collection, $site]` |
 | publish / unpublish | `publish` |
-| list assets | `view` on the asset container (`view {container} assets`) |
+| list assets, review_images | `view` on the asset container (`view {container} assets`) |
+| preview/save asset alt text | `store` or `edit` on the asset (`upload {container} assets` is enough in most roles) |
 | image upload | `store` on the asset container (`upload {container} assets`), when the link is made and again on upload |
 | glossary, style rules | `GlossaryAccess` (`edit translation glossary` permission; super admins always) |
 
@@ -53,6 +54,7 @@ Claude cannot pass a chat attachment to a tool (it sees the picture, not its byt
 - The POST validates like the Control Panel (`AllowedFile`, the container's validation rules) plus images only and `image_fetch.max_bytes`, sets the alt text before `upload()` so the first save carries it, and runs as the link's account so asset events see it. A link takes one image; a second post gets 409. The path returned is `$asset->path()` after upload, because Statamic's uploader may lowercase the name or change the extension (source preset).
 - Uploading changes no page, so it has no preview/confirm of its own; placing the image is a normal entry edit with one. A name that exists gets `-2`, `-3`; the uploader adds a timestamp as a last resort, so nothing is ever overwritten.
 - `list_assets` lists one folder (files plus subfolders), or with a query searches file names below it; at most 100 files. URLs are returned once as `url_prefix` (container URL + path) instead of per file, which saves about a quarter of the result on an S3 container.
+- **Alt text on existing images:** `review_images` returns a batch (six at a time) with inline JPEG previews, the asset blueprint's locale→handle map (`alt`, `alt_fr`, …), current meta, and a copy brief. Claude writes the strings; the CMS never calls Infomaniak or DeepL. `preview_asset_alts` / `save_asset_alts` follow the usual confirmation token (edit level, plus store or edit on the container). Scope `missing` (default) skips assets that already have every requested handle filled.
 - In a host app whose `assets` disk is S3, a test upload lands in the real bucket: delete the asset again through Statamic after verifying.
 
 ## Composing and refactoring

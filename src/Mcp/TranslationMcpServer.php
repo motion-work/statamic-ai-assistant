@@ -26,6 +26,8 @@ class TranslationMcpServer
         'save_compose_entry' => 'edit',
         'prepare_image_upload' => 'edit',
         'check_image_upload' => 'edit',
+        'preview_asset_alts' => 'edit',
+        'save_asset_alts' => 'edit',
         'save_glossary' => 'edit',
         'save_style_rules' => 'edit',
         'set_published' => 'publish',
@@ -145,7 +147,7 @@ class TranslationMcpServer
                 'name' => 'statamic-ai-assistant-translations',
                 'version' => '3.x',
             ],
-            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. To build a new entry from a goal, or restructure an existing one, call get_content_model first and follow its brief (block descriptions, when-to-use rules, site instructions, glossary, style rules), get the fields of the chosen blocks with get_block_schemas, then preview_compose_entry and save_compose_entry. To put an image from the chat on a page, call prepare_image_upload (into the container and folder of the image field, or where the user says), let the user upload it through the link, call check_image_upload for its path, then set the asset segment with preview_entry_edit and save_entry_edit. list_assets shows what is in a folder of the asset library, for existing images too. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
+            'instructions' => 'You translate. The CMS does not call DeepL or Infomaniak for these tools. Read the entry, follow the glossary and style rules, translate every segment yourself, show preview_localization to the user, and call save_localization with confirmed true only after they agree. A localization stays linked to the source entry as its origin. To change the text of an existing entry in place, use preview_entry_edit and save_entry_edit the same way. To build a new entry from a goal, or restructure an existing one, call get_content_model first and follow its brief (block descriptions, when-to-use rules, site instructions, glossary, style rules), get the fields of the chosen blocks with get_block_schemas, then preview_compose_entry and save_compose_entry. To put an image from the chat on a page, call prepare_image_upload (into the container and folder of the image field, or where the user says), let the user upload it through the link, call check_image_upload for its path, then set the asset segment with preview_entry_edit and save_entry_edit. For alt text on library images, call review_images (you see each batch and write the strings yourself), then preview_asset_alts and save_asset_alts after the user agrees. list_assets shows what is in a folder of the asset library, for existing images too. duplicate_entry copies an entry and set_published publishes or unpublishes one; call them without confirmed first and show the result. The user\'s Control Panel role decides what they may read, edit, duplicate and publish.',
         ];
     }
 
@@ -161,6 +163,13 @@ class TranslationMcpServer
         $result = ClaudeAccess::allows($this->bridge->actor(), $level)
             ? $this->runTool($name, new McpArguments(is_array($params['arguments'] ?? null) ? $params['arguments'] : []))
             : ['error' => 'forbidden', 'message' => ClaudeAccess::denial($level).' Nothing was changed.'];
+
+        if (isset($result['_content_blocks']) && is_array($result['_content_blocks'])) {
+            return [
+                'content' => $result['_content_blocks'],
+                'isError' => isset($result['error']),
+            ];
+        }
 
         return [
             'content' => [[
@@ -194,6 +203,9 @@ class TranslationMcpServer
         'list_assets' => ['assets', 'listAssets', ['optional:container', 'optional:folder', 'optional:query']],
         'prepare_image_upload' => ['assets', 'prepareImageUpload', ['optional:container', 'optional:folder', 'optional:filename', 'optional:alt']],
         'check_image_upload' => ['assets', 'checkImageUpload', ['string:upload_id']],
+        'review_images' => ['assetAlts', 'reviewImages', ['optional:container', 'optional:folder', 'list:locales', 'optional:scope', 'optional:cursor']],
+        'preview_asset_alts' => ['assetAlts', 'previewAssetAlts', ['list:updates']],
+        'save_asset_alts' => ['assetAlts', 'saveAssetAlts', ['string:confirmation_token', 'flag:confirmed']],
         'read_glossary' => ['glossary', 'readGlossary', []],
         'save_glossary' => ['glossary', 'saveGlossary', ['list:entries', 'flag:confirmed']],
         'read_style_rules' => ['glossary', 'readStyleRules', []],
@@ -361,6 +373,42 @@ class TranslationMcpServer
                     'upload_id' => ['type' => 'string'],
                 ],
                 'required' => ['upload_id'],
+            ]),
+            $this->tool('review_images', 'Show a batch of image assets so you can write alt text yourself (the CMS does not generate it). Returns the copy brief, locale-to-handle mapping, current meta, and inline JPEG previews. Use scope "missing" (default) or "all". Paginate with cursor until remaining is 0. Then preview_asset_alts and save_asset_alts. Read-only on assets; needs view permission on the container.', [
+                'type' => 'object',
+                'properties' => [
+                    'container' => ['type' => 'string', 'description' => 'Asset container handle. Without it, the only container you may view, or the list of containers.'],
+                    'folder' => ['type' => 'string', 'description' => 'Folder inside the container. Empty searches the whole container recursively.'],
+                    'locales' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Languages to write, e.g. ["de","fr"]. Mapped to blueprint handles (alt, alt_fr, …).'],
+                    'scope' => ['type' => 'string', 'enum' => ['missing', 'all'], 'description' => 'missing: only images with an empty target handle. all: every image.'],
+                    'cursor' => ['type' => 'string', 'description' => 'Pagination cursor from the previous review_images response.'],
+                ],
+                'required' => ['locales'],
+            ]),
+            $this->tool('preview_asset_alts', 'Describe alt text metadata changes and return a confirmation_token. Pass updates as a list of {ref, values} using blueprint handles from review_images. Writes nothing. Refused when the role cannot edit assets on that container.', [
+                'type' => 'object',
+                'properties' => [
+                    'updates' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'ref' => ['type' => 'string', 'description' => 'container::path'],
+                                'values' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                            ],
+                            'required' => ['ref', 'values'],
+                        ],
+                    ],
+                ],
+                'required' => ['updates'],
+            ]),
+            $this->tool('save_asset_alts', 'Save alt text from preview_asset_alts. Requires its confirmation_token and confirmed true after the user agrees. Refused if asset metadata changed since the preview.', [
+                'type' => 'object',
+                'properties' => [
+                    'confirmation_token' => ['type' => 'string'],
+                    'confirmed' => ['type' => 'boolean'],
+                ],
+                'required' => ['confirmation_token', 'confirmed'],
             ]),
             $this->tool('read_glossary', 'Read the glossary terms the translation should use. Not synced to DeepL by this connection.', [
                 'type' => 'object',
