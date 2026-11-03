@@ -244,7 +244,7 @@ class TranslationMcpServer
                     'collection' => ['type' => 'string', 'description' => 'Optional collection handle.'],
                 ],
             ]),
-            $this->tool('read_entry', 'Read one entry\'s translatable segments, plus the glossary and style rules. Translate the segments yourself. Do not send them to DeepL or Infomaniak.', [
+            $this->tool('read_entry', 'Read one entry\'s translatable segments, plus the glossary and style rules. Each text segment includes field, the blueprint handle it belongs to (seo_title, title, …). Translate the segments yourself. Do not send them to DeepL or Infomaniak.', [
                 'type' => 'object',
                 'properties' => [
                     'entry_id' => ['type' => 'string'],
@@ -272,7 +272,7 @@ class TranslationMcpServer
                 ],
                 'required' => ['confirmation_token', 'confirmed', 'translations'],
             ]),
-            $this->tool('preview_entry_edit', 'Change the text of an existing entry in place, in any language. Call it with only entry_id to list the entry\'s editable segments (text, plus toggles, choice fields, links and assets such as images, with their field label and block) and its slug. Call it again with edits and/or a new slug to get the before/after changes and a confirmation_token. A new slug changes the page\'s web address. Does not write anything. Refused when the user\'s Control Panel role cannot edit that entry.', [
+            $this->tool('preview_entry_edit', 'Change the text of an existing entry in place, in any language. Call it with only entry_id to list the entry\'s editable segments and its slug. A text segment has field set to the blueprint handle (seo_title, title, …). Toggles, choices, links and assets also carry their field label and block. Call it again with edits and/or a new slug to get the before/after changes and a confirmation_token. A new slug changes the page\'s web address. Does not write anything. Refused when the user\'s Control Panel role cannot edit that entry.', [
                 'type' => 'object',
                 'properties' => [
                     'entry_id' => ['type' => 'string'],

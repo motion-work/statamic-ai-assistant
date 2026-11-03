@@ -20,7 +20,7 @@ final class EntryEditSegments
      * {@see externalSegments()}, fields marked localizable: false count too,
      * because the edit writes back into the same entry.
      *
-     * @return array<int, array{id: string, text: string, html: bool}>
+     * @return array<int, array{id: string, text: string, html: bool, field?: string}>
      */
     public function editableSegments(mixed $entry): array
     {
@@ -124,17 +124,22 @@ final class EntryEditSegments
     }
 
     /**
-     * @return array<int, array{id: string, text: string, html: bool}>
+     * @return array<int, array{id: string, text: string, html: bool, field?: string}>
      */
     public function collectedSegments(): array
     {
         $segments = [];
         foreach ($this->collector->segments->collectedTexts as $index => $text) {
-            $segments[] = [
+            $segment = [
                 'id' => (string) $index,
                 'text' => $text,
                 'html' => isset($this->collector->segments->htmlTexts[$index]),
             ];
+            $field = $this->collector->segments->textFields[$index] ?? null;
+            if (is_string($field) && $field !== '') {
+                $segment['field'] = $field;
+            }
+            $segments[] = $segment;
         }
 
         return $segments;

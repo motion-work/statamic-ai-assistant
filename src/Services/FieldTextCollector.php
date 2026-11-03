@@ -74,6 +74,24 @@ final class FieldTextCollector
      */
     public function collectFromField(mixed $value, ?string $fieldType, ?array $fieldDef = null): mixed
     {
+        $previous = $this->segments->currentField;
+        $handle = $fieldDef['handle'] ?? null;
+        if (is_string($handle) && $handle !== '') {
+            $this->segments->currentField = $handle;
+        }
+
+        try {
+            return $this->collectFieldValue($value, $fieldType, $fieldDef);
+        } finally {
+            $this->segments->currentField = $previous;
+        }
+    }
+
+    /**
+     * @param  array{type: string, localizable: bool, sets?: array, fields?: array}|null  $fieldDef
+     */
+    private function collectFieldValue(mixed $value, ?string $fieldType, ?array $fieldDef): mixed
+    {
         if ($this->collectingValues && in_array($fieldType, self::VALUE_TYPES, true)) {
             return $this->segments->valuePlaceholder($value, $fieldDef ?? []);
         }

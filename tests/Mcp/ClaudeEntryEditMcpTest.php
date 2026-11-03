@@ -75,6 +75,23 @@ class ClaudeEntryEditMcpTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_text_segments_name_the_blueprint_field_they_belong_to(): void
+    {
+        $listed = $this->tool($this->serverAs($this->user('mcp-editor')), 'preview_entry_edit', ['entry_id' => $this->page()->id()]);
+        $fields = [];
+        foreach ($listed['segments'] as $segment) {
+            if (isset($segment['text'])) {
+                $fields[$segment['text']] = $segment['field'] ?? null;
+            }
+        }
+
+        $this->assertSame('title', $fields['Über uns']);
+        $this->assertSame('kicker', $fields['Hinweis']);
+        $this->assertSame('body', $fields['Absatz']);
+        $this->assertSame('body', $fields['Titel']);
+        $this->assertSame('label', $fields['Spalten']);
+    }
+
     public function test_an_editor_changes_one_text_and_everything_else_stays_as_it_was(): void
     {
         $page = $this->page();

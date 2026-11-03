@@ -202,7 +202,7 @@ class EntryTranslator
      * Texts Claude (or another external translator) should translate.
      * Nothing is sent to DeepL or the configured AI provider.
      *
-     * @return array<int, array{id: string, text: string, html: bool}>
+     * @return array<int, array{id: string, text: string, html: bool, field?: string}>
      */
     public function externalSegments(mixed $entry): array
     {

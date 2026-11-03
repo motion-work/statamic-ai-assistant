@@ -19,6 +19,12 @@ final class TranslationSegmentBuffer
     /** @var array<int, bool> Tracks which collected texts are HTML (from merged Bard content) */
     public array $htmlTexts = [];
 
+    /** @var array<int, string|null> Blueprint handle for each collected text. */
+    public array $textFields = [];
+
+    /** The blueprint handle whose text is being collected. */
+    public ?string $currentField = null;
+
     public int $textIndex = 0;
 
     /** @var array<int, array{value: mixed, def: array<string, mixed>, set: string|null}> */
@@ -34,6 +40,7 @@ final class TranslationSegmentBuffer
     {
         $index = $this->textIndex;
         $this->collectedTexts[$index] = $text;
+        $this->textFields[$index] = $this->currentField;
         $this->textIndex++;
 
         return $index;
@@ -128,6 +135,8 @@ final class TranslationSegmentBuffer
         $this->currentSet = null;
         $this->collectedTexts = [];
         $this->htmlTexts = [];
+        $this->textFields = [];
+        $this->currentField = null;
         $this->textIndex = 0;
     }
 
