@@ -47,7 +47,8 @@ export const state = reactive({
   generationError: null,    // fatal pre-plan error (current turn only)
   plannerAnswer: null,      // read-only answer to a question (current turn only)
   operations: [],           // completed non-entry operations this turn: [{id,kind,label}]
-  transcript: [],           // full chat history from the server: [{role,text,entry_ids,kind}]
+  transcript: [],           // full chat history from the server: [{role,text,entry_ids,kind,citations?}]
+  webSearch: false,         // editor's per-chat web search toggle (sent with every message; off on a new chat)
   chatSessionId: null,      // durable session id across turns (NOT cleared at poll-terminal)
   currentChatId: null,      // id of this conversation's local-history record
   bulkSaving: false,
@@ -158,6 +159,14 @@ export function setI18n(translator) {
 
 export function setToaster(toast) {
   _toast = toast;
+}
+
+/**
+ * Switch web search on or off for this chat's messages (the composer toggle).
+ * Only takes effect when the backend offers it (agentWebSearchAvailable).
+ */
+export function setWebSearch(on) {
+  state.webSearch = !!on;
 }
 
 /** Remember a title picked via the "@" entry picker (for transcript chips). */
@@ -313,6 +322,7 @@ export function openChatFromHistory(id) {
 
   resetGenerationOnly();
   state.pendingAttachedFiles = [];
+  state.webSearch = false;
   state.currentChatId = record.id;
   state.chatSessionId = record.sessionId || null;
   state.mentionedTitles = [...(record.mentionedTitles || [])];
@@ -648,6 +658,7 @@ export async function startGeneration({ prompt, useAutoTarget, collection, bluep
     formData.append('auto_resolve_target', '0');
   }
   formData.append('prompt', text);
+  formData.append('web_search', state.webSearch ? '1' : '0');
   appendAttachments(formData, files);
   // The file payloads are now captured by FormData; clear the scratch list so
   // composer chips reference nothing stale after sending.
@@ -844,7 +855,12 @@ export async function continueGeneration(prompt) {
   // append so the new prompt isn't duplicated when the server re-appends it.
   const priorTurns = state.transcript
     .filter((t) => (t.text || '').trim() !== '')
-    .map((t) => ({ role: t.role, text: t.text, kind: t.kind || null }));
+    .map((t) => ({
+      role: t.role,
+      text: t.text,
+      kind: t.kind || null,
+      ...(Array.isArray(t.citations) && t.citations.length ? { citations: t.citations } : {}),
+    }));
 
   // Clear only the CURRENT-turn scratch — history + prior cards stay.
   state.generationError = null;
@@ -871,10 +887,12 @@ export async function continueGeneration(prompt) {
   // the file payloads are captured, so clear the scratch list immediately.
   const continueBody = new FormData();
   continueBody.append('prompt', text);
+  continueBody.append('web_search', state.webSearch ? '1' : '0');
   appendAttachments(continueBody, files);
 
   const resumeBody = new FormData();
   resumeBody.append('prompt', text);
+  resumeBody.append('web_search', state.webSearch ? '1' : '0');
   resumeBody.append('transcript', JSON.stringify(priorTurns));
   appendAttachments(resumeBody, files);
 
@@ -1185,6 +1203,7 @@ function resetGenerationOnly() {
 /** Clear everything except `active`; used when user clicks "New chat". */
 export function reset() {
   resetGenerationOnly();
+  state.webSearch = false;
   state.mentionedTitles = [];
   state.pendingAttachedFiles = [];
   state._backgroundedAt = null;

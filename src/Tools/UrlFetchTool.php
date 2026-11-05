@@ -44,7 +44,12 @@ class UrlFetchTool implements ChatTool
         $args = json_decode($argumentsJson, true);
         $url = (is_array($args) && isset($args['url']) && is_string($args['url'])) ? trim($args['url']) : '';
 
-        if ($this->restrict && ! $this->isUrlAllowed($url)) {
+        // A page a web search cited this run may be opened too, but only a page
+        // the user pointed at counts as image provenance (see below).
+        $userSourced = ! $this->restrict || $this->isUrlAllowed($url);
+        $cited = ! $userSourced && $context->wasCited($url);
+
+        if (! $userSourced && ! $cited) {
             $context->addWarning((string) __('Skipped fetching :url — the agent only opens links you provide.', [
                 'url' => Str::limit($url !== '' ? $url : '(none)', 80),
             ]));
@@ -75,8 +80,9 @@ class UrlFetchTool implements ChatTool
         $decoded = json_decode($json, true);
 
         // Record provenance so save_remote_image may later pull images that
-        // actually appeared on this page (or its CDN) — but nothing invented.
-        if (is_array($decoded) && ($decoded['ok'] ?? false) !== false) {
+        // actually appeared on this page (or its CDN) — but nothing invented,
+        // and nothing from a page only a web search led to.
+        if ($userSourced && is_array($decoded) && ($decoded['ok'] ?? false) !== false) {
             $context->rememberFetchedContent($url, $json);
         }
 

@@ -237,7 +237,7 @@ class TranslationMcpServer
                 'type' => 'object',
                 'properties' => new \stdClass,
             ]),
-            $this->tool('find_entries', 'Find entries by title, slug, or id. Use this before translating.', [
+            $this->tool('find_entries', 'Find entries by title, slug, or id, plus entries about the same topic when the site has a semantic index. Use this before translating.', [
                 'type' => 'object',
                 'properties' => [
                     'query' => ['type' => 'string', 'description' => 'Title, slug, or id. Empty returns the first entries.'],

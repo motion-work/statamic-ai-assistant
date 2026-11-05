@@ -89,6 +89,12 @@ class ChatToolRunner
         return array_values(array_map(fn (ChatTool $t) => $t->definition(), $this->tools));
     }
 
+    /** The run's shared side-channels (warnings, provenance, citations). */
+    public function context(): ToolContext
+    {
+        return $this->context;
+    }
+
     /** How many times a given tool has been dispatched this run. */
     public function callCount(string $name): int
     {

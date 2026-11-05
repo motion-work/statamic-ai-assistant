@@ -4,6 +4,8 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Log;
 use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
+use MotionWork\StatamicAiAssistant\Support\AssistantToolCallMessage;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
 use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
 
 /**
@@ -38,62 +40,102 @@ final class AgenticPlannerLoop
         // while the planner is thinking before its first tool call.
         $this->batch?->appendPlannerActivity($run->sessionId, (string) __('Analyzing your request…'));
 
-        $tools = array_merge($runner->definitions(), $this->jobTools->definitions($run->cap));
-        $maxRounds = (int) config('statamic-ai-assistant.entry_generator_tool_max_rounds', 120);
-        $maxTokens = max(4096, (int) config('statamic-ai-assistant.entry_generator_planner_max_output_tokens', 12000));
-        $toolNames = array_map(fn ($t) => strtolower((string) ($t['function']['name'] ?? '')), $tools);
-
-        $promptHasUrl = (bool) preg_match('~\bhttps?://[^\s<>\]\}\)\"\'`]+~iu', $userPrompt);
+        $setup = $this->loopSetup($run, $runner, $userPrompt);
         $working = $messages;
 
-        for ($round = 0; $round < $maxRounds; $round++) {
+        for ($round = 0; $round < $setup['max_rounds']; $round++) {
             $run->heartbeat?->__invoke();
 
-            $forceTool = ! $run->forceToolDisabled && $promptHasUrl && $runner->callCount('fetch_page_content') === 0 && $run->created === 0;
-            $toolChoice = $forceTool
-                ? ['type' => 'function', 'function' => ['name' => 'fetch_page_content']]
-                : 'auto';
-
-            ChatToolRunner::compactToolMessages($working);
-
-            $callMessages = $this->withStatusReminder($working, $run, $round, $maxRounds);
-
-            $data = $this->aiService->createChatCompletion($callMessages, $maxTokens, $tools, $toolChoice, $run->heartbeat);
-            $choice = $data['choices'][0] ?? null;
-            $msg = $this->assistantMessage($choice);
-
-            $toolCalls = $msg['tool_calls'] ?? null;
-            $hasToolCalls = is_array($toolCalls) && $toolCalls !== [];
-
-            if ($forceTool && ! $hasToolCalls) {
-                $this->stopForcingTool($run, $round, $toolChoice);
-            }
-
-            if ($hasToolCalls) {
-                if ($this->continueAfterToolCalls($run, $runner, $working, $msg, $round)) {
-                    continue;
-                }
-
+            if (! $this->playRound($run, $runner, $working, $round, $setup)) {
                 return;
             }
-
-            $content = $msg['content'] ?? '';
-            if (is_string($content) && trim($content) !== '') {
-                if ($this->replyHandler->continueAfterTextReply($run, $runner, $working, $content, $toolNames, $round)) {
-                    continue;
-                }
-
-                return;
-            }
-
-            if ($this->replyHandler->continueAfterEmptyReply($run, $working, $round, $choice, $data)) {
-                continue;
-            }
-
-            return;
         }
 
-        $this->finishAtRoundLimit($run, $runner, $maxRounds);
+        $this->finishAtRoundLimit($run, $runner, $setup['max_rounds']);
+    }
+
+    /**
+     * What every round of this run sends: the tools (read, job, and the web
+     * search server tool when the editor switched it on), the limits, and
+     * whether the prompt carries a URL to fetch first.
+     *
+     * @return array{tools: array<int, array<string, mixed>>, tool_names: array<int, string>, max_rounds: int, max_tokens: int, prompt_has_url: bool}
+     */
+    private function loopSetup(AgenticPlanRun $run, ChatToolRunner $runner, string $userPrompt): array
+    {
+        $tools = array_merge($runner->definitions(), $this->jobTools->definitions($run->cap));
+        // OpenRouter runs the search server-side: it is only listed, never dispatched.
+        if ($run->webSearch) {
+            $tools[] = WebSearch::serverTool();
+        }
+
+        return [
+            'tools' => $tools,
+            'tool_names' => array_map(fn ($t) => strtolower((string) ($t['function']['name'] ?? '')), $tools),
+            'max_rounds' => (int) config('statamic-ai-assistant.entry_generator_tool_max_rounds', 120),
+            'max_tokens' => max(4096, (int) config('statamic-ai-assistant.entry_generator_planner_max_output_tokens', 12000)),
+            'prompt_has_url' => (bool) preg_match('~\bhttps?://[^\s<>\]\}\)\"\'`]+~iu', $userPrompt),
+        ];
+    }
+
+    /**
+     * One round: a completion, then its tool calls or text reply. False when
+     * the reply ended the run.
+     *
+     * @param  array<int, array<string, mixed>>  $working
+     * @param  array{tools: array<int, array<string, mixed>>, tool_names: array<int, string>, max_rounds: int, max_tokens: int, prompt_has_url: bool}  $setup
+     */
+    private function playRound(AgenticPlanRun $run, ChatToolRunner $runner, array &$working, int $round, array $setup): bool
+    {
+        $toolChoice = $this->toolChoice($run, $runner, $setup['prompt_has_url']);
+
+        ChatToolRunner::compactToolMessages($working);
+
+        $callMessages = $this->withStatusReminder($working, $run, $round, $setup['max_rounds']);
+
+        $data = $this->aiService->createChatCompletion($callMessages, $setup['max_tokens'], $setup['tools'], $toolChoice, $run->heartbeat);
+        $choice = $data['choices'][0] ?? null;
+        $msg = $this->assistantMessage($choice);
+        if ($run->webSearch) {
+            $msg = WebSearch::withoutCitationMarkers($msg);
+        }
+        $this->recordCitations($run, $runner, $msg);
+
+        $toolCalls = $msg['tool_calls'] ?? null;
+        $hasToolCalls = is_array($toolCalls) && $toolCalls !== [];
+
+        if (is_array($toolChoice) && ! $hasToolCalls) {
+            $this->stopForcingTool($run, $round, $toolChoice);
+        }
+
+        if ($hasToolCalls) {
+            return $this->continueAfterToolCalls($run, $runner, $working, $msg, $round);
+        }
+
+        $content = $msg['content'] ?? '';
+        if (is_string($content) && trim($content) !== '') {
+            return $this->replyHandler->continueAfterTextReply($run, $runner, $working, $content, $setup['tool_names'], $round);
+        }
+
+        return $this->replyHandler->continueAfterEmptyReply($run, $working, $round, $choice, $data);
+    }
+
+    /**
+     * Force fetch_page_content while the prompt has a URL nothing has fetched
+     * yet (and the model has not ignored the forcing before); otherwise auto.
+     *
+     * @return string|array<string, mixed>
+     */
+    private function toolChoice(AgenticPlanRun $run, ChatToolRunner $runner, bool $promptHasUrl): string|array
+    {
+        $force = ! $run->forceToolDisabled
+            && $promptHasUrl
+            && $runner->callCount('fetch_page_content') === 0
+            && $run->created === 0;
+
+        return $force
+            ? ['type' => 'function', 'function' => ['name' => 'fetch_page_content']]
+            : 'auto';
     }
 
     /**
@@ -108,6 +150,27 @@ final class AgenticPlannerLoop
         }
 
         return $this->replies->normalizeAssistantMessage($msg);
+    }
+
+    /**
+     * Web search sources the reply cites: the fetch tool may open them, and
+     * the session keeps them for the reply's source chips.
+     *
+     * @param  array<string, mixed>  $msg
+     */
+    private function recordCitations(AgenticPlanRun $run, ChatToolRunner $runner, array $msg): void
+    {
+        if (! $run->webSearch) {
+            return;
+        }
+
+        $citations = WebSearch::citationsFrom($msg);
+        if ($citations === []) {
+            return;
+        }
+
+        $runner->context()->rememberCitations($citations);
+        $this->batch?->addTurnCitations($run->sessionId, $citations);
     }
 
     /**
@@ -137,11 +200,7 @@ final class AgenticPlannerLoop
      */
     private function continueAfterToolCalls(AgenticPlanRun $run, ChatToolRunner $runner, array &$working, array $msg, int $round): bool
     {
-        $working[] = [
-            'role' => 'assistant',
-            'content' => array_key_exists('content', $msg) ? $msg['content'] : null,
-            'tool_calls' => $msg['tool_calls'],
-        ];
+        $working[] = AssistantToolCallMessage::from($msg, $msg['tool_calls']);
 
         $runner->consume($msg['tool_calls'], $working, fn (string $name, string $args) => $this->jobTools->dispatchAgenticJobTool($run, $name, $args));
 

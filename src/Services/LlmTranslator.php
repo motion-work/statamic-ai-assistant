@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Services\Ai\AiTask;
 use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
 
 /**
@@ -115,7 +116,7 @@ class LlmTranslator
         $chars = array_sum(array_map('mb_strlen', $texts));
         $maxTokens = min(16000, 1000 + $chars);
 
-        $raw = $this->ai->withoutThinking(fn () => $this->ai->generateFromMessages($messages, $maxTokens));
+        $raw = $this->ai->forTask(AiTask::Translate, fn () => $this->ai->generateFromMessages($messages, $maxTokens));
 
         $json = JsonObjectExtractor::firstObject($raw);
         $decoded = $json !== null ? json_decode($json, true) : null;

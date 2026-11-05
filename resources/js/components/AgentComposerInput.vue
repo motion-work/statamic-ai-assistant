@@ -94,6 +94,8 @@ export default {
     fileMeta: { type: Object, default: () => ({}) },
     /** Return true to consume a keydown before the editor sees it (dropdown nav). */
     keydownInterceptor: { type: Function, default: null },
+    /** Focus the editor as soon as it exists (it loads lazily on first open). */
+    autofocus: { type: Boolean, default: false },
   },
 
   emits: ['update:modelValue', 'send', 'mention-query', 'chip-click', 'blur'],
@@ -174,6 +176,10 @@ export default {
         this.$emit('blur');
       },
     });
+
+    if (this.autofocus && !this.disabled) {
+      this.$nextTick(() => this.focus());
+    }
   },
 
   beforeUnmount() {

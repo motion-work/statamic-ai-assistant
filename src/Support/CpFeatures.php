@@ -2,19 +2,22 @@
 
 namespace MotionWork\StatamicAiAssistant\Support;
 
+use MotionWork\StatamicAiAssistant\Services\Ai\AiProviders;
+
 /**
  * Which parts of the addon appear in the Control Panel.
  *
- * AI (agent, field buttons, AI instructions) needs INFOMANIAK_API_TOKEN.
+ * AI (agent, field buttons, AI instructions) needs the active provider's key
+ * (OPENROUTER_API_KEY or INFOMANIAK_API_TOKEN, see AiProviders).
  * Translations need a DeepL key. Without one they stay available only as the
- * LLM fallback, and only when the Infomaniak token is set. The glossary and
+ * LLM fallback, and only when the AI provider has its key. The glossary and
  * style rules need neither: Claude reads them through the connector.
  */
 class CpFeatures
 {
     public static function aiEnabled(): bool
     {
-        return trim((string) config('statamic-ai-assistant.infomaniak_api_token')) !== '';
+        return AiProviders::hasCredentials();
     }
 
     public static function deeplEnabled(): bool

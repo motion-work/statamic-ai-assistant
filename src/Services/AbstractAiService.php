@@ -2,9 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\RequestException;
-use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Services\Ai\AiRetryPolicy;
+use MotionWork\StatamicAiAssistant\Services\Ai\AiTask;
 use MotionWork\StatamicAiAssistant\Support\TrimAiOutput;
 use Statamic\Facades\Site;
 
@@ -13,52 +12,26 @@ abstract class AbstractAiService
     /** Whether calls inside withoutThinking() should ask the model to skip reasoning. */
     private bool $thinkingDisabled = false;
 
+    /** The task of the calls in progress (forTask()); null means Agent. */
+    private ?AiTask $task = null;
+
+    /** @var array<string, mixed> Extra payload fields for the calls in progress (withRequestOptions()). */
+    private array $requestOptions = [];
+
+    /** @var array<string, mixed> Caller context attached to AiCompletionFinished (withCompletionContext()). */
+    private array $completionContext = [];
+
+    /** max_tokens passed to generateFromMessages() for the call in progress. */
+    private ?int $maxTokensOverride = null;
+
     abstract protected function callApi(array $messages): string;
 
     /**
-     * Whether a provider failure is transient and worth retrying: rate limiting,
-     * gateway/upstream errors, and dropped connections. Hard timeouts are treated
-     * as NON-transient on purpose — the model is simply slow, so retrying only
-     * stacks full-length waits and delays the eventual (same) failure.
+     * Whether a provider failure is transient and worth retrying (see AiRetryPolicy).
      */
     protected function isTransientAiFailure(\Throwable $e): bool
     {
-        if ($e instanceof ConnectionException) {
-            return ! Str::contains(Str::lower($e->getMessage()), ['timed out', 'timeout', 'operation too slow']);
-        }
-
-        if ($e instanceof RequestException) {
-            return in_array($e->response?->status(), [429, 500, 502, 503, 504], true);
-        }
-
-        return false;
-    }
-
-    /** Max attempts for a transient provider call (1 = no retry). */
-    protected function aiRetryTimes(): int
-    {
-        return max(1, (int) config('statamic-ai-assistant.ai_http_retry_times', 3));
-    }
-
-    /** Backoff between attempts (ms): honour Retry-After, else exponential + jitter. */
-    protected function aiRetrySleepMs(): \Closure
-    {
-        return function (int $attempt, \Throwable $exception): int {
-            if ($exception instanceof RequestException) {
-                $retryAfter = (int) $exception->response?->header('Retry-After');
-                if ($retryAfter > 0) {
-                    return min($retryAfter, 30) * 1000;
-                }
-            }
-
-            return min(8000, (2 ** max(0, $attempt - 1)) * 1000) + random_int(0, 300);
-        };
-    }
-
-    /** `$when` predicate for Http::retry — retry transient failures only. */
-    protected function aiRetryWhen(): \Closure
-    {
-        return fn (\Throwable $e): bool => $this->isTransientAiFailure($e);
+        return AiRetryPolicy::isTransient($e);
     }
 
     /**
@@ -79,13 +52,48 @@ abstract class AbstractAiService
     }
 
     /**
-     * Run $fn with the provider's fast model temporarily swapped in, restoring the
-     * primary model afterwards. This reuses the same config-override pattern as the
-     * max_tokens handling below, so there is no model handoff or context threading:
-     * the call simply uses a different model, then everything reverts.
+     * Run $fn as calls for $task: the task picks the model (an OpenRouter
+     * profile; for Infomaniak the fast model on Light, the vision model on
+     * Vision), and quick tasks (every task but Agent) run withoutThinking().
+     * The previous task is restored afterwards, also when $fn throws.
      *
-     * A no-op (runs $fn as-is) when the provider has no fast tier or it resolves to
-     * the same model — so callers can always wrap lightweight tasks safely.
+     * @template T
+     *
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    public function forTask(AiTask $task, callable $fn): mixed
+    {
+        $previous = $this->task;
+        $previousOptions = $this->requestOptions;
+        $this->task = $task;
+
+        // A response_format belongs to the call that set it: the entry schema
+        // must not reach a nested call for another task (e.g. alt text written
+        // by a tool while the entry is generated), which would answer in JSON.
+        if ($task !== ($previous ?? AiTask::Agent)) {
+            unset($this->requestOptions['response_format']);
+        }
+
+        try {
+            $run = $task === AiTask::Light ? fn () => $this->withLegacyFastModel($fn) : $fn;
+
+            return $task->isQuick() ? $this->withoutThinking($run) : $run();
+        } finally {
+            $this->task = $previous;
+            $this->requestOptions = $previousOptions;
+        }
+    }
+
+    /** The task of the call in progress; Agent outside forTask(). */
+    public function currentTask(): AiTask
+    {
+        return $this->task ?? AiTask::Agent;
+    }
+
+    /**
+     * Run $fn with the provider's fast model: forTask(AiTask::Light, $fn).
+     * Kept for existing callers (target selection, block hints).
      *
      * @template T
      *
@@ -94,10 +102,22 @@ abstract class AbstractAiService
      */
     public function usingFastModel(callable $fn): mixed
     {
-        // Fast-tier tasks are short by design (small max_tokens budgets), so a
-        // reasoning model must answer directly instead of thinking first.
-        $fn = fn () => $this->withoutThinking($fn);
+        return $this->forTask(AiTask::Light, $fn);
+    }
 
+    /**
+     * Providers with a config-based model tier (Infomaniak) swap their fast
+     * model into the primary model key for the duration of $fn, then restore
+     * it. A no-op when the provider has no fast tier or it resolves to the same
+     * model. OpenRouter resolves its profile per call instead.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    private function withLegacyFastModel(callable $fn): mixed
+    {
         $key = $this->modelConfigKey();
         $fast = $this->fastModel();
 
@@ -113,6 +133,72 @@ abstract class AbstractAiService
         } finally {
             config([$key => $original]);
         }
+    }
+
+    /**
+     * Run $fn with extra fields merged into every provider payload it sends,
+     * e.g. ['response_format' => [...]] or ['session_id' => '...'] (OpenRouter
+     * sticky routing for prompt caching). Nested calls merge over the outer
+     * options. Providers drop fields they do not support (Infomaniak keeps
+     * only response_format). `messages` and `stream` cannot be overridden.
+     *
+     * @template T
+     *
+     * @param  array<string, mixed>  $options
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    public function withRequestOptions(array $options, callable $fn): mixed
+    {
+        $previous = $this->requestOptions;
+        $this->requestOptions = array_replace($previous, $options);
+
+        try {
+            return $fn();
+        } finally {
+            $this->requestOptions = $previous;
+        }
+    }
+
+    /** @return array<string, mixed> */
+    protected function requestOptions(): array
+    {
+        return $this->requestOptions;
+    }
+
+    /**
+     * Run $fn with $context attached to the AiCompletionFinished event of every
+     * call it makes, e.g. ['agent_session_id' => '...', 'entry_id' => '...'].
+     * Nested calls merge over the outer context.
+     *
+     * @template T
+     *
+     * @param  array<string, mixed>  $context
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    public function withCompletionContext(array $context, callable $fn): mixed
+    {
+        $previous = $this->completionContext;
+        $this->completionContext = array_replace($previous, $context);
+
+        try {
+            return $fn();
+        } finally {
+            $this->completionContext = $previous;
+        }
+    }
+
+    /** @return array<string, mixed> */
+    protected function completionContext(): array
+    {
+        return $this->completionContext;
+    }
+
+    /** max_tokens passed to generateFromMessages() for the call in progress. */
+    protected function maxTokensOverride(): ?int
+    {
+        return $this->maxTokensOverride;
     }
 
     /**
@@ -163,10 +249,12 @@ abstract class AbstractAiService
     public function generateFromMessages(array $messages, ?int $maxTokens = null, ?callable $onToken = null): string
     {
         $originalMaxTokens = null;
+        $previousOverride = $this->maxTokensOverride;
 
         if ($maxTokens !== null) {
             $originalMaxTokens = config('statamic-ai-assistant.max_tokens');
             config(['statamic-ai-assistant.max_tokens' => $maxTokens]);
+            $this->maxTokensOverride = $maxTokens;
         }
 
         try {
@@ -176,6 +264,7 @@ abstract class AbstractAiService
 
             return $this->callApi($messages);
         } finally {
+            $this->maxTokensOverride = $previousOverride;
             if ($originalMaxTokens !== null) {
                 config(['statamic-ai-assistant.max_tokens' => $originalMaxTokens]);
             }
@@ -274,7 +363,8 @@ abstract class AbstractAiService
     }
 
     /**
-     * One quick, non-thinking completion: an optional system message plus the user's request.
+     * One quick field completion (AiTask::Field, no thinking): an optional
+     * system message plus the user's request.
      */
     private function quickCompletion(string $system, string $user): string
     {
@@ -285,7 +375,7 @@ abstract class AbstractAiService
         }
         $messages[] = ['role' => 'user', 'content' => $user];
 
-        $content = $this->withoutThinking(fn () => $this->callApi($messages));
+        $content = $this->forTask(AiTask::Field, fn () => $this->callApi($messages));
 
         return $this->cleanResult($content);
     }

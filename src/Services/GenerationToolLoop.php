@@ -4,9 +4,15 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Semantic\SemanticEntrySearch;
+use MotionWork\StatamicAiAssistant\Services\Ai\GeneratesImages;
+use MotionWork\StatamicAiAssistant\Support\AssistantToolCallMessage;
+use MotionWork\StatamicAiAssistant\Support\ImageGeneration;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
 use MotionWork\StatamicAiAssistant\Tools\AnalyzeImageTool;
 use MotionWork\StatamicAiAssistant\Tools\ChatTool;
 use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
+use MotionWork\StatamicAiAssistant\Tools\GenerateImageTool;
 use MotionWork\StatamicAiAssistant\Tools\ListAssetsTool;
 use MotionWork\StatamicAiAssistant\Tools\ListTaxonomiesTool;
 use MotionWork\StatamicAiAssistant\Tools\ReadDocumentTool;
@@ -31,8 +37,12 @@ final class GenerationToolLoop
         private PromptUrlFetcher $promptUrlFetcher,
         private ?RemoteImageFetcher $imageFetcher,
         private EntryStructureSerializer $structureSerializer,
-        private EntrySearch $search,
-    ) {}
+        private ?EntrySearch $search = null,
+    ) {
+        // Entry discovery for the read tools: keyword search plus semantic
+        // matches, falling back to the keyword search alone on its own.
+        $this->search ??= new SemanticEntrySearch;
+    }
 
     /**
      * Runs the rounds and returns the model's final text.
@@ -68,6 +78,18 @@ final class GenerationToolLoop
         // models miss them.
         $working[0]['content'] = $this->toolRules($useImageTool, $disableUrlFetch)."\n".($working[0]['content'] ?? '');
 
+        // Web search (switched on per message by the editor; the entry job runs
+        // inside WebSearch::during()). Never alongside an attachment, which is
+        // the source by itself. The rules go last so the cached prefix holds.
+        $webSearch = WebSearch::activeInScope() && ! $disableUrlFetch;
+        if ($webSearch) {
+            $working[0]['content'] .= "\n\n".AgenticPlannerPrompt::webSearchRules()
+                .'This overrides URL rule 0 for pages the search results cited: those may be fetched too.';
+        }
+        if ($this->offersImageGeneration()) {
+            $working[0]['content'] .= "\n\n".self::imageGenerationRules();
+        }
+
         // Shared tool runner: one dispatch + per-tool call budgets for both this
         // loop and the planner. Read tools (fetch/image/read-entry) implement the
         // ChatTool contract; the runner owns the tool_call → tool-reply plumbing.
@@ -98,7 +120,7 @@ final class GenerationToolLoop
             // for them again (see ChatToolRunner::compactToolMessages).
             ChatToolRunner::compactToolMessages($working);
 
-            [$data, $msg] = $this->complete($working, $maxTokens, $runner, $toolChoice);
+            [$data, $msg] = $this->complete($working, $maxTokens, $runner, $toolChoice, $webSearch);
 
             $toolCalls = $msg['tool_calls'] ?? null;
             $hasToolCalls = is_array($toolCalls) && $toolCalls !== [];
@@ -108,11 +130,7 @@ final class GenerationToolLoop
             }
 
             if ($hasToolCalls) {
-                $working[] = [
-                    'role' => 'assistant',
-                    'content' => array_key_exists('content', $msg) ? $msg['content'] : null,
-                    'tool_calls' => $toolCalls,
-                ];
+                $working[] = AssistantToolCallMessage::from($msg, $toolCalls);
 
                 // Single shared dispatch: per-tool budgets, JSON encoding and the
                 // role:tool replies are all handled by the runner.
@@ -150,9 +168,15 @@ final class GenerationToolLoop
      * @param  string|array<string, mixed>  $toolChoice
      * @return array{0: array<string, mixed>, 1: array<string, mixed>}
      */
-    private function complete(array $working, int $maxTokens, ChatToolRunner $runner, string|array $toolChoice): array
+    private function complete(array $working, int $maxTokens, ChatToolRunner $runner, string|array $toolChoice, bool $webSearch = false): array
     {
-        $data = $this->aiService->createChatCompletion($working, $maxTokens, $runner->definitions(), $toolChoice);
+        $tools = $runner->definitions();
+        if ($webSearch) {
+            // OpenRouter runs the search server-side: listed, never dispatched.
+            $tools[] = WebSearch::serverTool();
+        }
+
+        $data = $this->aiService->createChatCompletion($working, $maxTokens, $tools, $toolChoice);
         $choice = $data['choices'][0] ?? null;
 
         if (! is_array($choice)) {
@@ -163,6 +187,13 @@ final class GenerationToolLoop
 
         if (! is_array($msg)) {
             throw new \RuntimeException(__('Unexpected AI response shape.'));
+        }
+
+        if ($webSearch) {
+            $msg = WebSearch::withoutCitationMarkers($msg);
+            $citations = WebSearch::citationsFrom($msg);
+            $runner->context()->rememberCitations($citations);
+            WebSearch::reportCitations($citations);
         }
 
         return [$data, $msg];
@@ -250,8 +281,30 @@ final class GenerationToolLoop
         if ($this->aiService->supportsVision()) {
             $toolset[] = new AnalyzeImageTool($this->aiService);
         }
+        if ($this->offersImageGeneration() && $this->aiService instanceof GeneratesImages) {
+            $toolset[] = new GenerateImageTool($this->aiService, app(GeneratedImageStore::class));
+        }
 
         return $toolset;
+    }
+
+    /** generate_image is offered inside an ImageGeneration scope (switch on, OpenRouter). */
+    private function offersImageGeneration(): bool
+    {
+        return $this->aiService instanceof GeneratesImages && ImageGeneration::scope() !== null;
+    }
+
+    /**
+     * When the editor may have images generated. Appended after the stable
+     * prompt prefix, like the web search rules, so the cached part holds.
+     */
+    public static function imageGenerationRules(): string
+    {
+        return "IMAGE GENERATION (generate_image):\n"
+            ."- Call generate_image ONLY when the user explicitly asks you to generate or create an image (e.g. \"erstelle ein Hero-Bild\", \"generate a picture of …\"). Never call it to fill empty image fields on your own.\n"
+            ."- Prefer images the user provided and existing assets (list_assets / use_assets) over generating.\n"
+            ."- Never depict a real, identifiable person, a brand logo or a copyrighted character.\n"
+            .'- One call per image the user asked for. When updating an entry, set the asset field you change to the exact `path` the tool returns.';
     }
 
     /**

@@ -2,6 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
+use MotionWork\StatamicAiAssistant\Support\ImageGeneration;
+use Statamic\Contracts\Entries\Entry as EntryContract;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
 use Statamic\Fields\Blueprint;
@@ -27,6 +29,8 @@ class EntryGeneratorService
     private GenerationSourceContext $sources;
 
     private EntryCompletion $completion;
+
+    private EntryResponseSchema $responseSchema;
 
     /** For the Claude connector, which composes entries itself. */
     public readonly EntryComposer $composer;
@@ -55,11 +59,12 @@ class EntryGeneratorService
         $this->sources = new GenerationSourceContext($promptUrlFetcher, $figma);
         $this->completion = new EntryCompletion(
             $aiService,
-            new GenerationToolLoop($aiService, $promptUrlFetcher, $imageFetcher, $this->structureSerializer, $search),
+            new GenerationToolLoop($aiService, $promptUrlFetcher, $imageFetcher, $this->structureSerializer),
             $parser,
         );
         $this->mapper = new FieldValueMapper($aiService, $this->assetResolver, $linkFallback ?? new EntryGeneratorLinkFallback, $options, $search);
         $this->composer = new EntryComposer($this->schema, $this->prompt, $this->mapper, $this->assetResolver);
+        $this->responseSchema = new EntryResponseSchema;
     }
 
     /**
@@ -99,7 +104,16 @@ class EntryGeneratorService
         $fetchedImages = new PreferredAssetPaths;
         $imageContainerHint = $this->assetResolver->primaryAssetContainer($blueprint);
 
-        $parsedData = $this->completion->entryJson($messages, $onStreamToken, $toolWarnings, $fetchedImages, $imageContainerHint, (string) $attachmentContent !== '');
+        // Images generated on request (generate_image) join the same queue.
+        $parsedData = ImageGeneration::during($fetchedImages, $imageContainerHint, fn () => $this->completion->entryJson(
+            $messages,
+            $onStreamToken,
+            $toolWarnings,
+            $fetchedImages,
+            $imageContainerHint,
+            (string) $attachmentContent !== '',
+            $this->responseSchema->responseFormat($fieldSchema),
+        ));
 
         // Merge any preferred assets surfaced by the URL augmentation step
         // (single-prompt path) with the explicit ones passed in by the caller.
@@ -188,20 +202,8 @@ class EntryGeneratorService
         ?callable $onStreamToken = null,
         ?array $prefetchedUrlAug = null,
     ): array {
-        $entry = Entry::find($entryId);
+        [$entry, $blueprint] = $this->entryWithBlueprint($entryId);
 
-        if (! $entry) {
-            throw new \RuntimeException(__('Entry not found.'));
-        }
-
-        $collectionHandle = (string) $entry->collectionHandle();
-        $blueprint = $entry->blueprint();
-
-        if (! $blueprint) {
-            throw new \RuntimeException(__('Blueprint not found for entry.'));
-        }
-
-        $blueprintHandle = (string) $blueprint->handle();
         $fieldSchema = $this->schema->buildFieldSchema($blueprint, $locale);
         // Update mode: surface asset fields the create path hides (`FieldTypes::SKIP_TYPES`)
         // so the LLM can ask for a replacement. We walk into group fields too — many
@@ -209,47 +211,102 @@ class EntryGeneratorService
         // Returns a list of {field, path} pairs the resolver step uses below.
         $assetFields = $this->updateAssets->augmentSchemaWithAssetFields($fieldSchema, $blueprint);
 
-        $snapshotIncompleteFields = [];
-        // Current values as text, complex fields as raw JSON so the model can
-        // return a full replacement; size-capped, so oversized fields are listed.
-        $currentSnapshot = $this->structureSerializer->serialize($entry, $blueprint, $snapshotIncompleteFields);
-        $systemMessage = $this->prompt->buildUpdateSystemMessage($fieldSchema, $locale, $currentSnapshot);
-
-        [$urlWarnings, $combinedAppendix] = $this->sources->forUpdate($prompt, $this->completion->usesUrlTool(), $prefetchedUrlAug);
-
-        $userMessage = $this->prompt->buildUserMessage($prompt, $attachmentContent, $combinedAppendix);
-
-        $messages = [
-            ['role' => 'system', 'content' => $systemMessage],
-            ['role' => 'user', 'content' => $userMessage],
-        ];
+        [$messages, $urlWarnings, $snapshotIncompleteFields] = $this->updateMessages($entry, $blueprint, $fieldSchema, $locale, $prompt, $attachmentContent, $prefetchedUrlAug);
 
         $toolWarnings = [];
-        // No image container: on the update path saved images would never be attached.
-        $parsedData = $this->completion->entryJson($messages, $onStreamToken, $toolWarnings, new PreferredAssetPaths, null, (string) $attachmentContent !== '');
+        // Images generated on request: the model sets the asset field to the
+        // returned path, and the replacement step below takes them from here.
+        $generated = new PreferredAssetPaths;
+        // No image container for save_remote_image: on the update path saved images would never be attached.
+        $parsedData = ImageGeneration::during($generated, $this->assetResolver->primaryAssetContainer($blueprint), fn () => $this->completion->entryJson(
+            $messages,
+            $onStreamToken,
+            $toolWarnings,
+            new PreferredAssetPaths,
+            null,
+            (string) $attachmentContent !== '',
+            // Update mode: only the keys the model changes, so nothing is required.
+            $this->responseSchema->responseFormat($fieldSchema, update: true),
+        ));
         $result = $this->mapper->mapToFieldData($parsedData, $blueprint, $locale, $prompt, null, true);
 
         // Resolve asset fields (top-level + nested in groups) the LLM asked to
         // replace. Fields the LLM did NOT mention stay absent from $data, so
         // the merge in EntryWriter::update() preserves the existing image.
-        $this->updateAssets->resolveUpdateAssetReplacements($result, $entry, $assetFields, $parsedData);
+        $this->updateAssets->resolveUpdateAssetReplacements($result, $entry, $assetFields, $parsedData, $generated);
+        $this->warnAboutIncompleteReplacements($result, $snapshotIncompleteFields);
 
-        // Data-loss guard: list fields (replicator/grid) are replaced wholesale on
-        // update. When the snapshot had to truncate or omit such a field, the LLM
-        // never saw its full content — a returned replacement may silently drop
-        // blocks. Surface that as a review warning instead of failing the update.
+        array_push($result['warnings'], ...$urlWarnings, ...$toolWarnings);
+
+        $result['collection'] = (string) $entry->collectionHandle();
+        $result['blueprint'] = (string) $blueprint->handle();
+
+        return $result;
+    }
+
+    /**
+     * The entry to update and its blueprint.
+     *
+     * @return array{0: EntryContract, 1: Blueprint}
+     */
+    private function entryWithBlueprint(string $entryId): array
+    {
+        $entry = Entry::find($entryId);
+
+        if (! $entry) {
+            throw new \RuntimeException(__('Entry not found.'));
+        }
+
+        $blueprint = $entry->blueprint();
+
+        if (! $blueprint) {
+            throw new \RuntimeException(__('Blueprint not found for entry.'));
+        }
+
+        return [$entry, $blueprint];
+    }
+
+    /**
+     * The update prompt: the system message with the schema and the entry's
+     * current values (static part first, the snapshot last), and the user
+     * message with its sources. Also returns the URL warnings and the fields too
+     * large to show the model in full.
+     *
+     * @param  array<string, array<string, mixed>>  $fieldSchema
+     * @param  array<string, mixed>|null  $prefetchedUrlAug
+     * @return array{0: array<int, array{role: string, content: string}>, 1: array<int, string>, 2: array<int, string>}
+     */
+    private function updateMessages(EntryContract $entry, Blueprint $blueprint, array $fieldSchema, string $locale, string $prompt, ?string $attachmentContent, ?array $prefetchedUrlAug): array
+    {
+        // Current values as text, complex fields as raw JSON so the model can
+        // return a full replacement; size-capped, so oversized fields are listed.
+        $snapshotIncompleteFields = [];
+        $currentSnapshot = $this->structureSerializer->serialize($entry, $blueprint, $snapshotIncompleteFields);
+
+        [$urlWarnings, $combinedAppendix] = $this->sources->forUpdate($prompt, $this->completion->usesUrlTool(), $prefetchedUrlAug);
+
+        return [[
+            ['role' => 'system', 'content' => $this->prompt->buildUpdateSystemMessage($fieldSchema, $locale, $currentSnapshot)],
+            ['role' => 'user', 'content' => $this->prompt->buildUserMessage($prompt, $attachmentContent, $combinedAppendix)],
+        ], $urlWarnings, $snapshotIncompleteFields];
+    }
+
+    /**
+     * Data-loss guard: list fields (replicator/grid) are replaced wholesale on
+     * update. When the snapshot had to truncate or omit such a field, the LLM
+     * never saw its full content — a returned replacement may silently drop
+     * blocks. Surface that as a review warning instead of failing the update.
+     *
+     * @param  array<string, mixed>  $result
+     * @param  array<int, string>  $snapshotIncompleteFields
+     */
+    private function warnAboutIncompleteReplacements(array &$result, array $snapshotIncompleteFields): void
+    {
         foreach (array_intersect($snapshotIncompleteFields, array_keys($result['data'] ?? [])) as $incompleteHandle) {
             $result['warnings'][] = __(
                 'The field ":field" was too large to show the AI in full, but the AI returned a replacement for it. Review that field carefully before publishing — blocks the AI never saw may be missing.',
                 ['field' => $incompleteHandle]
             );
         }
-
-        array_push($result['warnings'], ...$urlWarnings, ...$toolWarnings);
-
-        $result['collection'] = $collectionHandle;
-        $result['blueprint'] = $blueprintHandle;
-
-        return $result;
     }
 }

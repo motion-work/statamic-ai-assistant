@@ -67,6 +67,34 @@
           </div>
         </section>
 
+        <!-- Site-wide: may the AI agent generate images when an editor asks? -->
+        <section v-if="aiEnabled" class="ax-card">
+          <div class="ax-card__head">
+            <h2 class="ax-card__title">{{ __('Image generation') }}</h2>
+            <p class="ax-card__desc">{{ __('Lets the AI agent create new images with an image model when an editor explicitly asks for one. Generated images are saved to the asset library, labelled as AI-generated. Each image costs about $0.01 to $0.07.') }}</p>
+          </div>
+
+          <p v-if="imageGeneration.unavailable" class="ax-note">{{ imageGeneration.unavailable }}</p>
+          <p v-else-if="imageGeneration.locked" class="ax-note">{{ __('Set by STATAMIC_AI_ASSISTANT_IMAGE_GENERATION in the site configuration.') }}</p>
+
+          <div class="ax-modes" role="radiogroup" :aria-label="__('Image generation')">
+            <label class="ax-mode" :class="{ 'ax-mode--on': !access.image_generation, 'ax-mode--disabled': imageGenerationLocked }">
+              <input type="radio" class="ax-box" name="ax-image-mode" :checked="!access.image_generation" :disabled="imageGenerationLocked" @change="access.image_generation = false" />
+              <span class="ax-mode__text">
+                <span class="ax-mode__title">{{ __('Never generate images') }}</span>
+                <span class="ax-mode__desc">{{ __('The agent never generates images. Image fields are filled from existing assets.') }}</span>
+              </span>
+            </label>
+            <label class="ax-mode" :class="{ 'ax-mode--on': access.image_generation, 'ax-mode--disabled': imageGenerationLocked }">
+              <input type="radio" class="ax-box" name="ax-image-mode" :checked="access.image_generation" :disabled="imageGenerationLocked" @change="access.image_generation = true" />
+              <span class="ax-mode__text">
+                <span class="ax-mode__title">{{ __('Generate when asked') }}</span>
+                <span class="ax-mode__desc">{{ __('The agent generates an image only when an editor asks for one, for example “erstelle ein Hero-Bild”.') }}</span>
+              </span>
+            </label>
+          </div>
+        </section>
+
         <!-- One table: who may do what. Roles set the defaults, users the exceptions. -->
         <section v-if="columns.length" class="ax-card ax-card--table">
           <div class="ax-card__head">
@@ -226,6 +254,7 @@ export default {
       ceiling: 100,
       userFilter: '',
       aiEnabled: true,
+      imageGeneration: { on: false, locked: false, unavailable: null },
       access: this.emptyAccess(),
       original: '{}',
     };
@@ -268,6 +297,10 @@ export default {
       );
     },
 
+    imageGenerationLocked() {
+      return this.imageGeneration.locked || !!this.imageGeneration.unavailable;
+    },
+
     dirty() {
       return JSON.stringify(this.access) !== this.original;
     },
@@ -285,6 +318,7 @@ export default {
         agent_settings: { roles: [], users: [] },
         advanced_tools: { roles: [], users: [] },
         claude_restricted: false,
+        image_generation: false,
         claude_none: { roles: [], users: [] },
         claude_read: { roles: [], users: [] },
         claude_edit: { roles: [], users: [] },
@@ -311,6 +345,7 @@ export default {
         agent_settings: feat('agent_settings'),
         advanced_tools: feat('advanced_tools'),
         claude_restricted: raw?.claude_restricted === true,
+        image_generation: raw?.image_generation === true,
         claude_none: feat('claude_none'),
         claude_read: feat('claude_read'),
         claude_edit: feat('claude_edit'),
@@ -327,7 +362,9 @@ export default {
         this.users = data.users || [];
         this.ceiling = data.ceiling || 100;
         this.aiEnabled = data.aiEnabled !== false;
-        this.access = this.normalize(data.access || {});
+        this.imageGeneration = { on: false, locked: false, unavailable: null, ...(data.imageGeneration || {}) };
+        // The switch as it applies (config override included), not only as stored.
+        this.access = this.normalize({ ...(data.access || {}), image_generation: this.imageGeneration.on === true });
         this.original = JSON.stringify(this.access);
       } catch (e) {
         this.loadError =
@@ -600,6 +637,21 @@ export default {
 .ax-mode--on {
   background: var(--tp-accent-soft, #eff6ff);
   border-color: var(--tp-accent, #3b82f6);
+}
+
+.ax-mode--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Why a switch cannot be changed here (config lock, missing provider). */
+.ax-note {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--tp-text-muted, #6b7280);
+  background: var(--tp-surface-muted, rgba(127, 127, 127, 0.08));
 }
 
 .ax-mode__text {

@@ -130,8 +130,9 @@ final class UpdateAssetFields
      * @param  array{data: array<string, mixed>, displayData: array<string, mixed>, warnings: string[]}  $result
      * @param  array<int, array{field: Field, path: array<int, string>}>  $assetFields
      * @param  array<string, mixed>  $parsedData
+     * @param  PreferredAssetPaths|null  $preferred  Images generated for this update, tried before random container assets.
      */
-    public function resolveUpdateAssetReplacements(array &$result, StatamicEntry $entry, array $assetFields, array $parsedData): void
+    public function resolveUpdateAssetReplacements(array &$result, StatamicEntry $entry, array $assetFields, array $parsedData, ?PreferredAssetPaths $preferred = null): void
     {
         if ($assetFields === []) {
             return;
@@ -182,7 +183,7 @@ final class UpdateAssetFields
         }
 
         foreach ($randomPicks as $pick) {
-            $picked = $this->assetResolver->pickReplacementForField($pick['field'], $result['warnings'], null);
+            $picked = $this->assetResolver->pickReplacementForField($pick['field'], $result['warnings'], $preferred);
             if ($picked === null || $picked === '' || $picked === []) {
                 $result['warnings'][] = __(':field: no replacement image was found in the asset container; current image kept.', [
                     'field' => implode('.', $pick['path']),

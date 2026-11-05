@@ -59,6 +59,7 @@ final class AgenticPlanRun
      * @param  int  $cap  Entry jobs the model may dispatch this turn
      * @param  int  $priorEntryCount  Entries earlier turns already added to the session
      * @param  \Closure(): void|null  $heartbeat  Cancellation poll between rounds and tool calls
+     * @param  bool  $webSearch  The editor switched web search on for this message (WebSearch)
      */
     public function __construct(
         public readonly string $sessionId,
@@ -67,6 +68,7 @@ final class AgenticPlanRun
         public readonly int $priorEntryCount,
         public readonly bool $advancedTools,
         public readonly ?\Closure $heartbeat = null,
+        public readonly bool $webSearch = false,
     ) {}
 
     /** Absolute cap for addPlannedEntry: prior turns' entries plus this turn's allowance. */

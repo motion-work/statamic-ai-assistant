@@ -23,8 +23,12 @@ final class EntryContentSearch
     /** Per-entry cap on flattened content length (chars) before matching, to bound work. */
     private const SEARCH_CONTENT_FLATTEN_CHARS = 20000;
 
-    /** Structural array keys skipped when flattening entry content (Bard/replicator plumbing). */
-    private const CONTENT_SKIP_KEYS = ['type', 'id', '_id', 'enabled', 'collapsed'];
+    /**
+     * Structural array keys skipped when flattening entry content: Bard/replicator
+     * plumbing, and `blueprint`, which Statamic adds to the data once an entry is
+     * loaded from disk (so the text would differ between requests).
+     */
+    private const CONTENT_SKIP_KEYS = ['type', 'id', '_id', 'enabled', 'collapsed', 'blueprint'];
 
     /**
      * Deep search: find entries whose *body content* (not just title/slug) matches
@@ -105,7 +109,7 @@ final class EntryContentSearch
      * Flatten all string leaves of an entry's raw data into one plain-text blob,
      * skipping structural keys (Bard/replicator plumbing) and capping total length.
      */
-    private function flattenEntryText(StatamicEntry $entry): string
+    public function flattenEntryText(StatamicEntry $entry): string
     {
         $parts = [];
         $this->collectStringLeaves($entry->data()->all(), $parts, 0);

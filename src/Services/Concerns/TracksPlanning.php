@@ -2,6 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Services\Concerns;
 
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
+
 /**
  * The planner's side of an AI agent session: plan rows, transcript turns,
  * planning status, the live activity feed, operations and cancellation.
@@ -94,13 +96,20 @@ trait TracksPlanning
     {
         $this->update($sessionId, function (array $session) use ($text, $entryIds, $kind): array {
             $transcript = is_array($session['transcript'] ?? null) ? $session['transcript'] : [];
-            $transcript[] = [
+            $turn = [
                 'role' => 'assistant',
                 'text' => $text,
                 'entry_ids' => array_values(array_filter($entryIds, 'is_string')),
                 'kind' => $kind,
             ];
+            // Web search sources collected during this turn belong to its reply.
+            $citations = is_array($session['turn_citations'] ?? null) ? $session['turn_citations'] : [];
+            if ($citations !== []) {
+                $turn['citations'] = $citations;
+            }
+            $transcript[] = $turn;
             $session['transcript'] = array_values($transcript);
+            $session['turn_citations'] = [];
 
             return $session;
         });
@@ -112,11 +121,11 @@ trait TracksPlanning
      * and all prior entries. Recovers a 'completed' or 'cancelled' session.
      * Returns false if the session no longer exists (expired/unknown).
      */
-    public function reopenForFollowUp(string $sessionId, string $prompt, ?int $maxPlanEntries, bool $advancedTools = false, ?string $attachmentContent = null): bool
+    public function reopenForFollowUp(string $sessionId, string $prompt, ?int $maxPlanEntries, bool $advancedTools = false, ?string $attachmentContent = null, bool $webSearch = false): bool
     {
         $found = false;
 
-        $this->update($sessionId, function (array $session) use ($prompt, $maxPlanEntries, $advancedTools, $attachmentContent, &$found): array {
+        $this->update($sessionId, function (array $session) use ($prompt, $maxPlanEntries, $advancedTools, $attachmentContent, $webSearch, &$found): array {
             $found = true;
 
             $session['status'] = 'running';
@@ -127,6 +136,9 @@ trait TracksPlanning
             $session['prompt'] = $prompt;
             $session['max_plan_entries'] = $maxPlanEntries !== null ? max(1, $maxPlanEntries) : null;
             $session['advanced_tools'] = $advancedTools;
+            // Web search is chosen per message, like the attachment below.
+            $session['web_search'] = $webSearch;
+            $session['turn_citations'] = [];
             // The attachment is scoped to a single turn: a follow-up replaces
             // (or clears) whatever was attached on the previous turn, so the
             // planner injects it only into the newest user message.
@@ -140,6 +152,52 @@ trait TracksPlanning
         });
 
         return $found;
+    }
+
+    /**
+     * Switch web search on or off for the session's newest message (the
+     * editor's composer toggle; follow-ups set it again via reopenForFollowUp()).
+     */
+    public function setWebSearch(string $sessionId, bool $on): void
+    {
+        $this->update($sessionId, function (array $session) use ($on): array {
+            $session['web_search'] = $on;
+
+            return $session;
+        });
+    }
+
+    /**
+     * Collect web search sources for the turn in progress; the next assistant
+     * turn carries them (appendAssistantTurn()).
+     *
+     * @param  array<int, array{url: string, title: string}>  $citations
+     */
+    public function addTurnCitations(string $sessionId, array $citations): void
+    {
+        if ($citations === []) {
+            return;
+        }
+
+        $this->update($sessionId, function (array $session) use ($citations): array {
+            // While the newest turn is the user's message, the reply is still to
+            // come: collect. Entry workers can finish after the planner wrote the
+            // turn's reply (the summary): their sources then join that reply.
+            $transcript = is_array($session['transcript'] ?? null) ? $session['transcript'] : [];
+            $last = array_key_last($transcript);
+
+            if ($last !== null && ($transcript[$last]['role'] ?? '') === 'assistant') {
+                $existing = is_array($transcript[$last]['citations'] ?? null) ? $transcript[$last]['citations'] : [];
+                $session['transcript'][$last]['citations'] = WebSearch::merge($existing, $citations);
+
+                return $session;
+            }
+
+            $existing = is_array($session['turn_citations'] ?? null) ? $session['turn_citations'] : [];
+            $session['turn_citations'] = WebSearch::merge($existing, $citations);
+
+            return $session;
+        });
     }
 
     public function markPlanningComplete(string $sessionId): void

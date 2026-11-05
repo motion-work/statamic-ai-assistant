@@ -4,8 +4,10 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Jobs\GeneratePlannedEntryJob;
+use MotionWork\StatamicAiAssistant\Semantic\SemanticEntrySearch;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\AdvancedToolset;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
@@ -49,7 +51,9 @@ class EntryGenerationPlanner
         $this->transcript = new PlannerTranscript($batch);
 
         $replies = new PlannerReplyParser;
-        $search ??= new EntrySearch;
+        // Discovery (find_entries, search_entry_content, read lookups) adds
+        // semantic matches; it falls back to the keyword search on its own.
+        $search ??= new SemanticEntrySearch;
         $this->loop = new AgenticPlannerLoop(
             $aiService,
             $batch,
@@ -94,8 +98,9 @@ class EntryGenerationPlanner
         // 'advanced_tools' grant at request time (stored on the session) and the
         // pack isn't disabled site-wide. When off, the model never sees them.
         $advancedTools = AdvancedToolset::enabledForSession($session);
+        $webSearch = WebSearch::enabledForSession($session);
 
-        $system = $this->prompt->system($cap, $advancedTools, $locale, $attachment, $this->aiService->supportsVision());
+        $system = $this->prompt->system($cap, $advancedTools, $locale, $attachment, $this->aiService->supportsVision(), $webSearch);
 
         $attachmentPart = $attachment
             ? "\n\nAdditional context from an attached document (excerpt):\n".Str::limit($attachment, 6000)
@@ -107,7 +112,7 @@ class EntryGenerationPlanner
         // session, so a follow-up gets its own per-turn allowance on top of them.
         $priorEntryCount = is_array($session['entry_order'] ?? null) ? count($session['entry_order']) : 0;
 
-        $run = new AgenticPlanRun($sessionId, $catalog, $cap, $priorEntryCount, $advancedTools, $this->cancellationPoll($sessionId));
+        $run = new AgenticPlanRun($sessionId, $catalog, $cap, $priorEntryCount, $advancedTools, $this->cancellationPoll($sessionId), $webSearch);
         $this->loop->planAgenticToolLoop($messages, $prompt, $run);
         $this->transcript->recordOutcome($run);
 

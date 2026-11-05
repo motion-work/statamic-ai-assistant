@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Log;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
+use MotionWork\StatamicAiAssistant\Usage\UsageAttribution;
 use Statamic\Facades\Entry;
 
 /**
@@ -25,10 +27,18 @@ class GeneratePlannedEntryJob implements ShouldQueue
 
     public int $timeout;
 
+    /**
+     * CP user who started the turn, when dispatched from a CP request. The
+     * planner dispatches from the queue, so this is usually null and the
+     * session owner the planner job remembered is used instead.
+     */
+    public ?string $userId = null;
+
     public function __construct(
         public string $sessionId,
         public string $entryId,
     ) {
+        $this->userId = UsageAttribution::currentUserId();
         $batch = config('statamic-ai-assistant.entry_generator_batch', []);
         $this->queue = (string) ($batch['queue'] ?? 'default');
         $this->timeout = (int) ($batch['job_timeout'] ?? 300);
@@ -39,6 +49,18 @@ class GeneratePlannedEntryJob implements ShouldQueue
         EntryGenerationBatchService $batch,
         EntryGeneratorService $generator,
         ?TranslationService $translations = null,
+    ): void {
+        UsageAttribution::run(
+            $this->userId ?? UsageAttribution::sessionOwner($this->sessionId),
+            ['agent_session_id' => $this->sessionId, 'plan_entry_id' => $this->entryId],
+            fn () => $this->work($batch, $generator, $translations),
+        );
+    }
+
+    private function work(
+        EntryGenerationBatchService $batch,
+        EntryGeneratorService $generator,
+        ?TranslationService $translations,
     ): void {
         if ($batch->isCancelled($this->sessionId)) {
             $batch->markEntryFailed($this->sessionId, $this->entryId, (string) __('Cancelled.'));
@@ -84,7 +106,14 @@ class GeneratePlannedEntryJob implements ShouldQueue
                 $batch->recordStreamDelta($this->sessionId, $this->entryId, $delta);
             };
 
-            $result = $this->generate($generator, $row, $statamicEntryId, $locale, $attachment, $streamSink, $prefetched);
+            // Web search, when the editor switched it on for this message: the
+            // worker's tool loop reads it from the scope, and its sources join
+            // the turn's reply.
+            $result = WebSearch::during(
+                WebSearch::enabledForSession(is_array($session) ? $session : []),
+                fn () => $this->generate($generator, $row, $statamicEntryId, $locale, $attachment, $streamSink, $prefetched),
+                fn (array $citations) => $batch->addTurnCitations($this->sessionId, $citations),
+            );
 
             $batch->setPreferredPaths(
                 $this->sessionId,

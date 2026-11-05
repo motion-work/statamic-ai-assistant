@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Services\Concerns\TracksEntryJobs;
 use MotionWork\StatamicAiAssistant\Services\Concerns\TracksPlanning;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
 
 /**
  * Redis-backed session for queued AI agent entry generation (post-planner).
@@ -90,6 +91,10 @@ class EntryGenerationBatchService
             // feature, resolved at request time like max_plan_entries — the
             // queued planner has no authenticated user to check against.
             'advanced_tools' => $advancedTools,
+            // The editor's per-message web search toggle (setWebSearch()), and
+            // the sources collected for the turn in progress.
+            'web_search' => false,
+            'turn_citations' => [],
             'locale' => $locale,
             'attachment_content' => $attachmentContent,
             'plan_warnings' => [],
@@ -137,13 +142,20 @@ class EntryGenerationBatchService
             if (! in_array($role, ['user', 'assistant'], true) || $text === '') {
                 continue;
             }
-            $turns[] = [
+            $restored = [
                 'role' => $role,
                 'text' => $text,
                 // Prior entry rows no longer exist in the reseeded session.
                 'entry_ids' => [],
                 'kind' => $role === 'assistant' ? (string) ($turn['kind'] ?? 'summary') : null,
             ];
+            $citations = $role === 'assistant' && is_array($turn['citations'] ?? null)
+                ? WebSearch::merge([], $turn['citations'])
+                : [];
+            if ($citations !== []) {
+                $restored['citations'] = $citations;
+            }
+            $turns[] = $restored;
         }
 
         $id = (string) Str::uuid();

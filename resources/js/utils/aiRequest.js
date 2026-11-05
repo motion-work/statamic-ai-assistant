@@ -15,7 +15,9 @@ export function isAiRequestCancelled(error) {
 /**
  * A message an editor can act on. Provider errors ("Infomaniak request failed
  * (400): …") and HTTP details go to the console for whoever debugs it; the
- * editor gets a plain sentence. Validation errors (422) are already readable.
+ * editor gets a plain sentence. Validation errors (422) and flagged provider
+ * refusals (`ai_provider_error`, see AiProviderException::render) are already
+ * readable and shown as they are.
  */
 export function friendlyAiError(error, fallbackKey = 'The AI request failed. Please try again. If it keeps happening, tell your administrator.') {
   if (error?.response) {
@@ -30,6 +32,13 @@ export function friendlyAiError(error, fallbackKey = 'The AI request failed. Ple
     const errors = error.response.data?.errors;
     const first = errors && Object.values(errors)[0];
     if (Array.isArray(first) && first[0]) return first[0];
+  }
+
+  // Provider refusals (out of credits, budget used up, no model can serve the
+  // request) arrive already translated and written for editors.
+  const data = error?.response?.data;
+  if (data?.ai_provider_error && typeof data.message === 'string' && data.message.trim() !== '') {
+    return data.message;
   }
 
   if (status === 419) {

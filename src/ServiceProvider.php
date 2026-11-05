@@ -5,7 +5,9 @@ namespace MotionWork\StatamicAiAssistant;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use MotionWork\StatamicAiAssistant\Actions\TranslateEntry;
+use MotionWork\StatamicAiAssistant\Console\EmbeddingsCommand;
 use MotionWork\StatamicAiAssistant\Controllers\PromptController;
+use MotionWork\StatamicAiAssistant\Events\AiCompletionFinished;
 use MotionWork\StatamicAiAssistant\Fieldtypes\AiText;
 use MotionWork\StatamicAiAssistant\Fieldtypes\AiTextarea;
 use MotionWork\StatamicAiAssistant\Fieldtypes\TranslationActionPreflight;
@@ -15,7 +17,11 @@ use MotionWork\StatamicAiAssistant\Mcp\ContentCommitter;
 use MotionWork\StatamicAiAssistant\Mcp\ImageUploads;
 use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
 use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
+use MotionWork\StatamicAiAssistant\Semantic\EmbeddingIndexer;
+use MotionWork\StatamicAiAssistant\Semantic\SemanticSearch;
+use MotionWork\StatamicAiAssistant\Semantic\SyncEntryEmbedding;
 use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
+use MotionWork\StatamicAiAssistant\Services\Ai\AiProviders;
 use MotionWork\StatamicAiAssistant\Services\AssetImageDownloader;
 use MotionWork\StatamicAiAssistant\Services\DeeplService;
 use MotionWork\StatamicAiAssistant\Services\EditorialGuidanceService;
@@ -29,9 +35,8 @@ use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
 use MotionWork\StatamicAiAssistant\Services\FigmaContentFetcher;
 use MotionWork\StatamicAiAssistant\Services\FigmaOAuthService;
 use MotionWork\StatamicAiAssistant\Services\FigmaTokenStore;
-use MotionWork\StatamicAiAssistant\Services\GroqService;
+use MotionWork\StatamicAiAssistant\Services\GeneratedImageStore;
 use MotionWork\StatamicAiAssistant\Services\ImageAltTextGenerator;
-use MotionWork\StatamicAiAssistant\Services\InfomaniakService;
 use MotionWork\StatamicAiAssistant\Services\LlmTranslator;
 use MotionWork\StatamicAiAssistant\Services\NavigationTreeSyncService;
 use MotionWork\StatamicAiAssistant\Services\PromptUrlFetcher;
@@ -45,6 +50,10 @@ use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
+use MotionWork\StatamicAiAssistant\Usage\RecordAiUsage;
+use Statamic\Events\EntryDeleted;
+use Statamic\Events\EntrySaved;
 use Statamic\Facades\CP\Nav;
 use Statamic\Providers\AddonServiceProvider;
 use Statamic\Statamic;
@@ -72,6 +81,18 @@ class ServiceProvider extends AddonServiceProvider
 
     protected $routes = [
         'cp' => __DIR__.'/../routes/cp.php',
+    ];
+
+    protected $listen = [
+        // Every finished AI call lands in the usage log ("AI usage" CP page).
+        AiCompletionFinished::class => [RecordAiUsage::class],
+        // Saved or deleted entries update the semantic search index.
+        EntrySaved::class => [SyncEntryEmbedding::class],
+        EntryDeleted::class => [SyncEntryEmbedding::class],
+    ];
+
+    protected $commands = [
+        EmbeddingsCommand::class,
     ];
 
     protected $viewNamespace = 'statamic-ai-assistant';
@@ -104,9 +125,13 @@ class ServiceProvider extends AddonServiceProvider
         ImageAltTextGenerator::class,
         AssetImageDownloader::class,
         RemoteImageFetcher::class,
+        GeneratedImageStore::class,
         FigmaOAuthService::class,
         FigmaTokenStore::class,
         FigmaContentFetcher::class,
+        // Semantic search: availability and the embedding index.
+        SemanticSearch::class,
+        EmbeddingIndexer::class,
         // The Claude connector at /mcp.
         McpOAuth::class,
         ImageUploads::class,
@@ -117,11 +142,7 @@ class ServiceProvider extends AddonServiceProvider
     {
         parent::register();
 
-        $this->app->singleton(AbstractAiService::class, function () {
-            $provider = config('statamic-ai-assistant.provider_name');
-
-            return $provider === 'infomaniak' ? new InfomaniakService : new GroqService;
-        });
+        $this->app->singleton(AbstractAiService::class, fn () => AiProviders::make());
 
         foreach (self::SINGLETONS as $class) {
             $this->app->singleton($class);
@@ -172,6 +193,8 @@ class ServiceProvider extends AddonServiceProvider
             'entryGeneratorEnabled' => fn () => $this->agentEnabledForCurrentUser(),
             'entryCreationMax' => fn () => EntryCreationPolicy::maxPlanEntries(),
             'entryCreationLimited' => fn () => EntryCreationPolicy::appliesTo(),
+            // Whether the agent composer offers the per-message web search toggle.
+            'agentWebSearchAvailable' => fn () => WebSearch::available(),
         ]);
     }
 
@@ -258,6 +281,22 @@ class ServiceProvider extends AddonServiceProvider
                     ->route('statamic-ai-assistant.block-hints.page')
                     ->icon('layers-stacks')
                     ->can(AgentAccess::gateAbility('agent_settings'));
+            });
+        }
+
+        // "AI usage" — what the AI calls cost, per task, model and person.
+        // Super-admins only, like the access page.
+        if (config('statamic-ai-assistant.usage_tracking', true)) {
+            Nav::extend(function ($nav) use ($section) {
+                if (! CpFeatures::aiEnabled()) {
+                    return;
+                }
+
+                $nav->create(__('AI usage'))
+                    ->section($section())
+                    ->route('statamic-ai-assistant.usage.page')
+                    ->icon('chart-monitoring-indicator')
+                    ->can(AgentAccess::manageGateAbility());
             });
         }
 

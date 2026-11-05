@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Mcp;
 
+use MotionWork\StatamicAiAssistant\Semantic\SemanticSearch;
 use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
@@ -126,6 +127,11 @@ class ClaudeTranslationBridge
             }
         }
 
-        return ['entries' => $matches];
+        // Free slots go to entries similar in meaning (none while semantic
+        // search cannot run, so this is then the keyword search alone).
+        $similar = (new SemanticEntryMatches(app(SemanticSearch::class), $this->context))
+            ->find($query, $collection, array_column($matches, 'entry_id'), 20 - count($matches));
+
+        return ['entries' => [...$matches, ...$similar]];
     }
 }

@@ -1,9 +1,11 @@
 <template>
   <!-- ═══ Agentic chat (drawer) — Claude-style flat layout ═══ -->
-  <div v-if="drawer" ref="chatRoot" class="eg-chat">
-    <!-- Top bar: history / new chat on the left, copy + advanced-tools on the right -->
+  <div v-if="drawer" ref="chatRoot" class="eg-chat" :class="{ 'eg-chat--empty': renderedStep === 2 }">
+    <!-- Top bar: brand (slot) + history / new chat on the left, copy +
+         advanced-tools + close (slot) on the right -->
     <div class="eg-chat__topbar">
       <div class="eg-chat__topbar-left">
+        <slot name="topbar-start" />
         <button
           type="button"
           class="eg-topbar-btn"
@@ -65,7 +67,19 @@
         <span class="eg-topbar-toggle__label">{{ __('Advanced structure tools') }}</span>
         <span v-if="advancedTools.enabled" class="eg-topbar-toggle__badge">{{ __('active') }}</span>
       </label>
+      <slot name="topbar-end" />
     </div>
+
+    <!-- Scrim behind the history sidebar / template sheet: dims the workspace
+         and closes whichever panel is open when clicked. -->
+    <Transition name="eg-scrim">
+      <div
+        v-if="historyOpen || (templatesOpen && activeTemplate)"
+        class="eg-chat__scrim"
+        aria-hidden="true"
+        @click="closePanels"
+      />
+    </Transition>
 
     <!-- Chat history: slide-over list of locally saved conversations -->
     <Transition name="eg-history">
@@ -222,6 +236,11 @@
       @insert="insertRefTokens"
     />
 
+    <!-- Main column. Empty chat: greeting, composer and template cards are
+         centred as one hero group. Conversation: the stream scrolls and the
+         composer docks at the bottom. Same DOM in both states, so the composer
+         (TipTap) never remounts when the first message is sent. -->
+    <div class="eg-chat__main">
     <div
       ref="chatStream"
       class="eg-chat__stream"
@@ -229,50 +248,10 @@
       @click="onChatStreamClick"
     >
 
-      <!-- Step 2: prompt-template cards shown inline as the initial content.
-           First 3 templates surface immediately; "More templates" reveals the rest. -->
-      <div v-if="renderedStep === 2" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
-        <p class="eg-chat__templates-lead">{{ __('Start from a template, or type your own request below.') }}</p>
-        <div class="eg-chat__templates">
-          <button
-            v-for="tpl in visibleTemplates"
-            :key="tpl.id"
-            type="button"
-            class="eg-templates__card"
-            @click="onTemplateSelect(tpl)"
-          >
-            <span class="eg-templates__card-icon" aria-hidden="true" v-html="templateIconSvg(tpl.icon)"></span>
-            <span class="eg-templates__card-body">
-              <span class="eg-templates__card-title">{{ __(tpl.title) }}</span>
-              <span class="eg-templates__card-summary">{{ __(tpl.summary) }}</span>
-            </span>
-            <span class="eg-templates__card-chevron" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </span>
-          </button>
-          <button
-            v-if="!showAllTemplates && allTemplates.length > initialTemplateCount"
-            type="button"
-            class="eg-chat__templates-more"
-            @click="showAllTemplates = true"
-          >
-            {{ __('More templates') }}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
-          <button
-            v-else-if="showAllTemplates && allTemplates.length > initialTemplateCount"
-            type="button"
-            class="eg-chat__templates-more"
-            @click="showAllTemplates = false"
-          >
-            {{ __('Show fewer') }}
-          </button>
-        </div>
+      <!-- Empty chat: greeting above the composer. -->
+      <div v-if="renderedStep === 2" class="eg-chat__hero">
+        <h1 class="eg-chat__hero-title">{{ heroGreeting }}</h1>
+        <p class="eg-chat__hero-lead">{{ __('Describe what you need, or start from a template below.') }}</p>
       </div>
 
       <!-- Conversation history: one block per turn. Assistant turns render their
@@ -317,6 +296,18 @@
             <p v-html="chatHtml(turn.text)"></p>
           </div>
           <p v-else v-html="chatHtml(turn.text)"></p>
+
+          <div v-if="turn.sources.length" class="eg-chat__sources">
+            <span class="eg-chat__sources-label">{{ __('Sources') }}</span>
+            <ul class="eg-chat__sources-list">
+              <li v-for="src in turn.sources" :key="src.url">
+                <a class="eg-chat__source" :href="src.url" target="_blank" rel="noopener noreferrer" :title="src.url">
+                  <span class="eg-chat__source-title">{{ src.title }}</span>
+                  <span class="eg-chat__source-host">{{ src.host }}</span>
+                </a>
+              </li>
+            </ul>
+          </div>
 
           <div v-if="turn.cards.length" class="eg-chat__cards">
             <EntryGeneratorEntryCard
@@ -475,6 +466,7 @@
             :known-titles="store.mentionedTitles"
             :file-meta="pendingFileMeta"
             :keydown-interceptor="composerKeydownInterceptor"
+            :autofocus="active"
             @send="handleComposerSend"
             @mention-query="onMentionQuery"
             @chip-click="onComposerChipClick"
@@ -506,6 +498,22 @@
               <circle cx="8.5" cy="8.5" r="1.5" />
               <path d="M21 15l-5-5L5 21" />
             </svg>
+          </button>
+          <button
+            v-if="webSearchAvailable"
+            type="button"
+            class="eg-chat__composer-web"
+            :class="{ 'eg-chat__composer-web--on': store.webSearch }"
+            :disabled="store.generating"
+            :aria-pressed="store.webSearch ? 'true' : 'false'"
+            :title="store.webSearch ? __('Web search is on for this chat. Click to turn it off.') : __('Let the agent search the web for this chat')"
+            @click="toggleWebSearch"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" />
+            </svg>
+            <span class="eg-chat__composer-web-label">{{ __('Web search') }}</span>
           </button>
           <button
             type="button"
@@ -548,6 +556,52 @@
           />
         </template>
       </div>
+    </div>
+
+    <!-- Empty chat: prompt templates as a card grid under the composer.
+         The first few surface immediately; "More templates" reveals the rest. -->
+    <section v-if="renderedStep === 2" class="eg-chat__starters" :aria-label="__('Templates')">
+      <h2 class="eg-chat__starters-label">{{ __('Start from a template') }}</h2>
+      <div class="eg-chat__templates">
+        <button
+          v-for="tpl in visibleTemplates"
+          :key="tpl.id"
+          type="button"
+          class="eg-templates__card"
+          @click="onTemplateSelect(tpl)"
+        >
+          <span class="eg-templates__card-icon" aria-hidden="true" v-html="templateIconSvg(tpl.icon)"></span>
+          <span class="eg-templates__card-body">
+            <span class="eg-templates__card-title">{{ __(tpl.title) }}</span>
+            <span class="eg-templates__card-summary">{{ __(tpl.summary) }}</span>
+          </span>
+          <span class="eg-templates__card-chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+              <path d="M5 12h14M13 6l6 6-6 6" />
+            </svg>
+          </span>
+        </button>
+      </div>
+      <button
+        v-if="!showAllTemplates && allTemplates.length > initialTemplateCount"
+        type="button"
+        class="eg-chat__templates-more"
+        @click="showAllTemplates = true"
+      >
+        {{ __('More templates') }}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      <button
+        v-else-if="showAllTemplates && allTemplates.length > initialTemplateCount"
+        type="button"
+        class="eg-chat__templates-more"
+        @click="showAllTemplates = false"
+      >
+        {{ __('Show fewer') }}
+      </button>
+    </section>
     </div>
   </div>
 
@@ -779,6 +833,7 @@ import {
   deleteChatFromHistory,
   setI18n,
   setToaster,
+  setWebSearch,
 } from '../store/entryGeneratorStore.js';
 import { formatChatMessageHtml } from '../formatChatUrls.js';
 import { formatFileSize } from '../composer/promptTokens.js';
@@ -854,7 +909,8 @@ export default {
       templatesOpen: false,
       activeTemplate: null,
       showAllTemplates: false,
-      initialTemplateCount: 3,
+      // Grid of two columns: four cards fill two even rows.
+      initialTemplateCount: 4,
       collections: [],
       selectedCollection: '',
       selectedBlueprint: '',
@@ -935,7 +991,20 @@ export default {
       return promptTemplates;
     },
 
-    /** Templates shown inline in the initial chat: first 3 unless expanded. */
+    /** Whether the composer offers web search (OpenRouter, enabled, not on a regional host). */
+    webSearchAvailable() {
+      return !!Statamic.$config.get('agentWebSearchAvailable');
+    },
+
+    /** Empty-chat headline, addressed to the signed-in user by first name. */
+    heroGreeting() {
+      const name = String(Statamic.$config.get('user')?.name || '').trim().split(/\s+/)[0];
+      return name
+        ? this.__('What should we create, :name?', { name })
+        : this.__('What should we create today?');
+    },
+
+    /** Templates shown in the empty chat: the first few unless expanded. */
     visibleTemplates() {
       const all = this.allTemplates;
       if (this.showAllTemplates || all.length <= this.initialTemplateCount) {
@@ -1037,6 +1106,7 @@ export default {
         role: t.role,
         text: t.text,
         kind: t.kind,
+        sources: t.role === 'assistant' ? this.sourceChips(t.citations) : [],
         cards: t.role === 'assistant' && Array.isArray(t.entry_ids)
           ? this.store.entries.filter((e) => t.entry_ids.includes(e.id))
           : [],
@@ -1167,7 +1237,12 @@ export default {
         if (now) {
           this.chatStickToBottom = true;
           this.seedOpenEntry();
-          this.$nextTick(() => this.scrollChatToBottom(true));
+          this.$nextTick(() => {
+            this.scrollChatToBottom(true);
+            // Reopening: the editor already exists, so focus it here. On the
+            // first open it loads lazily and focuses itself (autofocus prop).
+            if (!this.store.generating) this.$refs.composer?.focus();
+          });
         }
       },
     },
@@ -1250,6 +1325,29 @@ export default {
       }
     },
 
+    toggleWebSearch() {
+      setWebSearch(!this.store.webSearch);
+    },
+
+    /**
+     * A reply's web search sources as chips: title (or the host when the
+     * source has none) and host. Only http(s) links.
+     */
+    sourceChips(citations) {
+      if (!Array.isArray(citations)) return [];
+      return citations
+        .filter((c) => c && typeof c.url === 'string' && /^https?:\/\//i.test(c.url))
+        .map((c) => {
+          let host = '';
+          try {
+            host = new URL(c.url).hostname.replace(/^www\./, '');
+          } catch (e) {
+            host = c.url;
+          }
+          return { url: c.url, host, title: (c.title || '').trim() || host };
+        });
+    },
+
     /**
      * Copy the whole visible conversation (plus the session id, so devs can
      * match server logs) to the clipboard — the "send this weird chat to the
@@ -1268,7 +1366,12 @@ export default {
       for (const turn of turns) {
         const who = turn.role === 'user' ? this.__('You') : this.__('AI agent');
         const kind = turn.kind && turn.kind !== 'summary' ? ` [${turn.kind}]` : '';
-        lines.push(`${who}${kind}:`, turn.text || '', '');
+        lines.push(`${who}${kind}:`, turn.text || '');
+        const sources = turn.role === 'assistant' ? this.sourceChips(turn.citations) : [];
+        if (sources.length) {
+          lines.push(`${this.__('Sources')}:`, ...sources.map((src) => `- ${src.title}: ${src.url}`));
+        }
+        lines.push('');
       }
 
       const text = lines.join('\n');
@@ -1694,6 +1797,13 @@ export default {
       }
       this.historyChats = listChatHistory();
       this.historyOpen = true;
+    },
+
+    /** Close the history sidebar and the template sheet (scrim click). */
+    closePanels() {
+      this.historyOpen = false;
+      this.templatesOpen = false;
+      this.activeTemplate = null;
     },
 
     startNewChat() {

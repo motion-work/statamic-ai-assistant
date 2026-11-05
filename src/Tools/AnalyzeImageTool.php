@@ -10,7 +10,7 @@ use Statamic\Facades\Asset;
  * model. Composable by design: the agent analyzes once, then writes alt texts
  * in as many languages as needed itself (it is a language model) — no
  * dedicated "generate alt" pipeline. Registered only when a vision model is
- * configured (see infomaniak_vision_model).
+ * configured (OpenRouter: the vision profile; Infomaniak: infomaniak_vision_model).
  */
 class AnalyzeImageTool implements ChatTool
 {

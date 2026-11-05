@@ -20,62 +20,51 @@
     </button>
 
     <Teleport to="body">
-      <Transition name="eg-cp-fade">
-        <div
-          v-if="open"
-          class="eg-cp-launcher__backdrop"
-          aria-hidden="true"
-          @click="closeDrawer"
-        />
-      </Transition>
       <!--
-        The panel mounts lazily on first open and then stays alive (v-show) so the
-        EntryGeneratorPage component instance, its DOM, and any in-flight scroll
-        position survive a close/reopen cycle. The actual generation state lives
-        in the module-scope store, so even if this whole launcher were torn down
-        the work would continue.
+        Full-screen workspace: covers the whole Control Panel so the agent is
+        the place work happens. It mounts lazily on first open and then stays
+        alive (v-show) so the EntryGeneratorPage instance, its DOM and scroll
+        position survive a close/reopen cycle. Generation state lives in the
+        module-scope store, so work continues even while it is closed.
+        z-index stays on the CP "above" layer, below the portal layer, so native
+        Stacks (asset browser), dropdowns and toasts still render on top.
       -->
-      <Transition name="eg-cp-sheet">
+      <Transition name="eg-cp-screen">
         <div
           v-show="open"
           v-if="hasOpenedOnce"
-          class="eg-cp-launcher__dock"
-          role="presentation"
+          class="eg-cp-screen"
+          role="dialog"
+          aria-modal="true"
+          tabindex="-1"
+          :aria-label="`${__('AI agent')} (${__('Beta')})`"
         >
-          <div
-            class="eg-cp-launcher__panel"
-            role="dialog"
-            tabindex="-1"
-            :aria-label="`${__('AI agent')} (${__('Beta')})`"
-            @click.stop
-          >
-            <header class="eg-cp-launcher__head">
-              <span class="eg-cp-launcher__head-brand" aria-hidden="true">
-                <svg class="eg-cp-launcher__mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+          <EntryGeneratorPage :drawer="true" :active="open">
+            <template #topbar-start>
+              <span class="eg-cp-screen__brand">
+                <svg class="eg-cp-screen__mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M12 2.5c.4 0 .73.28.8.67.62 3.4 1.88 5.24 5.8 6.03a.82.82 0 0 1 0 1.6c-3.92.8-5.18 2.63-5.8 6.03a.82.82 0 0 1-1.6 0c-.62-3.4-1.88-5.24-5.8-6.03a.82.82 0 0 1 0-1.6c3.92-.8 5.18-2.63 5.8-6.03.07-.39.4-.67.8-.67Z" />
                   <path d="M18.5 15c.24 0 .44.17.48.4.25 1.36.75 2.07 2.27 2.38a.49.49 0 0 1 0 .96c-1.52.31-2.02 1.02-2.27 2.38a.49.49 0 0 1-.96 0c-.25-1.36-.75-2.07-2.27-2.38a.49.49 0 0 1 0-.96c1.52-.31 2.02-1.02 2.27-2.38.04-.23.24-.4.48-.4Z" />
                 </svg>
+                <span class="eg-cp-screen__title">{{ __('AI agent') }}</span>
+                <span class="eg-cp-screen__beta">{{ __('Beta') }}</span>
               </span>
-              <div class="eg-cp-launcher__head-title-row">
-                <span class="eg-cp-launcher__head-title">{{ __('AI agent') }}</span>
-                <span class="eg-cp-launcher__beta">{{ __('Beta') }}</span>
-              </div>
+              <span class="eg-cp-screen__divider" aria-hidden="true" />
+            </template>
+            <template #topbar-end>
               <button
                 type="button"
-                class="eg-cp-launcher__close"
-                :title="__('Minimize')"
-                :aria-label="__('Minimize')"
+                class="eg-cp-screen__close"
+                :title="__('Back to the Control Panel (Esc)')"
                 @click="closeDrawer"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="20" height="20">
+                <span class="eg-cp-screen__close-label">{{ __('Close') }}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
                   <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
                 </svg>
               </button>
-            </header>
-            <div class="eg-cp-launcher__body">
-              <EntryGeneratorPage :drawer="true" :active="open" />
-            </div>
-          </div>
+            </template>
+          </EntryGeneratorPage>
         </div>
       </Transition>
     </Teleport>

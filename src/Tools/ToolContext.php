@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Tools;
 
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
 
 /**
  * Per-run side-channels a ChatTool may need. Bundling them here means tools with
@@ -102,5 +103,29 @@ class ToolContext
     public function sawFetchedUrl(string $url): bool
     {
         return isset($this->fetchedUrls[rtrim(trim($url), '.,;:!?)]}')]);
+    }
+
+    // ── Web search citations ─────────────────────────────────────────────
+    // Pages the model cited from a web search this run. The fetch tool may
+    // open them, but they never count as provenance for save_remote_image:
+    // images still only come from sources the user provided.
+
+    /** @var array<string, true> normalized URLs cited by web search this run */
+    private array $citedUrls = [];
+
+    /**
+     * @param  array<int, array{url: string, title: string}>  $citations
+     */
+    public function rememberCitations(array $citations): void
+    {
+        foreach ($citations as $citation) {
+            $this->citedUrls[WebSearch::normalizeUrl($citation['url'])] = true;
+        }
+    }
+
+    /** Whether a web search cited this URL this run. */
+    public function wasCited(string $url): bool
+    {
+        return $url !== '' && isset($this->citedUrls[WebSearch::normalizeUrl($url)]);
     }
 }

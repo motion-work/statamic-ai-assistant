@@ -12,6 +12,7 @@ use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use MotionWork\StatamicAiAssistant\Support\QueueReadiness;
+use MotionWork\StatamicAiAssistant\Support\WebSearch;
 use Statamic\Facades\Site;
 use Statamic\Facades\User;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -54,6 +55,7 @@ final class AgentSessionController
             'attachments' => 'nullable|array|max:6',
             'attachments.*' => 'file|mimes:pdf,txt|max:10240',
             'auto_resolve_target' => 'nullable|boolean',
+            'web_search' => 'nullable|boolean',
         ]);
 
         $attachmentContent = $this->attachmentContentFromRequest($request);
@@ -79,16 +81,25 @@ final class AgentSessionController
         // the user's explicit opt-in toggle.
         $maxPlanEntries = EntryCreationPolicy::maxPlanEntries();
         $advancedTools = AgentAccess::advancedToolsActive();
+        $webSearch = $this->webSearchRequested($request);
 
-        $startSession = fn () => $this->entryBatch->initPlanningSession(
-            $locale,
-            $attachmentContent,
-            (string) $data['prompt'],
-            $collectionHandle,
-            $blueprintHandle,
-            $maxPlanEntries,
-            $advancedTools,
-        );
+        $startSession = function () use ($locale, $attachmentContent, $data, $collectionHandle, $blueprintHandle, $maxPlanEntries, $advancedTools, $webSearch): string {
+            $sessionId = $this->entryBatch->initPlanningSession(
+                $locale,
+                $attachmentContent,
+                (string) $data['prompt'],
+                $collectionHandle,
+                $blueprintHandle,
+                $maxPlanEntries,
+                $advancedTools,
+            );
+
+            if ($webSearch) {
+                $this->entryBatch->setWebSearch($sessionId, true);
+            }
+
+            return $sessionId;
+        };
 
         return response()->stream(fn () => $this->streamPlanning($startSession), 200, $this->ndjsonStreamHeaders());
     }
@@ -173,6 +184,7 @@ final class AgentSessionController
             'attachment' => 'nullable|file|mimes:pdf,txt|max:10240',
             'attachments' => 'nullable|array|max:6',
             'attachments.*' => 'file|mimes:pdf,txt|max:10240',
+            'web_search' => 'nullable|boolean',
         ]);
 
         $session = $this->entryBatch->getSession($sessionId);
@@ -195,7 +207,7 @@ final class AgentSessionController
 
         $attachmentContent = $this->attachmentContentFromRequest($request);
 
-        if (! $this->entryBatch->reopenForFollowUp($sessionId, (string) $data['prompt'], $maxPlanEntries, $advancedTools, $attachmentContent)) {
+        if (! $this->entryBatch->reopenForFollowUp($sessionId, (string) $data['prompt'], $maxPlanEntries, $advancedTools, $attachmentContent, $this->webSearchRequested($request))) {
             return response()->json(['error' => __('This chat has expired. Start a new request.')], 404);
         }
 
@@ -218,9 +230,13 @@ final class AgentSessionController
             'transcript.*.role' => 'required|string|in:user,assistant',
             'transcript.*.text' => 'required|string|max:20000',
             'transcript.*.kind' => 'nullable|string|max:32',
+            'transcript.*.citations' => 'nullable|array|max:30',
+            'transcript.*.citations.*.url' => 'required|string|max:2048',
+            'transcript.*.citations.*.title' => 'nullable|string|max:500',
             'attachment' => 'nullable|file|mimes:pdf,txt|max:10240',
             'attachments' => 'nullable|array|max:6',
             'attachments.*' => 'file|mimes:pdf,txt|max:10240',
+            'web_search' => 'nullable|boolean',
         ]);
 
         if ($err = (new QueueReadiness)->setupError()) {
@@ -234,11 +250,20 @@ final class AgentSessionController
         $attachmentContent = $this->attachmentContentFromRequest($request);
 
         $sessionId = $this->entryBatch->restoreSessionFromTranscript($locale, $data['transcript'], $advancedTools);
-        $this->entryBatch->reopenForFollowUp($sessionId, (string) $data['prompt'], $maxPlanEntries, $advancedTools, $attachmentContent);
+        $this->entryBatch->reopenForFollowUp($sessionId, (string) $data['prompt'], $maxPlanEntries, $advancedTools, $attachmentContent, $this->webSearchRequested($request));
 
         PlanEntriesJob::dispatch($sessionId);
 
         return response()->json(['ok' => true, 'session_id' => $sessionId]);
+    }
+
+    /**
+     * The editor switched web search on for this message, and it can be
+     * offered (OpenRouter, not regional, enabled in config).
+     */
+    private function webSearchRequested(Request $request): bool
+    {
+        return $request->boolean('web_search') && WebSearch::available();
     }
 
     /**

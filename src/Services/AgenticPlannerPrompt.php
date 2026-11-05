@@ -4,6 +4,7 @@ namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Str;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
+use MotionWork\StatamicAiAssistant\Support\ImageGeneration;
 use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\AdvancedToolset;
 use Statamic\Facades\Site;
@@ -15,11 +16,22 @@ use Statamic\Facades\Site;
  */
 final class AgenticPlannerPrompt
 {
-    public function system(int $cap, bool $advancedTools, string $locale, ?string $attachment, bool $supportsVision): string
+    public function system(int $cap, bool $advancedTools, string $locale, ?string $attachment, bool $supportsVision, bool $webSearch = false): string
     {
         $system = $this->intro($cap)
             .$this->tools($advancedTools, $supportsVision)
             .$this->workflow($cap, $locale);
+
+        // Web search is switched on per message, so it goes after the stable
+        // instructions: the cached prompt prefix stays the same either way.
+        if ($webSearch) {
+            $system .= "\n\n".self::webSearchRules();
+        }
+
+        // Site-wide switch (super admins), after the stable part like web search.
+        if (ImageGeneration::enabled()) {
+            $system .= "\n\n".self::imageGenerationRules();
+        }
 
         // Editor-maintained site-wide instructions (AI instructions page) —
         // the site-level analog of a coding agent's project memory file.
@@ -45,6 +57,30 @@ final class AgenticPlannerPrompt
         }
 
         return $system;
+    }
+
+    /**
+     * The web search rules shared by the planner and the entry worker.
+     */
+    public static function webSearchRules(): string
+    {
+        return "WEB SEARCH (enabled by the user for this message):\n"
+            ."- You can search the web. The search runs automatically when you need it; there is no tool call to make for it.\n"
+            ."- Search when the request needs current or external facts the CMS does not hold (dates, prices, opening hours, regulations, news, facts about a third party). Do not search for things the CMS already answers (entries, globals, navigation, assets).\n"
+            ."- Only state facts the search results support, and keep the sources: the user sees them listed under your reply. Never invent a source.\n"
+            ."- You may call fetch_page_content on a page the search results cited, to read it in full. Never save images from searched pages: images only come from pages the user provided.\n"
+            ."- Write in the user's language even when the sources are in another language.\n";
+    }
+
+    /**
+     * The planner itself generates nothing: the entry worker has the
+     * generate_image tool, so an explicit image request must reach its job.
+     */
+    public static function imageGenerationRules(): string
+    {
+        return "IMAGE GENERATION (switched on for this site):\n"
+            ."- The entry worker can generate images with an image model. When the user explicitly asks for an image to be generated or created (\"erstelle ein Bild …\", \"generate a hero image\"), keep that request, with what the image should show, in that entry's create_entry_job / update_entry_job `prompt`.\n"
+            ."- Do not ask for generated images on your own: without an explicit request, image fields are filled from existing assets as usual.\n";
     }
 
     private function intro(int $cap): string

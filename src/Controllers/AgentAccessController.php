@@ -8,6 +8,7 @@ use MotionWork\StatamicAiAssistant\Services\AgentAccessStore;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
+use MotionWork\StatamicAiAssistant\Support\ImageGeneration;
 use Statamic\Facades\Role;
 use Statamic\Facades\User;
 
@@ -45,7 +46,23 @@ class AgentAccessController
             'ceiling' => EntryCreationPolicy::configuredMaxPlanEntries(),
             // Without AI features only the Claude connector section applies.
             'aiEnabled' => CpFeatures::aiEnabled() && (bool) config('statamic-ai-assistant.entry_generator', true),
+            'imageGeneration' => $this->imageGeneration(),
         ]);
+    }
+
+    /**
+     * The image generation switch as the page shows it: on or off, whether
+     * config locks it, and why it cannot run (another provider, no model).
+     *
+     * @return array{on: bool, locked: bool, unavailable: ?string}
+     */
+    private function imageGeneration(): array
+    {
+        return [
+            'on' => ImageGeneration::switchedOn(),
+            'locked' => ImageGeneration::configOverride() !== null,
+            'unavailable' => ImageGeneration::unavailableReason(),
+        ];
     }
 
     /**
@@ -60,6 +77,7 @@ class AgentAccessController
         $data = $request->validate([
             'access' => 'required|array',
             'access.claude_restricted' => 'sometimes|boolean',
+            'access.image_generation' => 'sometimes|boolean',
             'access.*.roles' => 'sometimes|array',
             'access.*.roles.*' => 'string',
             'access.*.users' => 'sometimes|array',

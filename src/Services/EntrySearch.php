@@ -17,7 +17,7 @@ use Statamic\Fieldtypes\Terms;
 class EntrySearch
 {
     /** Max candidate rows pulled from the store before in-PHP ranking in findEntriesShortlist(). */
-    private const SEARCH_SCAN_LIMIT = 200;
+    protected const SEARCH_SCAN_LIMIT = 200;
 
     /**
      * Search entries by title/slug — rows only, no pagination info. Convenience
@@ -115,7 +115,7 @@ class EntrySearch
      * A fresh base query per attempt — Statamic's query builder is stateful,
      * so we rebuild rather than clone.
      */
-    private function baseQuery(string $siteHandle, ?string $collectionHandle): mixed
+    protected function baseQuery(string $siteHandle, ?string $collectionHandle): mixed
     {
         $q = Entry::query()->where('site', $siteHandle);
         if (is_string($collectionHandle) && $collectionHandle !== '') {
@@ -128,7 +128,7 @@ class EntrySearch
     /**
      * @param  array<int, string>  $tokens
      */
-    private function candidates(array $tokens, string $siteHandle, ?string $collectionHandle): \Illuminate\Support\Collection
+    protected function candidates(array $tokens, string $siteHandle, ?string $collectionHandle): \Illuminate\Support\Collection
     {
         // Primary narrowing: every token must appear in the title OR slug. This is
         // word-order agnostic and — because tokenising strips connectors like "&",
@@ -166,7 +166,7 @@ class EntrySearch
      * @param  array<int, array<string, mixed>>  $rows
      * @return array{results: array<int, array<string, mixed>>, pagination: array{total: int, limit: int, offset: int, has_more: bool}}
      */
-    private function page(array $rows, int $total, int $limit, int $offset): array
+    protected function page(array $rows, int $total, int $limit, int $offset): array
     {
         return [
             'results' => $rows,
@@ -191,10 +191,24 @@ class EntrySearch
      */
     private function rankAndMapEntries($candidates, string $query, array $tokens, int $limit, int $offset = 0): array
     {
+        return $this->mapEntryRows(
+            collect($this->rank($candidates, $query, $tokens))->slice($offset, $limit)->pluck('entry')
+        );
+    }
+
+    /**
+     * Candidates with their keyword score, best first (see rankAndMapEntries()).
+     *
+     * @param  \Illuminate\Support\Collection<int, StatamicEntry>  $candidates
+     * @param  array<int, string>  $tokens
+     * @return list<array{entry: StatamicEntry, score: int}>
+     */
+    protected function rank($candidates, string $query, array $tokens): array
+    {
         $queryFold = SearchText::fold($query);
         $tokensFold = array_values(array_filter(array_map(fn ($t) => SearchText::fold($t), $tokens)));
 
-        $ranked = $candidates
+        return $candidates
             ->map(function ($entry) use ($queryFold, $tokensFold) {
                 $titleFold = SearchText::fold((string) ($entry->value('title') ?? ''));
                 $slugFold = SearchText::fold((string) ($entry->slug() ?? ''));
@@ -222,17 +236,15 @@ class EntrySearch
                 return ['entry' => $entry, 'score' => $score];
             })
             ->sortByDesc('score') // stable in PHP 8: equal scores keep recency order
-            ->slice($offset, $limit)
-            ->pluck('entry');
-
-        return $this->mapEntryRows($ranked);
+            ->values()
+            ->all();
     }
 
     /**
      * @param  \Illuminate\Support\Collection<int, StatamicEntry>|iterable<StatamicEntry>  $entries
      * @return array<int, array{id: string, title: string, slug: string, collection: string, published: bool}>
      */
-    private function mapEntryRows($entries): array
+    protected function mapEntryRows($entries): array
     {
         return collect($entries)
             ->map(fn ($e) => [

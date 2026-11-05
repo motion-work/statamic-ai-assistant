@@ -11,6 +11,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
 use MotionWork\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Usage\UsageAttribution;
 use Statamic\Facades\Entry;
 
 class TranslateEntryJob implements ShouldQueue
@@ -34,6 +35,13 @@ class TranslateEntryJob implements ShouldQueue
 
     protected int $maxDepth;
 
+    /**
+     * CP user who started the translation, captured at dispatch, so calls of
+     * the LLM fallback are attributed in the AI usage log. Null on jobs queued
+     * before the addon recorded it.
+     */
+    public ?string $userId = null;
+
     public function __construct(
         string $entryId,
         string $sourceLocale,
@@ -48,6 +56,7 @@ class TranslateEntryJob implements ShouldQueue
         $this->overwrite = $overwrite;
         $this->translationBatchId = $translationBatchId;
         $this->maxDepth = $maxDepth;
+        $this->userId = UsageAttribution::currentUserId();
         $this->queue = config('statamic-ai-assistant.translation_queue', 'translations');
     }
 
@@ -74,12 +83,16 @@ class TranslateEntryJob implements ShouldQueue
             ['origin_title' => EntryLabel::for($entry)],
         );
 
-        $result = $translationService->translateEntry(
-            $entry,
-            $this->sourceLocale,
-            $this->destinationLocale,
-            $this->overwrite,
-            $this->maxDepth,
+        $result = UsageAttribution::run(
+            $this->userId,
+            ['translation_batch_id' => $this->translationBatchId],
+            fn () => $translationService->translateEntry(
+                $entry,
+                $this->sourceLocale,
+                $this->destinationLocale,
+                $this->overwrite,
+                $this->maxDepth,
+            ),
         );
 
         $payload = $translationService->entryStatusPayloadForBatch($result);

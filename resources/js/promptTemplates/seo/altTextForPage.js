@@ -9,7 +9,7 @@ export default {
   id: 'seo-alt-text-for-page',
   category: 'seo',
   icon: 'image',
-  title: 'Add missing alt text to a page’s images',
+  title: "Add missing alt text to a page's images",
   summary: 'Describe each image with the vision model and write concise alt text in every locale.',
   whenToUse: 'Use when a page has images without alt text — good for SEO and accessibility.',
   questions: [

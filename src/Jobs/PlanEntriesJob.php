@@ -14,6 +14,7 @@ use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 use MotionWork\StatamicAiAssistant\Services\PromptAssetMentionResolver;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
+use MotionWork\StatamicAiAssistant\Usage\UsageAttribution;
 
 /**
  * Run the AI agent planner asynchronously so the HTTP request returns immediately.
@@ -33,8 +34,16 @@ class PlanEntriesJob implements ShouldQueue
 
     public int $timeout;
 
+    /**
+     * CP user who started the turn, captured at dispatch (the queue worker has
+     * none) so the AI usage log can attribute the calls. Null on jobs queued
+     * before the addon recorded it.
+     */
+    public ?string $userId = null;
+
     public function __construct(public string $sessionId)
     {
+        $this->userId = UsageAttribution::currentUserId();
         $batch = config('statamic-ai-assistant.entry_generator_batch', []);
         $this->queue = (string) ($batch['queue'] ?? 'default');
         // Planner can run for many minutes (URL fetches + LLM rounds); keep generous.
@@ -55,6 +64,26 @@ class PlanEntriesJob implements ShouldQueue
             return;
         }
 
+        // The generation jobs the planner dispatches run inside the queue,
+        // where nobody is signed in: they look the owner up by session.
+        UsageAttribution::rememberSessionOwner($this->sessionId, $this->userId);
+        $userId = $this->userId ?? UsageAttribution::sessionOwner($this->sessionId);
+
+        UsageAttribution::run(
+            $userId,
+            ['agent_session_id' => $this->sessionId],
+            fn () => $this->plan($session, $batch, $planner, $generator, $decorator),
+        );
+    }
+
+    /** @param  array<string, mixed>  $session */
+    private function plan(
+        array $session,
+        EntryGenerationBatchService $batch,
+        EntryGenerationPlanner $planner,
+        EntryGeneratorService $generator,
+        PlanEntryDecorator $decorator,
+    ): void {
         $cancelMessage = (string) __('Cancelled.');
 
         if ($batch->isCancelled($this->sessionId)) {

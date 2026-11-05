@@ -9,18 +9,30 @@ return [
     | PROVIDER Key
     |--------------------------------------------------------------------------
     |
-    | This plugin supports the following providers for now:
-    | - infomaniak (CH, respect the data of your clients)
-    | - groq (US, speed)
+    | This plugin supports the following providers:
+    | - auto (default): openrouter once OPENROUTER_API_KEY is set, infomaniak
+    |   otherwise, so sites with only Infomaniak credentials keep working
+    |   unchanged.
+    | - openrouter: one API for every model; the addon picks the model per
+    |   task (see "OpenRouter" below).
+    | - infomaniak: Swiss-hosted. Use it when a client needs prompts and
+    |   content to stay in Switzerland.
     |
     | Set the provider in your .env file using:
-    | PROVIDER_NAME=infomaniak
-    | or
-    | PROVIDER_NAME=groq
+    | STATAMIC_AI_ASSISTANT_PROVIDER_NAME=auto
+    | or openrouter / infomaniak.
+    |
+    | Data residency with OpenRouter: requests go to https://openrouter.ai and
+    | the chosen model's provider, wherever it runs. In-region routing (EU) is
+    | only available on OpenRouter's Business and Enterprise plans, by setting
+    | OPENROUTER_BASE_URL=https://eu.openrouter.ai/api/v1; even then, billing
+    | and account records are processed in the US. By default the addon only
+    | routes to providers that do not collect prompts (data_collection: deny,
+    | see openrouter_provider). For Swiss hosting, use infomaniak.
     |
     */
 
-    'provider_name' => env('STATAMIC_AI_ASSISTANT_PROVIDER_NAME', 'infomaniak'),
+    'provider_name' => env('STATAMIC_AI_ASSISTANT_PROVIDER_NAME', 'auto'),
 
     /*
     |--------------------------------------------------------------------------
@@ -124,17 +136,17 @@ return [
     |
     | Use the appropriate API key for your chosen provider.
     |
-    | For GROQ: set GROQ_API_KEY in your environment.
+    | For OPENROUTER: set OPENROUTER_API_KEY in your environment.
     | For INFOMANIAK: set INFOMANIAK_API_TOKEN in your environment.
     |
-    | An empty INFOMANIAK_API_TOKEN hides every AI feature in the Control Panel
-    | (agent, field buttons, AI instructions, agent access). DeepL translations,
-    | the glossary and the translate actions stay, and only when DEEPL_API_KEY
-    | is set.
+    | Without the active provider's key, every AI feature is hidden in the
+    | Control Panel (agent, field buttons, AI instructions, agent access).
+    | DeepL translations, the glossary and the translate actions stay, and only
+    | when DEEPL_API_KEY is set.
     |
     */
 
-    'groq_api_key' => env('GROQ_API_KEY'),
+    'openrouter_api_key' => env('OPENROUTER_API_KEY'),
     'infomaniak_api_token' => env('INFOMANIAK_API_TOKEN'),
 
     /*
@@ -142,12 +154,9 @@ return [
     | Model / Product Identifiers
     |--------------------------------------------------------------------------
     |
-    | For GROQ, use GROQ_MODEL.
     | For INFOMANIAK, use INFOMANIAK_PRODUCT_ID and INFOMANIAK_MODEL.
     |
     */
-    'groq_model' => env('GROQ_MODEL', 'llama-3.1-8b-instant'),
-
     // Infomaniak tiered models: the strong model does the heavy work (planning +
     // entry generation); the fast model handles lightweight tasks (target
     // selection, collection matching, block hints). Both are set in .env:
@@ -157,6 +166,293 @@ return [
     // model — so behaviour is unchanged until you opt in.
     'infomaniak_model' => env('INFOMANIAK_MODEL', 'mistral24b'),
     'infomaniak_model_fast' => env('INFOMANIAK_MODEL_FAST') ?: env('INFOMANIAK_MODEL', 'mistral24b'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | OpenRouter
+    |--------------------------------------------------------------------------
+    |
+    | OpenRouter (https://openrouter.ai) puts every model behind one API. The
+    | addon decides which model answers, per task:
+    |
+    |   agent      AI agent planning and entry generation (tools, reasoning)
+    |   light      small helpers: target selection, collection matching, hints
+    |   field      Ai Text / Bard buttons: generate and refactor
+    |   translate  LLM translation fallback (no DeepL key)
+    |   vision     image understanding: alt text, analyze_image
+    |
+    | Each profile has:
+    |   models      the model ids in fallback order (a list, or a comma-
+    |               separated string in .env). OpenRouter moves to the next
+    |               one when a model is down, rate limited or the prompt is
+    |               too long. The first one is the model you get normally.
+    |   preset      optional OpenRouter preset slug ("statamic-agent" or
+    |               "@preset/statamic-agent"). Presets live in your OpenRouter
+    |               account, so the model can be changed there for every site
+    |               at once. With models set too, the request fields win over
+    |               the preset; with no models, the preset alone decides.
+    |   reasoning   reasoning effort: none, minimal, low, medium, high, xhigh,
+    |               max, or null to leave the model's default. Quick tasks
+    |               (every task but agent) ask for "none" while
+    |               quick_tasks_without_thinking is on, so their models must
+    |               accept reasoning effort "none" (some reasoning models
+    |               don't: their models page says "mandatory").
+    |   max_tokens  optional output budget when the caller sets none.
+    |   temperature optional; null uses `temperature` above.
+    |
+    | The models below are the shipped defaults, picked in November 2026 from
+    | https://openrouter.ai/models (tools + structured outputs for the agent,
+    | image input for vision, cheap models that accept reasoning "none" for the
+    | quick tasks). Revise them as models change.
+    |
+    */
+
+    'openrouter_base_url' => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+
+    // Shown in your OpenRouter activity next to the site URL (HTTP-Referer).
+    // Empty uses APP_NAME.
+    'openrouter_app_title' => env('OPENROUTER_APP_TITLE'),
+
+    // Seconds to wait for one OpenRouter response (agent calls can be long).
+    'openrouter_http_timeout' => max(30, (int) env('OPENROUTER_HTTP_TIMEOUT', 180)),
+
+    'openrouter_profiles' => [
+        'agent' => [
+            // Strong tool-calling models with structured outputs. The agent
+            // forces a tool on some turns (e.g. fetch a URL first): Claude
+            // models with mandatory reasoning reject a forced tool_choice, so
+            // they come last, where OpenRouter only falls back to them.
+            'models' => env('OPENROUTER_AGENT_MODELS', 'openai/gpt-6.1-sol,google/gemini-4-argon,anthropic/claude-sonnet-5.5'),
+            'preset' => env('OPENROUTER_AGENT_PRESET'),
+            'reasoning' => env('OPENROUTER_AGENT_REASONING', 'medium'),
+            'max_tokens' => null,
+            'temperature' => null,
+        ],
+        'light' => [
+            'models' => env('OPENROUTER_LIGHT_MODELS', 'anthropic/claude-haiku-5.5,openai/gpt-6-luna'),
+            'preset' => env('OPENROUTER_LIGHT_PRESET'),
+            'reasoning' => env('OPENROUTER_LIGHT_REASONING', 'none'),
+            'max_tokens' => null,
+            'temperature' => null,
+        ],
+        'field' => [
+            'models' => env('OPENROUTER_FIELD_MODELS', 'anthropic/claude-haiku-5.5,openai/gpt-6-luna'),
+            'preset' => env('OPENROUTER_FIELD_PRESET'),
+            'reasoning' => env('OPENROUTER_FIELD_REASONING', 'none'),
+            'max_tokens' => null,
+            'temperature' => null,
+        ],
+        'translate' => [
+            // Good German, French and Italian; Mistral as an EU-made fallback.
+            'models' => env('OPENROUTER_TRANSLATE_MODELS', 'anthropic/claude-haiku-5.5,mistralai/mistral-large-4-0'),
+            'preset' => env('OPENROUTER_TRANSLATE_PRESET'),
+            'reasoning' => env('OPENROUTER_TRANSLATE_REASONING', 'none'),
+            'max_tokens' => null,
+            'temperature' => null,
+        ],
+        'vision' => [
+            // Must accept image input. Empty models and preset disable image analysis.
+            'models' => env('OPENROUTER_VISION_MODELS', 'anthropic/claude-haiku-5.5,openai/gpt-6-luna'),
+            'preset' => env('OPENROUTER_VISION_PRESET'),
+            'reasoning' => env('OPENROUTER_VISION_REASONING', 'none'),
+            'max_tokens' => null,
+            'temperature' => null,
+        ],
+        'image' => [
+            // Image generation (the agent's generate_image tool, see
+            // image_generation below). OpenRouter's images endpoint takes one
+            // model per request, so the addon tries these in order itself.
+            // Shipped defaults (Nov 2026): FLUX 3 Klein, about $0.009 per 1K
+            // image; Gemini 3.1 Flash Image as the fallback, about $0.07 per
+            // image. Only `models` applies; presets and reasoning do not.
+            'models' => env('OPENROUTER_IMAGE_MODELS', 'black-forest-labs/flux-3-image-klein,google/gemini-3.1-flash-image'),
+        ],
+        'embedding' => [
+            // Semantic search (see semantic_search below). One model: vectors
+            // from different models cannot be compared, so changing the model
+            // or the dimensions invalidates the index until it is rebuilt.
+            // openai/text-embedding-3-small: about $0.02 per million tokens,
+            // multilingual, and it can shorten its vectors to `dimensions`.
+            'models' => env('OPENROUTER_EMBEDDING_MODEL', 'openai/text-embedding-3-small'),
+            'dimensions' => max(64, (int) env('OPENROUTER_EMBEDDING_DIMENSIONS', 512)),
+        ],
+    ],
+
+    /*
+    | Which upstream providers OpenRouter may route to (the `provider` object,
+    | https://openrouter.ai/docs/features/provider-routing):
+    |
+    |   data_collection  "deny" (default) uses only providers that do not store
+    |                    or train on prompts; "allow" uses any provider.
+    |   zdr              true uses only zero-data-retention endpoints (fewer
+    |                    models qualify).
+    |   only / ignore    provider slugs to allow or skip (comma-separated).
+    |   sort             "price", "throughput" or "latency"; empty keeps
+    |                    OpenRouter's balanced default.
+    |
+    | Structured output (response_format) also sends require_parameters, so the
+    | schema never lands on a provider that ignores it.
+    |
+    | Data residency: OpenRouter keeps prompts and completions in the EU only
+    | on its Business and Enterprise plans, through
+    | OPENROUTER_BASE_URL=https://eu.openrouter.ai/api/v1. Account and billing
+    | records are processed in the US either way. For Swiss hosting use the
+    | infomaniak provider.
+    */
+    'openrouter_provider' => [
+        'data_collection' => env('OPENROUTER_DATA_COLLECTION', 'deny'),
+        'zdr' => (bool) env('OPENROUTER_ZDR', false),
+        'only' => env('OPENROUTER_PROVIDER_ONLY', ''),
+        'ignore' => env('OPENROUTER_PROVIDER_IGNORE', ''),
+        'sort' => env('OPENROUTER_PROVIDER_SORT', ''),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | OpenRouter structured outputs and prompt caching (AI agent)
+    |--------------------------------------------------------------------------
+    |
+    | Structured outputs: the AI agent sends each entry's JSON Schema (built
+    | from its blueprint) as `response_format`, so the model answers with JSON
+    | in exactly that shape and the repair round is rarely needed. Requests then
+    | only go to providers that support it (require_parameters), and carry no
+    | temperature (the OpenAI and Anthropic reasoning endpoints do not accept
+    | one). If a provider rejects the schema, the entry is generated again
+    | without it, so this never fails a generation. Very deeply nested
+    | blueprints get no schema. OpenRouter only.
+    |
+    | Prompt caching: the agent's system prompt (instructions + field schema)
+    | is large and repeats on every round and every entry of a session. The
+    | agent session id is sent as `session_id`, so OpenRouter keeps a session
+    | on one provider where that prefix stays cached, and agent calls carry a
+    | `cache_control` breakpoint, which Anthropic models need before they cache
+    | (OpenAI, Google and others cache automatically). Cached input costs
+    | roughly 0.1x (Anthropic) to 0.5x (OpenAI) of the normal input price;
+    | Anthropic charges 1.25x for the first write.
+    |
+    */
+    'openrouter_structured_outputs' => (bool) env('OPENROUTER_STRUCTURED_OUTPUTS', true),
+    'openrouter_prompt_caching' => (bool) env('OPENROUTER_PROMPT_CACHING', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI agent — web search
+    |--------------------------------------------------------------------------
+    |
+    | Editors switch web search on per message with the "Web search" button in
+    | the agent's composer (off by default; it stays on for the follow-ups of
+    | that chat). The agent can then look things up on the web, cite its
+    | sources under the reply, and open the cited pages. Images are still only
+    | saved from pages the editor gave: pages reached through a search never
+    | make their images saveable.
+    |
+    | The search runs inside OpenRouter (the `openrouter:web_search` server
+    | tool), so it needs the OpenRouter provider. It is not offered when
+    | OPENROUTER_BASE_URL points at a regional host (eu./us.openrouter.ai): the
+    | EU host has no search engine. Set enabled to false to remove the button
+    | for everyone.
+    |
+    | Privacy: search queries (written by the model from the editor's request)
+    | go to the search provider (Exa, Parallel, Perplexity or the model's own
+    | search). OpenRouter's zero-data-retention setting does not cover them.
+    |
+    | Cost: about $0.007–0.015 per search on top of the tokens, depending on
+    | the engine. max_results caps the results per search, max_total_results
+    | the results per request (across all searches).
+    |
+    | allowed_domains / excluded_domains: comma-separated domains to restrict
+    | or exclude, e.g. "admin.ch,bfs.admin.ch".
+    |
+    */
+    'web_search' => [
+        'enabled' => (bool) env('STATAMIC_AI_ASSISTANT_WEB_SEARCH', true),
+        'engine' => env('STATAMIC_AI_ASSISTANT_WEB_SEARCH_ENGINE', 'auto'),
+        'max_results' => max(1, min(25, (int) env('STATAMIC_AI_ASSISTANT_WEB_SEARCH_MAX_RESULTS', 5))),
+        'max_total_results' => max(1, (int) env('STATAMIC_AI_ASSISTANT_WEB_SEARCH_MAX_TOTAL_RESULTS', 15)),
+        'allowed_domains' => env('STATAMIC_AI_ASSISTANT_WEB_SEARCH_ALLOWED_DOMAINS', ''),
+        'excluded_domains' => env('STATAMIC_AI_ASSISTANT_WEB_SEARCH_EXCLUDED_DOMAINS', ''),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Semantic search (AI agent and Claude connector)
+    |--------------------------------------------------------------------------
+    |
+    | Finds entries by meaning, not only by matching words: "update the page
+    | about care" finds "Garantie und Reparaturen". Used by the AI agent's
+    | find_entries, search_entry_content and read tools, and by the Claude
+    | connector's find_entries. Results are merged with the keyword search, so
+    | an exact title or slug match still comes first.
+    |
+    | Every search falls back to the keyword search alone, unchanged, while
+    | semantic search cannot run: another provider than OpenRouter or no
+    | OPENROUTER_API_KEY, `enabled` false, no index built yet for the site,
+    | more entries than `max_entries`, or a failed embedding request.
+    |
+    | Index: one vector per entry localization (title, slug and text), stored
+    | per site under `path` (default storage/app/statamic-ai-assistant/embeddings).
+    | Build it once with `php artisan statamic-ai-assistant:embeddings build`
+    | (or "Rebuild index" on the AI usage page); after that, saving or deleting
+    | an entry updates its vector on `queue`. The model and dimensions come
+    | from the `embedding` profile above.
+    |
+    | Privacy: entry text (and each search query) is sent to the embedding
+    | provider through OpenRouter, with the openrouter_provider settings.
+    | Cost: about $0.02 per million tokens, roughly $0.03 to index 1,000
+    | entries; a search costs a fraction of a cent.
+    |
+    |   max_entries     above this many entries per site the vectors are not
+    |                   loaded and the keyword search runs alone (memory).
+    |   min_similarity  cosine similarity (0–1) below which a match is dropped.
+    |
+    */
+    'semantic_search' => [
+        'enabled' => (bool) env('STATAMIC_AI_ASSISTANT_SEMANTIC_SEARCH', true),
+        'path' => env('STATAMIC_AI_ASSISTANT_SEMANTIC_SEARCH_PATH'),
+        'queue' => env('STATAMIC_AI_ASSISTANT_SEMANTIC_SEARCH_QUEUE'),
+        'max_entries' => max(1, (int) env('STATAMIC_AI_ASSISTANT_SEMANTIC_SEARCH_MAX_ENTRIES', 5000)),
+        'min_similarity' => (float) env('STATAMIC_AI_ASSISTANT_SEMANTIC_SEARCH_MIN_SIMILARITY', 0.3),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Image generation (AI agent)
+    |--------------------------------------------------------------------------
+    |
+    | The agent's generate_image tool, on the OpenRouter provider only, with
+    | the `image` profile's models (openrouter_profiles). The agent generates
+    | an image only when an editor explicitly asks for one; it never fills
+    | empty image fields with generated images on its own.
+    |
+    | On/off: super admins switch it in the Control Panel (AI assistant → Who
+    | has access → Image generation); it is off until they do. Setting
+    | STATAMIC_AI_ASSISTANT_IMAGE_GENERATION to true or false overrides that
+    | switch for the site (the CP then shows it locked); leave it unset to let
+    | the CP decide.
+    |
+    | Generated images are saved as assets in `folder` of the entry's image
+    | container, with `ai_generated: true` and the prompt (`ai_prompt`) in
+    | their metadata, and an alt text from the vision model. They are saved
+    | when generated, before the entry is: images of a discarded preview stay
+    | in that folder, so it is the place to clean up.
+    |
+    |   max_per_entry   generate_image calls per generated entry.
+    |   aspect_ratio    default when the agent names none ("16:9", "1:1", …).
+    |   resolution      "512", "1K", "2K", … (bigger costs more on most models).
+    |   output_format   "jpeg" or "png"; FLUX rejects "webp".
+    |
+    | Cost: about $0.009 (FLUX 3 Klein) to $0.07 (Gemini) per image, shown on
+    | the AI usage page.
+    |
+    */
+    'image_generation' => [
+        'enabled' => env('STATAMIC_AI_ASSISTANT_IMAGE_GENERATION'),
+        'folder' => env('STATAMIC_AI_ASSISTANT_IMAGE_GENERATION_FOLDER', 'ai-generated'),
+        'max_per_entry' => max(1, (int) env('STATAMIC_AI_ASSISTANT_IMAGE_GENERATION_MAX_PER_ENTRY', 4)),
+        'aspect_ratio' => env('STATAMIC_AI_ASSISTANT_IMAGE_GENERATION_ASPECT_RATIO', '16:9'),
+        'resolution' => env('STATAMIC_AI_ASSISTANT_IMAGE_GENERATION_RESOLUTION', '1K'),
+        'output_format' => env('STATAMIC_AI_ASSISTANT_IMAGE_GENERATION_FORMAT', 'jpeg'),
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -170,9 +466,10 @@ return [
     | runs out first. When true, those calls ask the model to answer directly.
     | The AI agent's planning and entry generation always keep thinking on.
     |
-    | Infomaniak only (sent as chat_template_kwargs; skipped for Mistral models,
-    | which reject it and don't think anyway). Set false to keep thinking
-    | everywhere.
+    | Infomaniak sends it as chat_template_kwargs (skipped for Mistral models,
+    | which reject it and don't think anyway); OpenRouter as reasoning effort
+    | "none". Set false to keep thinking everywhere (OpenRouter quick tasks then
+    | use their profile's reasoning setting).
     |
     */
     'quick_tasks_without_thinking' => (bool) env('STATAMIC_AI_ASSISTANT_QUICK_TASKS_WITHOUT_THINKING', true),
@@ -195,11 +492,6 @@ return [
     */
 
     'infomaniak_http_timeout' => max(30, (int) env('STATAMIC_AI_ASSISTANT_INFOMANIAK_HTTP_TIMEOUT', 180)),
-
-    /*
-    | Groq HTTP client (Guzzle) timeout for direct chat/completions calls.
-    */
-    'groq_http_timeout' => max(30, (int) env('STATAMIC_AI_ASSISTANT_GROQ_HTTP_TIMEOUT', 600)),
 
     /*
     | Max attempts for an AI provider call when it fails transiently (HTTP
@@ -498,7 +790,8 @@ return [
     | Optional multimodal model for the analyze_image tool (e.g. generating
     | alt texts from what an image actually shows). Set to a vision-capable
     | model id from your Infomaniak AI product (GET /1/ai/models lists them);
-    | leave empty to disable image analysis entirely.
+    | leave empty to disable image analysis entirely. Infomaniak only:
+    | OpenRouter uses the `vision` profile in openrouter_profiles.
     |
     */
     'infomaniak_vision_model' => (string) env('STATAMIC_AI_ASSISTANT_INFOMANIAK_VISION_MODEL', ''),
@@ -650,5 +943,29 @@ return [
         'max_bytes' => max(1024, (int) env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH_MAX_BYTES', 10 * 1024 * 1024)),
         'timeout' => max(1, (int) env('STATAMIC_AI_ASSISTANT_IMAGE_FETCH_TIMEOUT', 20)),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI usage log
+    |--------------------------------------------------------------------------
+    |
+    | Every AI call (agent, field buttons, LLM translations, image analysis) is
+    | logged with its task, model, tokens and duration, plus its cost in USD
+    | when the provider reports one (OpenRouter does; Infomaniak does
+    | not). Super admins see it on the "AI usage" CP page, next to the
+    | OpenRouter key's spending limit.
+    |
+    | The log is flat files, one JSON line per call in `<YYYY-MM>.jsonl` under
+    | `usage_path` (default: storage/app/statamic-ai-assistant/usage). Recording
+    | never interrupts an AI call: a write error is logged and skipped. Months
+    | older than `usage_retention_months` (the current month counts as one)
+    | are deleted, checked at most once a day.
+    |
+    | It records who started a call (the CP user id) but no prompts or replies.
+    |
+    */
+    'usage_tracking' => (bool) env('STATAMIC_AI_ASSISTANT_USAGE_TRACKING', true),
+    'usage_retention_months' => max(1, (int) env('STATAMIC_AI_ASSISTANT_USAGE_RETENTION_MONTHS', 12)),
+    'usage_path' => env('STATAMIC_AI_ASSISTANT_USAGE_PATH'),
 
 ];

@@ -11,6 +11,7 @@ import EntryGeneratorCpLauncher from "./components/EntryGeneratorCpLauncher.vue"
 import SetHintsSettingsPage from "./components/SetHintsSettingsPage.vue";
 import TranslationGlossaryPage from "./components/TranslationGlossaryPage.vue";
 import AgentAccessPage from "./components/AgentAccessPage.vue";
+import AiUsagePage from "./components/AiUsagePage.vue";
 import { AiTextLegacyBardNode } from "./AiTextLegacyBardNode";
 import { AiBardService } from "./AiBardService";
 import { TranslationInfoDisplay } from "./utils/TranslationInfoDisplay";
@@ -53,6 +54,8 @@ Statamic.booting((statamic) => {
   Statamic.$components.register("translation-glossary-page", TranslationGlossaryPage);
 
   Statamic.$components.register("agent-access-page", AgentAccessPage);
+
+  Statamic.$components.register("ai-usage-page", AiUsagePage);
 
   Statamic.$components.register(
     "translation_action_preflight-fieldtype",

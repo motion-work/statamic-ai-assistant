@@ -5,9 +5,11 @@ use MotionWork\StatamicAiAssistant\Controllers\AgentAccessController;
 use MotionWork\StatamicAiAssistant\Controllers\AgentPickerController;
 use MotionWork\StatamicAiAssistant\Controllers\AgentPreferenceController;
 use MotionWork\StatamicAiAssistant\Controllers\AgentSessionController;
+use MotionWork\StatamicAiAssistant\Controllers\AiUsageController;
 use MotionWork\StatamicAiAssistant\Controllers\BulkTranslationController;
 use MotionWork\StatamicAiAssistant\Controllers\EntryGeneratorController;
 use MotionWork\StatamicAiAssistant\Controllers\FigmaOAuthController;
+use MotionWork\StatamicAiAssistant\Controllers\SemanticSearchController;
 use MotionWork\StatamicAiAssistant\Controllers\SetHintsController;
 use MotionWork\StatamicAiAssistant\Controllers\TranslationController;
 use MotionWork\StatamicAiAssistant\Controllers\TranslationGlossaryController;
@@ -69,6 +71,21 @@ Route::prefix('ai-agent-access')->name('statamic-ai-assistant.access.')
 
         Route::get('/data', [AgentAccessController::class, 'index'])->name('data');
         Route::post('/save', [AgentAccessController::class, 'save'])->name('save');
+    });
+
+// "AI usage" — cost and calls per task, model and person; super-admins only.
+Route::prefix('ai-usage')->name('statamic-ai-assistant.usage.')
+    ->middleware('can:'.AgentAccess::manageGateAbility())
+    ->group(function () {
+        Route::get('/', function () {
+            abort_unless(CpFeatures::aiEnabled(), 404);
+
+            return view('statamic-ai-assistant::ai-usage');
+        })->name('page');
+
+        Route::get('/data', [AiUsageController::class, 'data'])->name('data');
+        Route::get('/semantic-search', [SemanticSearchController::class, 'status'])->name('semantic');
+        Route::post('/semantic-search/rebuild', [SemanticSearchController::class, 'rebuild'])->name('semantic.rebuild');
     });
 
 Route::prefix('ai-translation-glossary')->name('statamic-ai-assistant.glossary.')->group(function () {
