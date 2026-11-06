@@ -39,6 +39,12 @@ final class WebSearch
             return false;
         }
 
+        // Free mode promises no cost, but OpenRouter bills every search
+        // (about $0.007–0.015), whichever model answers: off, like images.
+        if (FreeModels::enabled()) {
+            return false;
+        }
+
         $host = strtolower((string) parse_url((string) config('statamic-ai-assistant.openrouter_base_url', ''), PHP_URL_HOST));
 
         return ! str_starts_with($host, 'eu.') && ! str_starts_with($host, 'us.');

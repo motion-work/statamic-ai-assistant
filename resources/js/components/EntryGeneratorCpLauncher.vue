@@ -114,6 +114,11 @@ export default {
   },
 
   computed: {
+    /** Bumped by the store when the agent opened a draft it just created. */
+    minimizeRequestedAt() {
+      return agentState.minimizeRequestedAt;
+    },
+
     activity() {
       return getActivity();
     },
@@ -133,6 +138,15 @@ export default {
   },
 
   watch: {
+    // The agent opened the draft it just created: let the editor see it,
+    // after a short pause so the "created …" line is still noticed.
+    minimizeRequestedAt(at) {
+      if (!at || !this.open) return;
+      clearTimeout(this._minimizeTimer);
+      this._minimizeTimer = setTimeout(() => {
+        if (this.open) this.minimizeDrawer();
+      }, 1200);
+    },
     open(val) {
       if (val) {
         this.scrollLockPrev = document.body.style.overflow;
@@ -168,6 +182,7 @@ export default {
   },
 
   beforeUnmount() {
+    clearTimeout(this._minimizeTimer);
     document.body.style.overflow = this.scrollLockPrev || '';
     if (this.escHandler) {
       document.removeEventListener('keydown', this.escHandler);

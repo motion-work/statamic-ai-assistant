@@ -99,7 +99,7 @@
         <section v-if="aiEnabled" class="ax-card">
           <div class="ax-card__head">
             <h2 class="ax-card__title">{{ __('Free models') }}</h2>
-            <p class="ax-card__desc">{{ __('Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well, and image generation is off.') }}</p>
+            <p class="ax-card__desc">{{ __('Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well. Image generation and web search are off, since OpenRouter bills them even with free models.') }}</p>
           </div>
 
           <p v-if="freeModels.unavailable" class="ax-note">{{ freeModels.unavailable }}</p>

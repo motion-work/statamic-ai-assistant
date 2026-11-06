@@ -1022,7 +1022,6 @@
   "No free model can take this request with the current privacy setting. Try again later, or allow models that use prompts for training.": "No free model can take this request with the current privacy setting. Try again later, or allow models that use prompts for training.",
   "Image generation is off while only free models are used: OpenRouter has no free image models.": "Image generation is off while only free models are used: OpenRouter has no free image models.",
   "Free models": "Free models",
-  "Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well, and image generation is off.": "Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well, and image generation is off.",
   "Set by STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS in the site configuration.": "Set by STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS in the site configuration.",
   "Paid models": "Paid models",
   "The models configured for each task, billed to the OpenRouter key.": "The models configured for each task, billed to the OpenRouter key.",
@@ -1035,5 +1034,6 @@
   "None available": "None available",
   "Save to see the models for this setting.": "Save to see the models for this setting.",
   "Free models are on: every free embedding model needs training to be allowed (Who has access). Keyword search is used meanwhile.": "Free models are on: every free embedding model needs training to be allowed (Who has access). Keyword search is used meanwhile.",
-  ":start–:end of :total": ":start–:end of :total"
+  ":start–:end of :total": ":start–:end of :total",
+  "Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well. Image generation and web search are off, since OpenRouter bills them even with free models.": "Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well. Image generation and web search are off, since OpenRouter bills them even with free models."
 }

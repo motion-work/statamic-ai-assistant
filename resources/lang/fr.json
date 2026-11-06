@@ -1022,7 +1022,6 @@
   "No free model can take this request with the current privacy setting. Try again later, or allow models that use prompts for training.": "Aucun modèle gratuit ne peut traiter cette demande avec le réglage de confidentialité actuel. Réessayez plus tard, ou autorisez aussi les modèles qui utilisent les requêtes pour l’entraînement.",
   "Image generation is off while only free models are used: OpenRouter has no free image models.": "La génération d’images est désactivée tant que seuls les modèles gratuits sont utilisés : OpenRouter n’a pas de modèle d’image gratuit.",
   "Free models": "Modèles gratuits",
-  "Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well, and image generation is off.": "Utilisez uniquement les modèles gratuits d’OpenRouter pour toutes les tâches d’IA. L’add-on choisit lui-même le modèle gratuit le plus performant pour chaque tâche. Les modèles gratuits sont plus lents, moins fiables et répondent parfois moins bien, et la génération d’images est désactivée.",
   "Set by STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS in the site configuration.": "Défini par STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS dans la configuration du site.",
   "Paid models": "Modèles payants",
   "The models configured for each task, billed to the OpenRouter key.": "Les modèles configurés pour chaque tâche, facturés sur la clé OpenRouter.",
@@ -1035,5 +1034,6 @@
   "None available": "Aucun disponible",
   "Save to see the models for this setting.": "Enregistrez pour voir les modèles de ce réglage.",
   "Free models are on: every free embedding model needs training to be allowed (Who has access). Keyword search is used meanwhile.": "Les modèles gratuits sont activés : chaque modèle d’embedding gratuit nécessite d’autoriser l’entraînement (Qui a accès). La recherche par mots-clés est utilisée en attendant.",
-  ":start–:end of :total": ":start–:end sur :total"
+  ":start–:end of :total": ":start–:end sur :total",
+  "Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well. Image generation and web search are off, since OpenRouter bills them even with free models.": "Utilisez uniquement les modèles gratuits d’OpenRouter pour toutes les tâches d’IA. L’add-on choisit lui-même le modèle gratuit le plus performant pour chaque tâche. Les modèles gratuits sont plus lents, moins fiables et répondent parfois moins bien. La génération d’images et la recherche web sont désactivées, car OpenRouter les facture même avec des modèles gratuits."
 }

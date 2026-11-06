@@ -66,6 +66,9 @@ class WebSearchTest extends TestCase
         config(['statamic-ai-assistant.provider_name' => 'openrouter', 'statamic-ai-assistant.web_search.enabled' => false]);
         $this->assertFalse(WebSearch::available(), 'switched off in config');
 
+        config(['statamic-ai-assistant.web_search.enabled' => true, 'statamic-ai-assistant.openrouter_free_models.enabled' => true]);
+        $this->assertFalse(WebSearch::available(), 'free mode: every search is billed');
+
         $this->assertFalse(WebSearch::enabledForSession(['web_search' => true]));
     }
 

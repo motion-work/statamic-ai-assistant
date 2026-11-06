@@ -53,6 +53,7 @@ export const state = reactive({
   chatSessionId: null,      // durable session id across turns (NOT cleared at poll-terminal)
   planningWaitSeconds: null, // seconds the planning job has waited for a queue worker (null once it started)
   turnAutoSaved: [],        // card ids the agent saved as drafts during the live turn (for opening the entry)
+  minimizeRequestedAt: 0,   // set when the agent opened a new draft in the CP: the launcher minimises to show it
   turnStartedAt: null,      // ms timestamp the editor sent the running turn (working timer); kept with the active run
   turnActivityFrom: 0,      // activity line id before this turn: newer planning lines are its steps
   connectionLost: false,    // a few progress polls failed in a row; cleared as soon as one succeeds
@@ -369,6 +370,8 @@ function openSingleAutoSavedEntry() {
   state.turnAutoSaved = [];
   if (url && state.active && !hasUnsavedChanges()) {
     visitCp(url);
+    // Step aside so the editor sees the draft; the pill brings the chat back.
+    state.minimizeRequestedAt = Date.now();
   }
 }
 
