@@ -23,6 +23,14 @@ Maintained by [Motion Work](https://github.com/motion-work).
 - Upgrade Bard by adding the AI asisstant buttons (generation and translation) directly in Bard
 - Multilang supported (CP panel addon translations in EN/DE/FR/IT for now)
 
+### AI agent: new entries are saved as drafts
+
+When the AI agent creates a **new** entry, it is saved in Statamic as an unpublished draft as soon as it is ready, in the queued job, so it exists even when the chat was closed. The editor's own permissions apply: without permission to create entries in that collection (and site), the entry stays a preview card to save by hand. When a run creates exactly one entry, the Control Panel opens it behind the agent (not over a form with unsaved changes), and the chat offers **Minimise & view**. The agent's top bar has **Minimise**: it hides the full-screen agent without touching the chat, and a small **Back to the AI agent** button next to the launcher brings it back.
+
+Changes to existing entries and translations keep the preview and your confirmation, since they overwrite content. Turn auto-saving off with `STATAMIC_AI_ASSISTANT_AUTO_SAVE_NEW_ENTRIES=false` (config `auto_save_new_entries`).
+
+In collections with a page tree (for example FAQ groups), the agent can also move an entry under another parent, to the top level or after a sibling ("verschiebe diese FAQ in die Gruppe …"). It needs the editor's right to edit the entry and to reorder that collection, and it applies right away.
+
 ## How to Install
 
 Install with Composer. Current releases target **Statamic 6.5+** on the **`3.x`** line:
@@ -144,6 +152,16 @@ Finds entries by meaning, not only by matching words: "update the page about ret
 - **Storage:** one vector per entry localization, in `storage/app/statamic-ai-assistant/embeddings/<site>/` (no database). Change it with `STATAMIC_AI_ASSISTANT_SEMANTIC_SEARCH_PATH`.
 - **Model and cost:** `OPENROUTER_EMBEDDING_MODEL` (default `openai/text-embedding-3-small`) at `OPENROUTER_EMBEDDING_DIMENSIONS` (default 512), about $0.02 per million tokens: roughly $0.03 to index 1,000 entries, a fraction of a cent per search. Changing either invalidates the index until it is rebuilt.
 - **Privacy:** entry text and search queries are sent to the embedding provider through OpenRouter, with the provider settings above (`data_collection: deny` by default).
+
+**Free models (Kostenlose Modelle)**
+
+Super admins can switch the whole addon to OpenRouter's free models on **Who has access → Free models** (`STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS=true|false` locks the switch). Every text task and semantic search then cost nothing, up to OpenRouter's daily limit of free requests (1000 per day, 50 for accounts that bought less than $10 of credits).
+
+- **The most capable free models first:** the addon reads OpenRouter's free models sorted by intelligence (cached 6 hours) and picks per task. The AI agent gets models with reliable tool calls (≥ 90 % success) and at least 64k context, structured-output models first; image analysis gets models with image input; quick tasks prefer models that can answer without reasoning. Each request sends the best two plus `openrouter/free` (OpenRouter's own free router) as the last fallback; OpenRouter accepts at most three. The card shows the model each task uses right now.
+- **Self-healing:** a free model that is busy (429), down or passed over by OpenRouter's fallback moves down for 15 minutes; one blocked by the privacy setting for 24 hours. Editors see plain hints when all free models are busy or the daily limit is reached.
+- **Privacy:** requests keep `data_collection: deny` unless **Also allow models that use prompts for training** is ticked (`STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS_ALLOW_TRAINING`). Many free models, and every free embedding model, only answer with training allowed, and the OpenRouter account must allow free model training as well (openrouter.ai/settings/privacy). Without it, semantic search falls back to the keyword search.
+- **Off while free models are on:** image generation (there are no free image models) and presets. Switching to a free embedding model invalidates the semantic index until it is rebuilt.
+- Free models are slower, less reliable and may answer less well than the paid defaults. Quick tasks get at least 3000 output tokens, since many free models must reason first. Tuning: `openrouter_free_models` in the config.
 
 **AI usage page**
 

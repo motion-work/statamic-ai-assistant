@@ -39,6 +39,10 @@ final class ImageGeneration
             return __('Image generation needs the OpenRouter provider (set OPENROUTER_API_KEY).');
         }
 
+        if (FreeModels::enabled()) {
+            return __('Image generation is off while only free models are used: OpenRouter has no free image models.');
+        }
+
         $ai = app(AbstractAiService::class);
         if (! $ai instanceof GeneratesImages || ! $ai->supportsImageGeneration()) {
             return __('No image model is configured (OPENROUTER_IMAGE_MODELS).');

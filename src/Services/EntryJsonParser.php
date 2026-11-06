@@ -30,6 +30,13 @@ final class EntryJsonParser
         $response = preg_replace('/\s*```\s*$/', '', $response);
         $response = trim($response);
 
+        // "No changes": an update with nothing to change answers {} or [].
+        // json_decode('{}', true) is [] too, which array_is_list() would
+        // otherwise reject as "an array, not an object".
+        if ($response === '[]' || $response === '{}') {
+            return [];
+        }
+
         $jsonStr = JsonObjectExtractor::firstObject($response);
 
         if ($jsonStr === null) {
@@ -62,6 +69,10 @@ final class EntryJsonParser
                 $this->logUnparseableResponse('generation', $rawResponse, $e->getMessage());
                 throw new \RuntimeException(__('Invalid JSON in AI response: :message', ['message' => $e->getMessage()]), $e->getCode(), $e);
             }
+        }
+
+        if ($decoded === []) {
+            return [];
         }
 
         if (! is_array($decoded) || array_is_list($decoded)) {

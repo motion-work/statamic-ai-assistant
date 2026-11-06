@@ -20,7 +20,10 @@ final class OpenRouterErrors
         'openrouter_key_limit',
     ];
 
-    public static function exception(Response $response): AiProviderException
+    /**
+     * @param  bool  $freeModels  Free mode: overload and the daily limit get their own wording.
+     */
+    public static function exception(Response $response, bool $freeModels = false): AiProviderException
     {
         $status = $response->status();
         $error = $response->json('error');
@@ -29,7 +32,9 @@ final class OpenRouterErrors
         $limitSource = is_string($meta['limit_source'] ?? null) ? $meta['limit_source'] : null;
         $hint = is_string($error['message'] ?? null) ? $error['message'] : mb_substr($response->body(), 0, 300);
 
-        $message = match ($status) {
+        $message = $freeModels ? self::freeModelsMessage($status, $hint) : null;
+
+        $message ??= match ($status) {
             401 => __('The OpenRouter API key is invalid or disabled. Check OPENROUTER_API_KEY.'),
             402 => self::paymentRequired($limitSource),
             403 => self::forbidden($limitSource, $meta, $hint),
@@ -40,6 +45,27 @@ final class OpenRouterErrors
         };
 
         return new AiProviderException($message, $status, $limitSource);
+    }
+
+    /**
+     * Free mode: the daily free-request limit, busy free models, or no free
+     * model allowed by the privacy setting; null for anything else.
+     */
+    private static function freeModelsMessage(int $status, string $hint): ?string
+    {
+        if ($status === 429 && preg_match('/free-models-per-day|per.?day/i', $hint) === 1) {
+            return __('The daily limit for free models is reached. It continues tomorrow, or switch the free models off.');
+        }
+
+        if ($status === 429 || $status === 503) {
+            return __('The free models are busy right now. Try again in a moment.');
+        }
+
+        if ($status === 404 && str_contains(strtolower($hint), 'data policy')) {
+            return __('No free model can take this request with the current privacy setting. Try again later, or allow models that use prompts for training.');
+        }
+
+        return null;
     }
 
     private static function paymentRequired(?string $limitSource): string

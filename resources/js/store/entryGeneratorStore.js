@@ -12,6 +12,7 @@
 
 import { reactive } from 'vue';
 import axios from 'axios';
+import { hasUnsavedChanges, singleAutoSavedEditUrl, visitCp } from '../utils/cpNavigation.js';
 import {
   newChatId,
   listChats,
@@ -50,6 +51,11 @@ export const state = reactive({
   transcript: [],           // full chat history from the server: [{role,text,entry_ids,kind,citations?}]
   webSearch: false,         // editor's per-chat web search toggle (sent with every message; off on a new chat)
   chatSessionId: null,      // durable session id across turns (NOT cleared at poll-terminal)
+  planningWaitSeconds: null, // seconds the planning job has waited for a queue worker (null once it started)
+  turnAutoSaved: [],        // card ids the agent saved as drafts during the live turn (for opening the entry)
+  turnStartedAt: null,      // ms timestamp the editor sent the running turn (working timer); kept with the active run
+  turnActivityFrom: 0,      // activity line id before this turn: newer planning lines are its steps
+  connectionLost: false,    // a few progress polls failed in a row; cleared as soon as one succeeds
   currentChatId: null,      // id of this conversation's local-history record
   bulkSaving: false,
 
@@ -82,6 +88,9 @@ export const state = reactive({
 
 /** Monotonic ids for activity list keys (Vue transitions). */
 let _activityLineId = 0;
+
+/** Progress polls that failed in a row (network/server), for backoff and the "connection lost" hint. */
+let _pollFailures = 0;
 
 const MAX_ACTIVITY_LINES = 48;
 
@@ -257,7 +266,9 @@ function mergeTranscriptMentions(incoming, previous) {
   if (!Array.isArray(incoming)) return incoming;
 
   const prevByText = new Map();
+  const workByText = new Map();
   for (const turn of previous || []) {
+    if (turn?.role === 'assistant' && turn.text && turn.work) workByText.set(turn.text, turn.work);
     if (turn?.role !== 'user' || !turn.text) continue;
     prevByText.set(turn.text, {
       mention_titles: Array.isArray(turn.mention_titles) ? turn.mention_titles : [],
@@ -267,7 +278,15 @@ function mergeTranscriptMentions(incoming, previous) {
     });
   }
 
-  return incoming.map((turn) => {
+  return incoming.map((turn, index) => {
+    if (turn?.role === 'assistant') {
+      // "Worked for 42s" + steps are recorded client-side; the server's copy lacks them.
+      // Match by text, else by position: the server only appends turns, and a
+      // summary it corrected after a failed job keeps its index, not its text.
+      const sameSlot = previous?.[index]?.role === 'assistant' ? previous[index].work : null;
+      const work = turn.work || workByText.get(turn.text) || sameSlot;
+      return work ? { ...turn, work } : turn;
+    }
     if (turn?.role !== 'user') return turn;
     const preserved = prevByText.get(turn.text) || {};
     const detected = mentionTitlesForPrompt(turn.text);
@@ -301,6 +320,134 @@ function persistChatHistory() {
   });
 }
 
+// ─── Running request across page loads ──────────────────────────────────
+//
+// The store lives in memory: CP navigation keeps it, a full page load does
+// not. While a request runs, its session id is kept in localStorage, so a new
+// page (or reopening the chat from history) attaches to the same server
+// session and keeps polling instead of showing a dead conversation.
+
+const ACTIVE_RUN_KEY = 'statamic-ai-assistant.activeRun';
+
+function rememberActiveRun() {
+  try {
+    localStorage.setItem(ACTIVE_RUN_KEY, JSON.stringify({
+      sessionId: state.generationBatchSessionId,
+      chatId: state.currentChatId,
+      turnStartedAt: state.turnStartedAt,
+    }));
+  } catch { /* storage unavailable: the run just won't survive a reload */ }
+}
+
+function forgetActiveRun() {
+  try { localStorage.removeItem(ACTIVE_RUN_KEY); } catch { /* storage unavailable */ }
+}
+
+function readActiveRun() {
+  try {
+    const run = JSON.parse(localStorage.getItem(ACTIVE_RUN_KEY) || 'null');
+    return run && run.sessionId ? run : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A turn starts when the editor sends a message: the timer and step list count from here. */
+function beginTurn(startedAt = Date.now()) {
+  state.turnStartedAt = startedAt;
+  state.turnActivityFrom = _activityLineId;
+  state.turnAutoSaved = [];
+}
+
+/**
+ * After a live turn that saved exactly one new draft, open it in the CP page
+ * behind the agent — once, only while the agent is open (the editor watched
+ * it finish) and never over a form with unsaved changes.
+ */
+function openSingleAutoSavedEntry() {
+  const url = singleAutoSavedEditUrl(state.entries, state.turnAutoSaved);
+  state.turnAutoSaved = [];
+  if (url && state.active && !hasUnsavedChanges()) {
+    visitCp(url);
+  }
+}
+
+/** The running turn's steps: real planner activity lines since it started. */
+export function currentTurnSteps() {
+  return state.activityLog
+    .filter((row) => row.id > state.turnActivityFrom && row.entryId == null)
+    .map((row) => row.text);
+}
+
+/**
+ * Close the running turn: keep its duration and steps on the agent's reply
+ * ("Worked for 42s ▸"), persisted with the chat history.
+ */
+function finishTurn() {
+  if (!state.turnStartedAt) return;
+  const work = { ms: Math.max(0, Date.now() - state.turnStartedAt), steps: currentTurnSteps().slice(-30) };
+  state.turnStartedAt = null;
+  const last = state.transcript[state.transcript.length - 1];
+  if (last?.role === 'assistant') {
+    last.work = work;
+    persistChatHistory();
+  }
+}
+
+/**
+ * Attach the live state to a server session and poll it: a running session
+ * keeps updating, a finished one shows its final reply and entry cards once
+ * (the poll stops on its own). With keepLoaded, the chat already in view (a
+ * chat opened from history) stays and is only refreshed from the server.
+ */
+async function attachToSession(sessionId, chatId, { keepLoaded = false, startedAt = null } = {}) {
+  let data;
+  try {
+    ({ data } = await axios.get(`/cp/ai-generate/generate-progress/${sessionId}`, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    }));
+  } catch (e) {
+    if (e?.response?.status === 404) forgetActiveRun();
+    return false;
+  }
+
+  if (state.generating || state.planning) return false; // another turn started meanwhile
+  if (keepLoaded && state.currentChatId !== chatId) return false; // another chat was opened meanwhile
+  if (data.status === 'cancelled') {
+    forgetActiveRun();
+    return false;
+  }
+
+  const record = chatId ? getChat(chatId) : null;
+  if (!keepLoaded) {
+    resetGenerationOnly();
+    state.currentChatId = chatId || newChatId();
+    state.chatSessionId = sessionId;
+    state.mentionedTitles = [...(record?.mentionedTitles || [])];
+    state.transcript = record ? record.transcript.map((t) => ({ ...t })) : [];
+  }
+  state.generating = true;
+  state.planning = data.planning_status === 'planning';
+  state.generationBatchSessionId = sessionId;
+  state._backgroundedAt = state.active ? null : Date.now();
+  // Only a known start keeps the timer honest; a chat opened from history
+  // without one shows the step but no time.
+  if (startedAt) beginTurn(startedAt);
+  scheduleGenerationBatchPoll();
+  return true;
+}
+
+/**
+ * Pick up a request that was still running when the previous page unloaded.
+ * Called once when the CP launcher mounts, so the launcher bubble shows the
+ * work in progress and the agent shows its result.
+ */
+export function resumeActiveRun() {
+  const run = readActiveRun();
+  if (!run || state.generating || state.planning) return;
+  attachToSession(run.sessionId, run.chatId, { startedAt: run.turnStartedAt || null });
+}
+
 /** Saved conversations for the history panel, newest first. */
 export function listChatHistory() {
   return listChats();
@@ -327,6 +474,14 @@ export function openChatFromHistory(id) {
   state.chatSessionId = record.sessionId || null;
   state.mentionedTitles = [...(record.mentionedTitles || [])];
   state.transcript = record.transcript.map((t) => ({ ...t }));
+  // The server session may still be running (started before a page load), or
+  // have finished after the reply was last saved here: reconnect so the chat
+  // shows its progress or its result, not just the saved messages.
+  if (record.sessionId) {
+    const run = readActiveRun();
+    const startedAt = run?.sessionId === record.sessionId ? run.turnStartedAt : null;
+    attachToSession(record.sessionId, record.id, { keepLoaded: true, startedAt });
+  }
   return true;
 }
 
@@ -392,6 +547,10 @@ function initialCardStatus(se) {
 function buildCardFromSnapshotEntry(se, index) {
   const operation = cardOperation(se);
   const entryId = typeof se.entry_id === 'string' && se.entry_id ? se.entry_id : null;
+  // A card first seen already finished (e.g. reattaching to a session after a
+  // page load) never sees the "→ ready" transition that normally copies its
+  // content, so take the content from the snapshot right away.
+  const finished = se.status === 'ready' || se.status === 'saved';
   return {
     id: se.id,
     index,
@@ -405,12 +564,13 @@ function buildCardFromSnapshotEntry(se, index) {
     entryId,
     status: initialCardStatus(se),
     tokenLength: 0,
-    data: null,
-    displayData: null,
+    data: finished ? (se.data ?? null) : null,
+    displayData: finished ? (se.displayData || se.data || null) : null,
     fieldPreview: null,
     warnings: Array.isArray(se.warnings) ? se.warnings : [],
     error: se.error || null,
     savedEntry: se.saved_entry || null,
+    autoSaved: !!se.auto_saved,
     savingMode: null,
     _tokenScratch: '',
     streamKeysLogged: {},
@@ -423,6 +583,7 @@ function applyBatchProgressSnapshot(data) {
   // Planner status mapping (additive — cards appear as they are dispatched).
   const planningStatus = data.planning_status || 'planning';
   const previousPlanning = state.generationPlanningStatus;
+  state.planningWaitSeconds = Number.isFinite(data.waiting_seconds) ? data.waiting_seconds : null;
   state.generationPlanningStatus = planningStatus;
 
   if (planningStatus === 'planning' && previousPlanning !== 'planning') {
@@ -477,6 +638,14 @@ function applyBatchProgressSnapshot(data) {
     if (state.entries.some((e) => e.id === se.id)) continue;
     const card = buildCardFromSnapshotEntry(se, state.entries.length);
     state.entries.push(card);
+    if (card.data) {
+      // Already finished (see buildCardFromSnapshotEntry): load its field
+      // preview now, as the "→ ready" transition would have.
+      fetchFieldPreview(card.collection, card.blueprint).then((s) => {
+        const live = state.entries.find((e) => e.id === card.id);
+        if (s && live) live.fieldPreview = s;
+      });
+    }
     if (!state.plan) {
       state.plan = { entries: [], warnings: data.warnings || [] };
     }
@@ -556,8 +725,17 @@ function applyBatchProgressSnapshot(data) {
       card.status = STATUS.SAVED;
       card.savedEntry = se.saved_entry || card.savedEntry;
       card.warnings = se.warnings || [];
+      card.autoSaved = !!se.auto_saved;
+      // An auto-saved draft goes straight from drafting to saved: take its content.
+      if (se.data) card.data = se.data;
+      if (se.displayData || se.data) card.displayData = se.displayData || se.data;
       const label = truncateActivityLabel(card.label || card.collectionTitle || card.collection);
-      pushActivityLine(_trans('Localized — :label', { label }), card.id);
+      if (card.autoSaved) {
+        state.turnAutoSaved.push(card.id);
+        pushActivityLine(_trans('Draft saved — :label', { label }), card.id);
+      } else {
+        pushActivityLine(_trans('Localized — :label', { label }), card.id);
+      }
     }
 
     if (se.saved_entry && !card.savedEntry) {
@@ -580,7 +758,7 @@ function applyBatchProgressSnapshot(data) {
     const n = state.entries.length;
     pushActivityLine(
       n === 0
-        ? _trans('Plan ready — no entries.')
+        ? (data.planner_answer ? _trans('Answer ready.') : _trans('Plan ready — no entries.'))
         : (n === 1
           ? _trans('Plan ready — one entry.')
           : _trans('Plan ready — :n entries.', { n })),
@@ -592,24 +770,31 @@ function applyBatchProgressSnapshot(data) {
 async function pollGenerationBatchOnce() {
   const sid = state.generationBatchSessionId;
   if (!sid || !state.generating) return;
+  rememberActiveRun();
 
   try {
     const { data } = await axios.get(`/cp/ai-generate/generate-progress/${sid}`, {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
     });
+    _pollFailures = 0;
+    state.connectionLost = false;
     applyBatchProgressSnapshot(data);
 
     const planningDone = data.planning_status === 'planned' || data.planning_status === 'planning_failed';
     const sessionTerminal = data.status === 'completed' || data.status === 'cancelled';
     const allEntriesTerminal = state.entries.length > 0 && state.entries.every(
-      (e) => e.status === STATUS.READY || e.status === STATUS.FAILED,
+      (e) => e.status === STATUS.READY || e.status === STATUS.FAILED || e.status === STATUS.SAVED,
     );
 
     if (sessionTerminal || (planningDone && state.entries.length === 0) || (planningDone && allEntriesTerminal)) {
       clearGenerationBatchPoll();
+      forgetActiveRun();
       state.generating = false;
       state.planning = false;
       state.generationBatchSessionId = null;
+      state.planningWaitSeconds = null;
+      finishTurn();
+      openSingleAutoSavedEntry();
       notifyBackgroundCompletionIfNeeded();
       return;
     }
@@ -617,14 +802,38 @@ async function pollGenerationBatchOnce() {
     if (e?.response?.status === 404) {
       state.generationError = _trans('Generation session expired or was not found.');
       clearGenerationBatchPoll();
+      forgetActiveRun();
       state.generating = false;
       state.planning = false;
       state.generationBatchSessionId = null;
+      state.turnStartedAt = null;
       return;
     }
+    notePollFailure();
   }
 
-  state._generationBatchPollTimer = setTimeout(() => pollGenerationBatchOnce(), 2000);
+  state._generationBatchPollTimer = setTimeout(() => pollGenerationBatchOnce(), nextPollDelay());
+}
+
+/** A transient poll failure (network, 5xx): keep trying, and say so after a few. */
+function notePollFailure() {
+  _pollFailures += 1;
+  if (_pollFailures >= 3) state.connectionLost = true;
+}
+
+/** 2s normally; backs off to 4s, 8s, then 10s while polls keep failing. */
+function nextPollDelay() {
+  return _pollFailures === 0 ? 2000 : Math.min(10000, 2000 * 2 ** _pollFailures);
+}
+
+// Back online: poll right away instead of waiting out the backoff.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (state.generating && state.generationBatchSessionId) scheduleGenerationBatchPoll();
+  });
+  window.addEventListener('offline', () => {
+    if (state.generating) state.connectionLost = true;
+  });
 }
 
 function scheduleGenerationBatchPoll() {
@@ -643,6 +852,7 @@ export async function startGeneration({ prompt, useAutoTarget, collection, bluep
   resetGenerationOnly();
   state.generating = true;
   state.planning = true;
+  beginTurn();
   state.pendingPrompt = '';
   // Optimistic first user turn so the chat shows the message before the first poll.
   state.transcript = [{ role: 'user', text, entry_ids: [], kind: null, mention_titles: mentionTitles, attachments: attachmentsMeta(files) }];
@@ -733,6 +943,7 @@ export async function startGeneration({ prompt, useAutoTarget, collection, bluep
     if (!useBatchPoll) {
       state.generating = false;
       state.planning = false;
+      finishTurn();
     }
     state._abortController = null;
     const wasUserStopped = state._userStopped;
@@ -815,6 +1026,7 @@ export function stopGeneration({ keepReady = false } = {}) {
     }).catch(() => {});
     state.generationBatchSessionId = null;
   }
+  forgetActiveRun();
 
   if (keepReady) {
     state.entries = state.entries.filter((e) => e.status === STATUS.READY);
@@ -872,6 +1084,7 @@ export async function continueGeneration(prompt) {
   state.pendingPrompt = '';
   state.activityLog = [];
   state.hasServerActivity = false;
+  beginTurn();
   const mentionTitles = mentionTitlesForPrompt(text);
 
   // Optimistically show the user's message; the next poll's server transcript
@@ -931,7 +1144,8 @@ export async function continueGeneration(prompt) {
   } catch (e) {
     state.generating = false;
     state.planning = false;
-    state.generationError = e?.response?.data?.error || _trans('Generation failed.');
+    state.turnStartedAt = null;
+    state.generationError = e?.response?.data?.error || e?.message || _trans('Generation failed.');
   }
 }
 
@@ -951,9 +1165,13 @@ export function stopChatTurn() {
     }).catch(() => {});
     state.generationBatchSessionId = null;
   }
+  forgetActiveRun();
 
   state.generating = false;
   state.planning = false;
+  state.planningWaitSeconds = null;
+  state.turnStartedAt = null;
+  state.connectionLost = false;
   state.generationError = null;
   state._backgroundedAt = null;
 }
@@ -1046,6 +1264,7 @@ export async function saveCard(id, mode) {
 
   card.status = STATUS.SAVING;
   card.savingMode = mode;
+  card.saveError = null;
 
   const payload = isUpdate
     ? { entry_id: card.entryId, data: card.data }
@@ -1065,11 +1284,11 @@ export async function saveCard(id, mode) {
       }
     } else {
       card.status = STATUS.READY;
-      if (_toast) _toast.error(isUpdate ? _trans('Entry update failed.') : _trans('Entry creation failed.'));
+      card.saveError = data.error || (isUpdate ? _trans('Entry update failed.') : _trans('Entry creation failed.'));
     }
   } catch (e) {
     card.status = STATUS.READY;
-    if (_toast) _toast.error(e.response?.data?.error || (isUpdate ? _trans('Entry update failed.') : _trans('Entry creation failed.')));
+    card.saveError = e.response?.data?.error || e.message || (isUpdate ? _trans('Entry update failed.') : _trans('Entry creation failed.'));
   } finally {
     card.savingMode = null;
   }
@@ -1183,6 +1402,7 @@ export function discardCard(id) {
 /** Clear generation results but keep the composer (prompt + file). */
 function resetGenerationOnly() {
   clearGenerationBatchPoll();
+  state.turnAutoSaved = [];
   state.generationBatchSessionId = null;
   state.generationPlanningStatus = null;
   state.plan = null;
@@ -1195,6 +1415,10 @@ function resetGenerationOnly() {
   state.currentChatId = null;
   state.planning = false;
   state.generating = false;
+  state.planningWaitSeconds = null;
+  state.turnStartedAt = null;
+  state.connectionLost = false;
+  _pollFailures = 0;
   state.bulkSaving = false;
   state.activityLog = [];
   state.hasServerActivity = false;

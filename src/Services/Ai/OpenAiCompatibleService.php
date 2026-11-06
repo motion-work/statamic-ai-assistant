@@ -77,6 +77,14 @@ abstract class OpenAiCompatibleService extends AbstractAiService
     /** Hook run before AiCompletionFinished is dispatched (provider logging). */
     protected function completionFinished(AiCompletionFinished $event): void {}
 
+    /**
+     * Hook run when the provider answered with an error status, before the
+     * exception is thrown (OpenRouter's free mode learns which models to skip).
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function requestFailed(array $payload, Response $response): void {}
+
     public function supportsChatTools(): bool
     {
         return true;
@@ -104,6 +112,8 @@ abstract class OpenAiCompatibleService extends AbstractAiService
         }
 
         if (! $response->successful()) {
+            $this->requestFailed($payload, $response);
+
             throw $this->failed($response);
         }
 
@@ -218,6 +228,8 @@ abstract class OpenAiCompatibleService extends AbstractAiService
         }
 
         if (! $response->successful()) {
+            $this->requestFailed($payload, $response);
+
             throw $this->failed($response);
         }
 

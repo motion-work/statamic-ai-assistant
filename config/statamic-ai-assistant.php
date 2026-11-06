@@ -336,6 +336,55 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | OpenRouter: free models only
+    |--------------------------------------------------------------------------
+    |
+    | When on, every text task (agent, quick helpers, field buttons, translation,
+    | image analysis) and semantic search use OpenRouter's free models instead
+    | of openrouter_profiles; presets are ignored and image generation is off
+    | (there are no free image models). Super admins switch it on the "Who has
+    | access" page; `enabled` / `allow_training` here override that switch
+    | (null = the CP decides).
+    |
+    | The addon picks the most capable free models itself: it reads OpenRouter's
+    | free models sorted by intelligence (cached `catalog_ttl` seconds), keeps
+    | those that fit the task (the agent needs reliable tool calls and a large
+    | context, image analysis needs image input, quick tasks prefer models that
+    | can answer without reasoning) and sends the best two plus `openrouter/free`
+    | (OpenRouter's own free router) as the last fallback; OpenRouter accepts at
+    | most three models per request. A model that is busy or fails is moved
+    | down for `busy_minutes`; one blocked by the privacy setting for
+    | `policy_hours`. `fallback_models` is used when the catalog can't be read.
+    |
+    | Privacy: many free models only answer when prompts may be used for
+    | training. Off by default (data_collection "deny", which `openrouter/free`
+    | respects); `allow_training` sends "allow" for free-mode requests, and the
+    | OpenRouter account must allow free model training too
+    | (https://openrouter.ai/settings/privacy). Free embedding models all need
+    | it, so semantic search falls back to keyword search without it.
+    |
+    | Limits: 1000 free requests per day (50 for accounts that bought less than
+    | $10 of credits), and free models are slower and less reliable. Quick tasks
+    | get at least `min_max_tokens`, since many free models must reason first.
+    |
+    */
+    'openrouter_free_models' => [
+        'enabled' => env('STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS'),
+        'allow_training' => env('STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS_ALLOW_TRAINING'),
+        'catalog_ttl' => max(300, (int) env('STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS_CATALOG_TTL', 21600)),
+        'busy_minutes' => max(1, (int) env('STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS_BUSY_MINUTES', 15)),
+        'policy_hours' => max(1, (int) env('STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS_POLICY_HOURS', 24)),
+        'min_max_tokens' => max(256, (int) env('STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS_MIN_MAX_TOKENS', 3000)),
+        'agent_min_context' => 64000,
+        'agent_min_tool_success_rate' => 0.9,
+        // Never picked: anonymous test models, safety classifiers, guard models.
+        'exclude' => ['stealth/*', '*content-safety*', '*guard*'],
+        'fallback_models' => ['nvidia/nemotron-3.5-super-vl:free', 'cohere/north-mini-code:free'],
+        'fallback_embedding_models' => ['nvidia/nemotron-3.5-embed-8b:free', 'nvidia/nemotron-3.5-embed-1b:free'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI agent — web search
     |--------------------------------------------------------------------------
     |
@@ -695,6 +744,25 @@ return [
     */
 
     'agent_settings_nav' => env('STATAMIC_AI_ASSISTANT_AGENT_SETTINGS_NAV', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI agent — save new entries as drafts right away
+    |--------------------------------------------------------------------------
+    |
+    | When true (default), a NEW entry the agent generates is saved in Statamic
+    | as an unpublished draft as soon as it is ready, inside the queued job, so
+    | it exists even when the editor closed the chat. When the run produced one
+    | entry, the CP opens it behind the agent and the chat offers "Minimise &
+    | view". Changes to existing entries and translations keep the preview and
+    | the editor's confirmation, since they overwrite content.
+    |
+    | The draft is saved for the CP user who sent the message and only when
+    | they may create entries in that collection; otherwise the card stays a
+    | preview to save by hand. Set false to always review before saving.
+    |
+    */
+    'auto_save_new_entries' => (bool) env('STATAMIC_AI_ASSISTANT_AUTO_SAVE_NEW_ENTRIES', true),
 
     /*
     | AI agent — queued batch generation (after planner)

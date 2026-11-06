@@ -197,11 +197,35 @@ final class PlannerTranscript
      */
     public function withAppliedList(string $text, array $changes): string
     {
+        // Labels are sentences ("… verschoben."); the list adds its own period.
+        $changes = array_map(fn (string $change): string => rtrim(trim($change), '.'), $changes);
+        $changes = array_values(array_filter($changes, fn (string $change): bool => ! self::alreadyTold($text, $change)));
+
         if ($changes === []) {
             return $text;
         }
 
         return trim($text)."\n".__('Applied: :list.', ['list' => implode(', ', $changes)]);
+    }
+
+    /**
+     * Whether the model's own summary already names a change: every «quoted»
+     * title in the change label appears in the text. Unquoted labels are
+     * always listed, since there is nothing reliable to compare.
+     */
+    private static function alreadyTold(string $text, string $change): bool
+    {
+        if (! preg_match_all('/«([^»]+)»/u', $change, $matches) || $matches[1] === []) {
+            return false;
+        }
+
+        foreach ($matches[1] as $title) {
+            if (! str_contains($text, $title)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -211,7 +235,7 @@ final class PlannerTranscript
      *
      * @param  array<int, string>  $steps
      */
-    public function completePlannerPlan(string $sessionId, array $steps, string $question, int $round): void
+    public function completePlannerPlan(string $sessionId, array $steps, string $question, int $round, string $approveLabel = ''): void
     {
         $lines = [];
         foreach (array_values($steps) as $i => $step) {
@@ -224,7 +248,7 @@ final class PlannerTranscript
             $text .= "\n\n".__('Question:').' '.$question;
         }
 
-        $this->recordPlanTurn($sessionId, $text, $round);
+        $this->recordPlanTurn($sessionId, $text, $round, $approveLabel);
     }
 
     /**
@@ -232,14 +256,14 @@ final class PlannerTranscript
      * the CP renders the approve action) — shared by the tool path and the
      * printed-as-text recovery path.
      */
-    public function recordPlanTurn(string $sessionId, string $text, int $round): void
+    public function recordPlanTurn(string $sessionId, string $text, int $round, string $approveLabel = ''): void
     {
         Log::info('[entry-gen-tool] agentic planner proposed a plan', [
             'rounds' => $round + 1,
         ]);
 
         $this->batch?->recordPlannerAnswer($sessionId, $text);
-        $this->batch?->appendAssistantTurn($sessionId, $text, [], 'plan');
+        $this->batch?->appendAssistantTurn($sessionId, $text, [], 'plan', $approveLabel !== '' ? ['approve_label' => $approveLabel] : []);
     }
 
     public function completePlannerAnswer(string $sessionId, string $answer, int $round, int $created): void

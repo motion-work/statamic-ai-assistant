@@ -243,6 +243,7 @@ class EntryGenerationBatchService
                     'target_site' => $row['target_site'] ?? null,
                     'target_site_label' => $row['target_site_label'] ?? null,
                     'saved_entry' => $row['saved_entry'] ?? null,
+                    'auto_saved' => (bool) ($row['auto_saved'] ?? false),
                     'status' => (string) ($row['status'] ?? 'pending'),
                     'token_length' => (int) ($row['token_length'] ?? 0),
                     'stream_delta' => $delta,
@@ -270,6 +271,8 @@ class EntryGenerationBatchService
                 'warnings' => $session['plan_warnings'] ?? [],
                 'planner_activity' => array_values($activity),
                 'operations' => array_values(is_array($session['operations'] ?? null) ? $session['operations'] : []),
+                // Non-null while the planning job still waits for a queue worker.
+                'waiting_seconds' => self::planningWaitSeconds($session),
             ];
 
             return $session;

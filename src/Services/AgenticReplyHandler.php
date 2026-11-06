@@ -29,7 +29,7 @@ final class AgenticReplyHandler
         // propose_plan is terminal: the plan is shown to the user, who
         // approves or answers in their next message (a follow-up turn).
         if ($run->plan !== null) {
-            $this->transcript->completePlannerPlan($run->sessionId, $run->plan['steps'], $run->plan['question'], $round);
+            $this->transcript->completePlannerPlan($run->sessionId, $run->plan['steps'], $run->plan['question'], $round, $run->plan['approve_label'] ?? '');
 
             return true;
         }

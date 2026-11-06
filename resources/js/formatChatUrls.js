@@ -6,6 +6,7 @@ import {
   chipLabel,
   formatFileSize,
 } from './composer/promptTokens.js';
+import { renderChatMarkdown } from './utils/chatMarkdown.js';
 
 function escapeHtml(s) {
   return String(s)
@@ -16,9 +17,28 @@ function escapeHtml(s) {
 }
 
 const BOLD_MARKDOWN_RE = /\*\*([^*\n]+?)\*\*/gu;
+const ITALIC_MARKDOWN_RE = /(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\*)/gu;
+const CODE_MARKDOWN_RE = /`([^`\n]+?)`/gu;
+const MD_LINK_RE = /\[([^\]\n]{1,200})\]\((https?:\/\/[^\s)]+)\)/giu;
 
+/** Inline Markdown on already-escaped text: `code`, **bold**, *italic*. */
 function formatBoldMarkdown(escapedText) {
-  return escapedText.replace(BOLD_MARKDOWN_RE, '<strong class="eg-chat__bold">$1</strong>');
+  const codes = [];
+  const protectedText = escapedText.replace(CODE_MARKDOWN_RE, (m, c) => {
+    codes.push(`<code class="eg-chat__code">${c}</code>`);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+
+  return protectedText
+    .replace(BOLD_MARKDOWN_RE, '<strong class="eg-chat__bold">$1</strong>')
+    .replace(ITALIC_MARKDOWN_RE, '$1<em>$2</em>')
+    .replace(/\u0000(\d+)\u0000/g, (m, i) => codes[Number(i)]);
+}
+
+function mdLinkHtml(label, url) {
+  const href = trimUrlTrailingPunct(url);
+
+  return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" class="eg-chat__link" title="${escapeHtml(href)}">${formatBoldMarkdown(escapeHtml(label))}</a>`;
 }
 
 /**
@@ -35,6 +55,21 @@ export function formatChatTextWithBoldUrls(text) {
   const s = String(text);
   if (!s) return '';
 
+  // [label](https://…) links first, so their URL does not become a bare chip.
+  let linked = '';
+  let from = 0;
+  const md = new RegExp(MD_LINK_RE.source, 'giu');
+  let link;
+  while ((link = md.exec(s)) !== null) {
+    linked += formatUrlChips(s.slice(from, link.index)) + mdLinkHtml(link[1], link[2]);
+    from = link.index + link[0].length;
+  }
+
+  return linked + formatUrlChips(s.slice(from));
+}
+
+function formatUrlChips(s) {
+  if (!s) return '';
   let out = '';
   let last = 0;
   const re = new RegExp(HTTP_URL_RE.source, 'giu');
@@ -145,7 +180,23 @@ function wrapEntryMentionChips(html, titles) {
  * @returns {string}
  */
 export function formatChatMessageHtml(text, mentionTitles = [], attachments = []) {
-  const html = formatChatTextWithBoldUrls(text);
+  return wrapChips(formatChatTextWithBoldUrls(text), mentionTitles, attachments);
+}
+
+/**
+ * Agent reply renderer: block Markdown (paragraphs, lists, headings, code)
+ * with the same inline formatting and chips as formatChatMessageHtml.
+ *
+ * @param {string|null|undefined} text
+ * @param {string[]} [mentionTitles]
+ * @param {Array} [attachments]
+ * @returns {string}
+ */
+export function formatAgentReplyHtml(text, mentionTitles = [], attachments = []) {
+  return wrapChips(renderChatMarkdown(text, formatChatTextWithBoldUrls), mentionTitles, attachments);
+}
+
+function wrapChips(html, mentionTitles, attachments) {
   return wrapEntryMentionChips(
     wrapFileMentionChips(wrapAssetFolderMentionChips(html), attachments),
     mentionTitles,

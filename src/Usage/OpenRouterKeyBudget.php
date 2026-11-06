@@ -18,7 +18,7 @@ final class OpenRouterKeyBudget
 
     private const CACHE_SECONDS = 300;
 
-    private const FIELDS = ['label', 'limit', 'limit_remaining', 'limit_reset', 'usage', 'usage_daily', 'usage_weekly', 'usage_monthly', 'is_free_tier'];
+    private const FIELDS = ['label', 'limit', 'limit_remaining', 'limit_reset', 'usage', 'usage_daily', 'usage_weekly', 'usage_monthly', 'is_free_tier', 'free_model_daily_requests'];
 
     /** Whether there is an OpenRouter key to ask about. */
     public function applies(): bool

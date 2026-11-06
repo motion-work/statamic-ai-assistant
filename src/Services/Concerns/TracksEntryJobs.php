@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Services\Concerns;
 
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Support\TurnSummaryCorrection;
 
 /**
  * The entry jobs' side of an AI agent session: each entry's status, streamed
@@ -103,10 +104,11 @@ trait TracksEntryJobs
     }
 
     /**
-     * The localization was saved on the target site. The card must not offer
-     * "Save as draft", which would create a new entry on the current site.
+     * The entry was saved: a localization on its target site, or a new entry
+     * the agent saved as a draft on its own (auto_saved). The card must not
+     * offer "Save as draft" again, which would create a second entry.
      *
-     * @param  array{entry_id: string, edit_url: ?string, title: string, warnings?: array<int, string>}  $saved
+     * @param  array{entry_id: string, edit_url: ?string, title: string, warnings?: array<int, string>, auto_saved?: bool, data?: array<string, mixed>, displayData?: array<string, mixed>}  $saved
      */
     public function markEntrySaved(string $sessionId, string $entryId, array $saved): void
     {
@@ -121,6 +123,12 @@ trait TracksEntryJobs
                 'title' => (string) ($saved['title'] ?? ''),
             ];
             $session['entries'][$entryId]['warnings'] = is_array($saved['warnings'] ?? null) ? array_values($saved['warnings']) : [];
+            $session['entries'][$entryId]['auto_saved'] = (bool) ($saved['auto_saved'] ?? false);
+            foreach (['data', 'displayData'] as $key) {
+                if (is_array($saved[$key] ?? null)) {
+                    $session['entries'][$entryId][$key] = $saved[$key];
+                }
+            }
             $session['entries'][$entryId]['error'] = null;
             $session['entries'][$entryId]['completed_at'] = now()->toIso8601String();
             $session['entries'][$entryId]['stream_buffer'] = '';
@@ -177,6 +185,9 @@ trait TracksEntryJobs
     public function markCompletedIfDone(string $sessionId): void
     {
         $this->update($sessionId, function (array $session): array {
+            // A finished turn whose summary claims success but had a failure
+            // gets a truthful summary (runs after every finished entry).
+            $session = TurnSummaryCorrection::apply($session);
             if (($session['status'] ?? '') !== 'running') {
                 return $session;
             }

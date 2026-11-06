@@ -196,6 +196,12 @@ class ReadEntryTool implements ChatTool
             $meta['date'] = (string) ($entry->date()?->toDateString() ?? '');
         }
 
+        if ($entry->collection()?->hasStructure()) {
+            // Its place in the page tree (null: top level); move_entry changes it.
+            $parent = $entry->structure()->in($entry->locale())->find($entry->id())?->parent();
+            $meta['parent_id'] = $parent && ! $parent->isRoot() ? (string) $parent->id() : null;
+        }
+
         return $meta;
     }
 

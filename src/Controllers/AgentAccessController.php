@@ -8,6 +8,7 @@ use MotionWork\StatamicAiAssistant\Services\AgentAccessStore;
 use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
+use MotionWork\StatamicAiAssistant\Support\FreeModelsOverview;
 use MotionWork\StatamicAiAssistant\Support\ImageGeneration;
 use Statamic\Facades\Role;
 use Statamic\Facades\User;
@@ -47,6 +48,7 @@ class AgentAccessController
             // Without AI features only the Claude connector section applies.
             'aiEnabled' => CpFeatures::aiEnabled() && (bool) config('statamic-ai-assistant.entry_generator', true),
             'imageGeneration' => $this->imageGeneration(),
+            'freeModels' => app(FreeModelsOverview::class)->toArray(),
         ]);
     }
 
@@ -78,6 +80,8 @@ class AgentAccessController
             'access' => 'required|array',
             'access.claude_restricted' => 'sometimes|boolean',
             'access.image_generation' => 'sometimes|boolean',
+            'access.free_models' => 'sometimes|boolean',
+            'access.free_models_training' => 'sometimes|boolean',
             'access.*.roles' => 'sometimes|array',
             'access.*.roles.*' => 'string',
             'access.*.users' => 'sometimes|array',

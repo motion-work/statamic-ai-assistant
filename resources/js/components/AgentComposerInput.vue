@@ -98,7 +98,7 @@ export default {
     autofocus: { type: Boolean, default: false },
   },
 
-  emits: ['update:modelValue', 'send', 'mention-query', 'chip-click', 'blur'],
+  emits: ['update:modelValue', 'send', 'mention-query', 'chip-click', 'blur', 'focus'],
 
   data() {
     return {
@@ -171,6 +171,9 @@ export default {
       },
       onSelectionUpdate: () => {
         this.emitMentionQuery();
+      },
+      onFocus: () => {
+        this.$emit('focus');
       },
       onBlur: () => {
         this.$emit('blur');

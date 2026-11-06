@@ -2,6 +2,8 @@
 
 namespace MotionWork\StatamicAiAssistant\Services\Concerns;
 
+use Illuminate\Support\Carbon;
+use MotionWork\StatamicAiAssistant\Support\TurnSummaryCorrection;
 use MotionWork\StatamicAiAssistant\Support\WebSearch;
 
 /**
@@ -91,16 +93,18 @@ trait TracksPlanning
      * read-only answer, or an error) to the conversation transcript.
      *
      * @param  array<int, string>  $entryIds  Session plan-row ids acted on this turn.
+     * @param  array<string, string>  $extra  Extra turn fields, e.g. a plan's approve_label.
      */
-    public function appendAssistantTurn(string $sessionId, string $text, array $entryIds = [], string $kind = 'summary'): void
+    public function appendAssistantTurn(string $sessionId, string $text, array $entryIds = [], string $kind = 'summary', array $extra = []): void
     {
-        $this->update($sessionId, function (array $session) use ($text, $entryIds, $kind): array {
+        $this->update($sessionId, function (array $session) use ($text, $entryIds, $kind, $extra): array {
             $transcript = is_array($session['transcript'] ?? null) ? $session['transcript'] : [];
             $turn = [
                 'role' => 'assistant',
                 'text' => $text,
                 'entry_ids' => array_values(array_filter($entryIds, 'is_string')),
                 'kind' => $kind,
+                ...$extra,
             ];
             // Web search sources collected during this turn belong to its reply.
             $citations = is_array($session['turn_citations'] ?? null) ? $session['turn_citations'] : [];
@@ -111,7 +115,8 @@ trait TracksPlanning
             $session['transcript'] = array_values($transcript);
             $session['turn_citations'] = [];
 
-            return $session;
+            // Its entry jobs may all have finished (and failed) already.
+            return TurnSummaryCorrection::apply($session);
         });
     }
 
@@ -165,6 +170,57 @@ trait TracksPlanning
 
             return $session;
         });
+    }
+
+    /**
+     * A planning job was dispatched for the session's newest message. Until a
+     * worker starts it (markPlanningStarted()), progress reports how long it
+     * has been waiting, so the CP can tell "queued" apart from "working".
+     */
+    public function markPlanningQueued(string $sessionId): void
+    {
+        $this->update($sessionId, function (array $session): array {
+            $session['planning_queued_at'] = now()->toIso8601String();
+            $session['planning_started_at'] = null;
+            // The editor's CP language: queued jobs run in it (CpLocale).
+            $session['cp_locale'] = app()->getLocale();
+
+            return $session;
+        });
+    }
+
+    /** The CP language the session's newest message was sent in, if recorded. */
+    public function cpLocale(string $sessionId): ?string
+    {
+        $locale = $this->getSession($sessionId)['cp_locale'] ?? null;
+
+        return is_string($locale) && $locale !== '' ? $locale : null;
+    }
+
+    /** A queue worker picked up the planning job (PlanEntriesJob::handle()). */
+    public function markPlanningStarted(string $sessionId): void
+    {
+        $this->update($sessionId, function (array $session): array {
+            $session['planning_started_at'] = now()->toIso8601String();
+
+            return $session;
+        });
+    }
+
+    /**
+     * Seconds the newest planning job has waited for a worker, or null once a
+     * worker started it (or when nothing is queued).
+     *
+     * @param  array<string, mixed>  $session
+     */
+    protected static function planningWaitSeconds(array $session): ?int
+    {
+        $queuedAt = $session['planning_queued_at'] ?? null;
+        if (! is_string($queuedAt) || ! empty($session['planning_started_at']) || ($session['planning_status'] ?? '') !== 'planning') {
+            return null;
+        }
+
+        return max(0, (int) Carbon::parse($queuedAt)->diffInSeconds(now(), true));
     }
 
     /**

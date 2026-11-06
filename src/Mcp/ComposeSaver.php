@@ -4,6 +4,7 @@ namespace MotionWork\StatamicAiAssistant\Mcp;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use MotionWork\StatamicAiAssistant\Support\EntryTreePlacement;
 use Statamic\Contracts\Entries\Entry;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry as EntryFacade;
@@ -106,8 +107,7 @@ final class ComposeSaver
         if ($collection->hasStructure()) {
             $tree = $collection->structure()->in($site->handle());
             $parentId = $plan['mode'] === 'copy' ? $this->context->parentInTree($source) : $plan['parent_id'];
-            $parentId ? $tree->appendTo($parentId, $entry) : $tree->append($entry);
-            $tree->save();
+            EntryTreePlacement::place($tree, (string) $entry->id(), $parentId ?: null);
         }
 
         return $entry;

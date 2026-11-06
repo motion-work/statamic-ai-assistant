@@ -4077,6 +4077,17 @@ html.dark .translation-progress__entry-error {
     color: var(--c-text);
 }
 
+.eg-chat__stream-panel__queue {
+    margin: 0.5rem 0 0;
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--c-text);
+    background: color-mix(in srgb, var(--theme-color-warning, #d97706) 10%, var(--c-surface));
+    border: 1px solid color-mix(in srgb, var(--theme-color-warning, #d97706) 35%, var(--c-border));
+}
+
 .eg-chat__stream-panel__hint {
     margin: 0 0 0.4rem;
     font-size: 0.75rem;
@@ -4207,12 +4218,14 @@ html.dark .translation-progress__entry-error {
 }
 
 .eg-chat__plan-actions {
-    margin-top: 0.35rem;
+    margin-top: 0.85rem;
 }
 
-.eg-chat__plan-hint {
-    margin-top: 0.45rem;
+/* `.eg-chat__msg p` resets margins; keep the hint's gap under the button. */
+.eg-chat__msg .eg-chat__plan-hint {
+    margin-top: 0.6rem;
     font-size: 0.75rem;
+    line-height: 1.45;
     opacity: 0.75;
 }
 
@@ -5739,6 +5752,38 @@ html.dark .eg-asset-modal__backdrop {
     color: #86efac;
 }
 
+.eg-entry-card__saved-actions {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.eg-entry-card__saved-actions .eg-entry-card__saved-link {
+    margin-left: 0;
+}
+
+.eg-entry-card__view-btn {
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: var(--c-accent, #4f46e5);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.eg-entry-card__view-btn:hover {
+    filter: brightness(1.08);
+}
+
+.eg-entry-card__view-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--c-accent, #4f46e5) 55%, transparent);
+    outline-offset: 2px;
+}
+
 .eg-entry-card__saved-link--blocked {
     margin-left: auto;
     font-weight: 600;
@@ -6545,6 +6590,16 @@ html.dark .eg-asset-modal__backdrop {
     color: var(--tp-text);
     font: inherit;
     font-size: 0.875rem;
+    appearance: none;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    background-size: 0.875rem 0.875rem;
+}
+
+html.dark .aiu-month__select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
 }
 
 .aiu-card {
@@ -6781,6 +6836,52 @@ html.dark .eg-asset-modal__backdrop {
     max-width: 14rem;
 }
 
+/* Breakdown tables: the name column takes what is left and truncates, so the table never outgrows its card. */
+.aiu-table--breakdown {
+    table-layout: fixed;
+}
+
+.aiu-table--breakdown thead th:nth-child(2) {
+    width: 4.5rem;
+}
+
+.aiu-table--breakdown thead th:nth-child(3) {
+    width: 6.5rem;
+}
+
+.aiu-table--breakdown tbody th {
+    max-width: none;
+}
+
+.aiu-name {
+    position: relative;
+    outline: none;
+}
+
+.aiu-name__tip {
+    position: absolute;
+    bottom: calc(100% - 0.35rem);
+    left: 0.5rem;
+    z-index: 5;
+    max-width: min(24rem, 90vw);
+    padding: 0.3rem 0.55rem;
+    border-radius: 0.4rem;
+    background: var(--tp-text);
+    color: var(--tp-surface);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+
+.aiu-name:hover .aiu-name__tip,
+.aiu-name:focus-visible .aiu-name__tip {
+    opacity: 1;
+}
+
 .aiu-table__name {
     display: block;
     overflow: hidden;
@@ -6831,6 +6932,65 @@ html.dark .eg-asset-modal__backdrop {
     margin: 0;
     font-weight: 600;
     color: var(--tp-text);
+}
+
+.aiu-pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    justify-content: space-between;
+    margin-top: 1rem;
+    font-size: 0.8125rem;
+    color: var(--tp-text-muted);
+}
+
+.aiu-pager__size,
+.aiu-pager__nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.aiu-pager__select {
+    min-width: 5rem;
+}
+
+.aiu-pager__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 2.25rem;
+    padding: 0 1rem;
+    border-radius: var(--tp-radius);
+    border: 1px solid var(--tp-border-strong);
+    background: var(--tp-surface);
+    color: var(--tp-text);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+
+.aiu-pager__btn:hover:not(:disabled) {
+    border-color: var(--tp-accent);
+    box-shadow: 0 0 0 3px var(--tp-accent-ring);
+}
+
+.aiu-pager__btn:focus-visible {
+    outline: none;
+    border-color: var(--tp-accent);
+    box-shadow: 0 0 0 3px var(--tp-accent-ring);
+}
+
+.aiu-pager__btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.aiu-pager__page {
+    padding: 0 0.25rem;
 }
 
 .aiu-footnote {
@@ -6901,4 +7061,490 @@ html.dark .eg-asset-modal__backdrop {
 
 .aiu-semantic__model {
     margin-top: 0.6rem;
+}
+
+/* --------------------------------------------------------------------------
+   AI agent chat — Claude-style conversation details
+   Working line (dots + step + timer + steps), "Worked for 42s", soft error
+   notices, Markdown replies, reply actions, stop button, jump to latest.
+   -------------------------------------------------------------------------- */
+
+/* Messages arrive with a short fade/slide. */
+.eg-chat__msg {
+    animation: eg-msg-in 0.22s ease-out both;
+}
+
+@keyframes eg-msg-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* Agent replies sit on the background, without a box. */
+.eg-chat__reply {
+    color: var(--c-text);
+}
+
+/* ── Working line ── */
+
+.eg-work {
+    max-width: 100%;
+}
+
+.eg-work__row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    max-width: 100%;
+    padding: 0.2rem 0.35rem 0.2rem 0;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--c-muted);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.eg-work__row:hover .eg-work__label,
+.eg-work__row:focus-visible .eg-work__label {
+    color: var(--c-text);
+}
+
+.eg-work__row:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--c-accent) 45%, transparent);
+    outline-offset: 2px;
+}
+
+.eg-work__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.15s;
+}
+
+.eg-work--live .eg-work__label {
+    color: var(--c-text);
+    opacity: 0.85;
+}
+
+.eg-work__time {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--c-muted);
+}
+
+.eg-work__caret {
+    flex-shrink: 0;
+    color: var(--c-faint);
+    transition: transform 0.18s ease;
+}
+
+.eg-work__row[aria-expanded='true'] .eg-work__caret {
+    transform: rotate(90deg);
+}
+
+.eg-work__dots {
+    flex-shrink: 0;
+    display: inline-flex;
+    gap: 0.22rem;
+}
+
+.eg-work__dots i {
+    width: 0.32rem;
+    height: 0.32rem;
+    border-radius: 50%;
+    background: var(--c-accent);
+    animation: eg-work-dot 1.2s ease-in-out infinite;
+}
+
+.eg-work__dots i:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.eg-work__dots i:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+@keyframes eg-work-dot {
+    0%, 80%, 100% {
+        opacity: 0.25;
+        transform: scale(0.85);
+    }
+    40% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.eg-work__steps {
+    list-style: none;
+    margin: 0.35rem 0 0.25rem 0.45rem;
+    padding: 0 0 0 0.8rem;
+    border-left: 1px solid var(--c-border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    animation: eg-msg-in 0.18s ease-out both;
+}
+
+.eg-work__step {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--c-muted);
+}
+
+.eg-work__step--current {
+    color: var(--c-text);
+}
+
+.eg-work__step--muted {
+    font-style: italic;
+}
+
+.eg-work__check {
+    flex-shrink: 0;
+    width: 0.8rem;
+    color: var(--theme-color-success, #16a34a);
+    font-size: 0.75rem;
+}
+
+.eg-work__spinner {
+    flex-shrink: 0;
+    width: 0.7rem;
+    height: 0.7rem;
+    margin-top: 0.15rem;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--c-accent) 25%, transparent);
+    border-top-color: var(--c-accent);
+    animation: eg-mention-spin 0.8s linear infinite;
+}
+
+.eg-work__hint {
+    margin: 0.35rem 0 0;
+    font-size: 0.8rem;
+    color: var(--c-muted);
+}
+
+.eg-work--done {
+    margin-bottom: 0.35rem;
+}
+
+.eg-work--done .eg-work__row {
+    font-size: 0.8rem;
+}
+
+/* ── Soft error notice ── */
+
+.eg-chat__notice--soft {
+    display: flex;
+    gap: 0.65rem;
+    align-items: flex-start;
+    padding: 0.65rem 0.8rem;
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--theme-color-warning, #d97706) 8%, var(--c-surface));
+    border: 1px solid color-mix(in srgb, var(--theme-color-warning, #d97706) 28%, var(--c-border));
+    color: var(--c-text);
+}
+
+.eg-chat__notice-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-top: 0.05rem;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--theme-color-warning, #d97706);
+}
+
+.eg-chat__notice-body {
+    min-width: 0;
+}
+
+.eg-chat__notice-body p {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.eg-chat__notice-actions {
+    margin-top: 0.5rem;
+}
+
+.eg-chat__notice-btn {
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--c-border);
+    background: var(--c-surface);
+    color: var(--c-text);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.eg-chat__notice-btn:hover {
+    border-color: color-mix(in srgb, var(--c-accent) 45%, var(--c-border));
+}
+
+/* ── Markdown in agent replies ── */
+
+.eg-md > * + * {
+    margin-top: 0.6rem;
+}
+
+.eg-md p {
+    margin: 0;
+    line-height: 1.6;
+}
+
+.eg-md ul,
+.eg-md ol {
+    margin: 0;
+    padding-left: 1.3rem;
+    line-height: 1.6;
+}
+
+.eg-md ul {
+    list-style: disc;
+}
+
+.eg-md ol {
+    list-style: decimal;
+}
+
+.eg-md li + li {
+    margin-top: 0.2rem;
+}
+
+.eg-md__h {
+    font-weight: 650;
+    color: var(--c-text);
+}
+
+.eg-md__h--1 {
+    font-size: 1.1em;
+}
+
+.eg-md__h--2 {
+    font-size: 1.05em;
+}
+
+.eg-chat__code,
+.eg-md pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    border-radius: 0.35rem;
+    background: color-mix(in srgb, var(--c-text) 7%, transparent);
+}
+
+.eg-chat__code {
+    padding: 0.05rem 0.3rem;
+}
+
+.eg-md pre {
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.eg-chat__link {
+    color: var(--theme-color-ui-accent-text, var(--c-accent));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/* ── Reply actions (copy, try again) ── */
+
+.eg-chat__reply-actions {
+    display: flex;
+    gap: 0.15rem;
+    margin-top: 0.35rem;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.eg-chat__msg--agent:hover .eg-chat__reply-actions,
+.eg-chat__msg--agent:focus-within .eg-chat__reply-actions,
+.eg-chat__msg--agent:last-of-type .eg-chat__reply-actions {
+    opacity: 1;
+}
+
+.eg-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 1.75rem;
+    min-width: 1.75rem;
+    padding: 0 0.4rem;
+    justify-content: center;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--c-muted);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.eg-icon-btn:hover,
+.eg-icon-btn:focus-visible {
+    color: var(--c-text);
+    background: color-mix(in srgb, var(--c-text) 7%, transparent);
+}
+
+/* ── Composer: stop button, hint, jump to latest ── */
+
+.eg-chat__composer-send--stop {
+    background: var(--c-text);
+    color: var(--c-surface);
+}
+
+.eg-chat__composer-hint {
+    margin: 0.4rem 0 0;
+    text-align: center;
+    font-size: 0.7rem;
+    color: var(--c-faint);
+}
+
+.eg-chat__jump {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 0.6rem);
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    border: 1px solid var(--c-border);
+    background: var(--c-surface);
+    color: var(--c-text);
+    box-shadow: var(--shadow-ui-md, 0 4px 12px rgb(0 0 0 / 18%));
+    cursor: pointer;
+    animation: eg-msg-in 0.18s ease-out both;
+}
+
+.eg-chat__jump:hover {
+    border-color: color-mix(in srgb, var(--c-accent) 45%, var(--c-border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .eg-chat__msg,
+    .eg-work__steps,
+    .eg-chat__jump {
+        animation: none;
+    }
+
+    .eg-work__dots i,
+    .eg-work__spinner {
+        animation-duration: 2.4s;
+    }
+
+    .eg-work__caret,
+    .eg-chat__reply-actions {
+        transition: none;
+    }
+}
+
+/* ── AI agent: new entries saved as drafts, minimise, back-to-agent pill ── */
+
+.eg-entry-card__saved {
+    flex-wrap: wrap;
+}
+
+.eg-cp-screen__minimize {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 2rem;
+    padding: 0 0.75rem 0 0.6rem;
+    border: 1px solid var(--c-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--c-text);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.eg-cp-screen__minimize:hover {
+    background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
+}
+
+.eg-cp-screen__minimize:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--c-accent) 55%, transparent);
+    outline-offset: 2px;
+}
+
+/* Sits left of the launcher bubble, vertically centred on it. */
+.eg-cp-launcher__pill {
+    position: fixed;
+    right: calc(1.25rem + 3.25rem + 0.6rem);
+    bottom: calc(1.25rem + (3.25rem - 2.1rem) / 2);
+    z-index: var(--z-index-above, 1);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    height: 2.1rem;
+    padding: 0 0.85rem 0 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--theme-color-gray-200, #e4e4e7);
+    background: var(--theme-color-content-bg, #fff);
+    color: var(--theme-color-gray-900, #18181b);
+    font-size: 0.78rem;
+    font-weight: 600;
+    box-shadow: var(--shadow-ui-md, 0 2px 4px -2px rgba(0, 0, 0, 0.37));
+    cursor: pointer;
+    animation: eg-pill-in 0.2s ease-out;
+}
+
+.dark .eg-cp-launcher__pill {
+    border-color: var(--theme-color-gray-700, #3f3f46);
+    background: var(--theme-color-gray-900, #18181b);
+    color: var(--theme-color-gray-100, #f4f4f5);
+}
+
+.eg-cp-launcher__pill:hover {
+    border-color: var(--theme-color-primary, #4f46e5);
+}
+
+.eg-cp-launcher__pill:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--theme-color-primary, #4f46e5) 55%, transparent);
+    outline-offset: 2px;
+}
+
+.eg-cp-launcher__pill svg {
+    color: var(--theme-color-primary, #4f46e5);
+}
+
+@keyframes eg-pill-in {
+    from { opacity: 0; transform: translateX(6px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .eg-cp-launcher__pill { animation: none; }
+}
+
+@media (max-width: 640px) {
+    .eg-cp-screen__minimize-label { display: none; }
+    .eg-cp-screen__minimize { padding: 0 0.5rem; }
 }

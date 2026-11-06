@@ -22,6 +22,8 @@ use Statamic\Facades\YAML;
  *   agent_settings:    { roles: [...], users: [...] }
  *   claude_restricted: true       # off (default): the connector follows the CP role alone
  *   image_generation: true        # site-wide switch for the agent's generate_image (absent = off)
+ *   free_models: true             # OpenRouter free models only (absent = off)
+ *   free_models_training: true    # free mode may use models that train on prompts (absent = off)
  *   claude_none:    { users: [...] }   # a user's own "no access", overriding their roles
  *   claude_read:    { roles: [...], users: [...] }
  *   claude_edit:    { roles: [...], users: [...] }
@@ -120,6 +122,30 @@ class AgentAccessStore
     }
 
     /**
+     * The super admins' "free models only" switch, or null when never saved.
+     */
+    public function freeModels(): ?bool
+    {
+        return $this->optionalBool('free_models');
+    }
+
+    /**
+     * Whether free mode may use models that train on prompts, or null when
+     * never saved.
+     */
+    public function freeModelsTraining(): ?bool
+    {
+        return $this->optionalBool('free_models_training');
+    }
+
+    private function optionalBool(string $key): ?bool
+    {
+        $value = $this->all()[$key] ?? null;
+
+        return is_bool($value) ? $value : null;
+    }
+
+    /**
      * Persist the full access document (replaces the file).
      *
      * @param  array<string, mixed>  $grants
@@ -180,8 +206,10 @@ class AgentAccessStore
 
         $out['claude_restricted'] = filter_var($input['claude_restricted'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-        if (array_key_exists('image_generation', $input)) {
-            $out['image_generation'] = filter_var($input['image_generation'], FILTER_VALIDATE_BOOLEAN);
+        foreach (['image_generation', 'free_models', 'free_models_training'] as $switch) {
+            if (array_key_exists($switch, $input)) {
+                $out[$switch] = filter_var($input[$switch], FILTER_VALIDATE_BOOLEAN);
+            }
         }
 
         return $out;

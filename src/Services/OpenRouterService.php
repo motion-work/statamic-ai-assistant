@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Log;
 use MotionWork\StatamicAiAssistant\Events\AiCompletionFinished;
 use MotionWork\StatamicAiAssistant\Services\Ai\AiTask;
 use MotionWork\StatamicAiAssistant\Services\Ai\EmbedsText;
+use MotionWork\StatamicAiAssistant\Services\Ai\Free\FreeModelFeedback;
+use MotionWork\StatamicAiAssistant\Services\Ai\Free\FreeModelPicker;
 use MotionWork\StatamicAiAssistant\Services\Ai\GeneratedImage;
 use MotionWork\StatamicAiAssistant\Services\Ai\GeneratesImages;
 use MotionWork\StatamicAiAssistant\Services\Ai\OpenAiCompatibleClient;
@@ -14,6 +16,7 @@ use MotionWork\StatamicAiAssistant\Services\Ai\OpenAiCompatibleService;
 use MotionWork\StatamicAiAssistant\Services\Ai\OpenRouterEmbeddings;
 use MotionWork\StatamicAiAssistant\Services\Ai\OpenRouterErrors;
 use MotionWork\StatamicAiAssistant\Services\Ai\OpenRouterImages;
+use MotionWork\StatamicAiAssistant\Support\FreeModels;
 use Statamic\Facades\User;
 
 /**
@@ -26,6 +29,10 @@ use Statamic\Facades\User;
  * Every request names the site (HTTP-Referer, X-OpenRouter-Title) and the
  * signed-in editor as a hashed `user`, so OpenRouter can attribute usage and
  * keep one editor's moderation flag from affecting the whole account.
+ *
+ * In free mode (FreeModels) the profiles' models give way to the free models
+ * FreeModelPicker ranks for the task, and FreeModelFeedback learns from each
+ * call which of them to skip for a while.
  */
 class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, GeneratesImages
 {
@@ -203,7 +210,7 @@ class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, G
             $fields['preset'] = $preset;
         }
 
-        $reasoning = $this->reasoning($profile['reasoning']);
+        $reasoning = $this->reasoning($profile['reasoning'], $models[0] ?? null);
         if ($reasoning !== null) {
             $fields['reasoning'] = $reasoning;
         }
@@ -216,12 +223,17 @@ class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, G
      * models of quick-task profiles must therefore accept effort "none" (models
      * with mandatory reasoning reject it).
      *
+     * In free mode a quick task keeps reasoning when its first model cannot
+     * skip it: those models reject effort "none" (HTTP 400).
+     *
      * @return array{effort: string}|null
      */
-    private function reasoning(?string $effort): ?array
+    private function reasoning(?string $effort, ?string $firstModel): ?array
     {
         if ($this->thinkingDisabled()) {
-            return ['effort' => 'none'];
+            $mustReason = FreeModels::enabled() && ! app(FreeModelPicker::class)->canSkipReasoning($firstModel);
+
+            return $mustReason ? null : ['effort' => 'none'];
         }
 
         return $effort === null ? null : ['effort' => $effort];
@@ -269,6 +281,11 @@ class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, G
 
         if (isset($payload['response_format'])) {
             unset($payload['temperature']);
+        }
+
+        // Many free models must reason first: give quick tasks room to answer.
+        if (FreeModels::enabled() && $this->currentTask()->isQuick()) {
+            $payload['max_tokens'] = max((int) $payload['max_tokens'], (int) config('statamic-ai-assistant.openrouter_free_models.min_max_tokens', 3000));
         }
 
         return $payload;
@@ -324,7 +341,17 @@ class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, G
 
     protected function failureException(Response $response): \RuntimeException
     {
-        return OpenRouterErrors::exception($response);
+        return OpenRouterErrors::exception($response, FreeModels::enabled());
+    }
+
+    protected function requestFailed(array $payload, Response $response): void
+    {
+        if (! FreeModels::enabled()) {
+            return;
+        }
+
+        $requested = is_array($payload['models'] ?? null) ? $payload['models'] : [$payload['model'] ?? null];
+        app(FreeModelFeedback::class)->failed(array_values(array_filter($requested, 'is_string')), $response, FreeModels::dataCollection());
     }
 
     protected function emptyReplyMessage(): string
@@ -334,6 +361,10 @@ class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, G
 
     protected function completionFinished(AiCompletionFinished $event): void
     {
+        if (FreeModels::enabled()) {
+            app(FreeModelFeedback::class)->succeeded($event->requestedModels, $event->model);
+        }
+
         $context = [
             'task' => $event->task->value,
             'model' => $event->model,
@@ -359,6 +390,16 @@ class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, G
      * @return array{models: list<string>, preset: ?string, reasoning: ?string, max_tokens: ?int, temperature: ?float}
      */
     private function profile(AiTask $task): array
+    {
+        $profile = $this->configuredProfile($task);
+
+        return FreeModels::enabled() ? app(FreeModelPicker::class)->profile($task, $profile) : $profile;
+    }
+
+    /**
+     * @return array{models: list<string>, preset: ?string, reasoning: ?string, max_tokens: ?int, temperature: ?float}
+     */
+    private function configuredProfile(AiTask $task): array
     {
         $raw = config('statamic-ai-assistant.openrouter_profiles.'.$task->value);
         $raw = is_array($raw) ? $raw : [];
@@ -390,7 +431,9 @@ class OpenRouterService extends OpenAiCompatibleService implements EmbedsText, G
         $config = is_array($config) ? $config : [];
         $preferences = [];
 
-        $dataCollection = strtolower(trim((string) ($config['data_collection'] ?? '')));
+        $dataCollection = FreeModels::enabled()
+            ? FreeModels::dataCollection()
+            : strtolower(trim((string) ($config['data_collection'] ?? '')));
         if (in_array($dataCollection, ['allow', 'deny'], true)) {
             $preferences['data_collection'] = $dataCollection;
         }

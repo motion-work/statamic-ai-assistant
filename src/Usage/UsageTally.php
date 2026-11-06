@@ -4,12 +4,10 @@ namespace MotionWork\StatamicAiAssistant\Usage;
 
 /**
  * Adds up usage records: totals, breakdowns by task, model, user and day,
- * and the most recent calls. One pass over a month's log.
+ * and every call (newest first) for the paged call list. One pass over a month's log.
  */
 final class UsageTally
 {
-    private const RECENT_LIMIT = 50;
-
     /** @var array<string, int|float> */
     private array $totals;
 
@@ -44,9 +42,6 @@ final class UsageTally
         }
 
         $this->recent[] = $record;
-        if (count($this->recent) > self::RECENT_LIMIT) {
-            array_shift($this->recent);
-        }
     }
 
     /** @return array<string, mixed> */

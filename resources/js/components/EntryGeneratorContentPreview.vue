@@ -76,7 +76,7 @@ export default {
       if (!dd || !th) return '';
       const v = dd[th];
       if (v == null || v === '') return '';
-      return (typeof v === 'string' ? v.trim() : String(v)) || '';
+      return this.plainValue(v).trim();
     },
 
     bodyRows() {
@@ -109,7 +109,7 @@ export default {
         const type = field.type || 'text';
 
         if (type === 'asset_description' || type === 'asset_descriptions') {
-          const paths = Array.isArray(raw) ? raw.join(', ') : String(raw);
+          const paths = this.plainValue(raw);
           if (!paths.trim()) continue;
           rows.push({ handle, label, kind: 'text', value: paths });
           continue;
@@ -133,7 +133,8 @@ export default {
           continue;
         }
 
-        rows.push({ handle, label, kind: 'text', value: typeof raw === 'string' ? raw : String(raw) });
+        const value = this.plainValue(raw);
+        if (value.trim()) rows.push({ handle, label, kind: 'text', value });
       }
 
       return rows;
@@ -167,7 +168,7 @@ export default {
           } else if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
             displayVal = this.flattenNested(val);
           } else {
-            displayVal = String(val);
+            displayVal = this.plainValue(val);
           }
 
           if (!displayVal.trim()) continue;
@@ -184,20 +185,48 @@ export default {
           if (typeof item === 'object' && item !== null) {
             const pairs = Object.entries(item)
               .filter(([k]) => k !== 'type' && k !== 'enabled')
-              .map(([k, v]) => `${this.humanize(k)}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+              .map(([k, v]) => [k, this.plainValue(v)])
+              .filter(([, v]) => v.trim() !== '')
+              .map(([k, v]) => `${this.humanize(k)}: ${v}`)
               .join(' · ');
             return pairs || `[${i + 1}]`;
           }
-          return String(item);
+          return this.plainValue(item);
         }).join('\n');
       }
       if (typeof val === 'object' && val !== null) {
         return Object.entries(val)
           .filter(([k]) => k !== 'type' && k !== 'enabled')
-          .map(([k, v]) => `${this.humanize(k)}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+          .map(([k, v]) => [k, this.plainValue(v)])
+          .filter(([, v]) => v.trim() !== '')
+          .map(([k, v]) => `${this.humanize(k)}: ${v}`)
           .join(' · ');
       }
-      return String(val);
+      return this.plainValue(val);
+    },
+
+    /**
+     * Any field value as readable text: strings as is, lists joined, and
+     * objects (media/asset values, links) by their most telling key, never
+     * "[object Object]". Empty when there is nothing worth showing.
+     */
+    plainValue(val) {
+      if (val === undefined || val === null || val === '') return '';
+      if (typeof val === 'string') return val;
+      if (typeof val === 'number') return String(val);
+      if (typeof val === 'boolean') return val ? this.__('Yes') : this.__('No');
+      if (Array.isArray(val)) {
+        return val.map((item) => this.plainValue(item)).filter((t) => t.trim() !== '').join(', ');
+      }
+      if (typeof val === 'object') {
+        for (const key of ['path', 'url', 'src', 'filename', 'basename', 'title', 'label', 'alt', 'text', 'value', 'id']) {
+          const picked = this.plainValue(val[key]);
+          if (picked.trim()) return picked;
+        }
+        return Object.values(val).map((v) => this.plainValue(v)).filter((t) => t.trim() !== '').join(', ');
+      }
+
+      return '';
     },
 
     humanize(handle) {

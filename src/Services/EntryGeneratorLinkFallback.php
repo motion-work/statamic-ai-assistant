@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Services;
 
+use Illuminate\Support\Facades\Log;
 use Statamic\Facades\Collection;
 use Statamic\Fields\Blueprint;
 use Statamic\Fields\Field;
@@ -45,7 +46,7 @@ class EntryGeneratorLinkFallback
             $current = $data[$handle] ?? null;
 
             if ($current === null || $current === '') {
-                $fallback = $this->resolveFallbackEntryLink($locale, $warnings);
+                $fallback = $this->resolveFallbackEntryLink($locale);
 
                 if ($fallback !== null) {
                     $data[$handle] = $fallback;
@@ -111,7 +112,7 @@ class EntryGeneratorLinkFallback
         unset($row);
     }
 
-    private function resolveFallbackEntryLink(string $locale, array &$warnings): ?string
+    private function resolveFallbackEntryLink(string $locale): ?string
     {
         if (array_key_exists($locale, $this->fallbackEntryLinkByLocale)) {
             return $this->fallbackEntryLinkByLocale[$locale];
@@ -124,7 +125,8 @@ class EntryGeneratorLinkFallback
         $collection = Collection::findByHandle($collectionHandle);
 
         if (! $collection) {
-            $warnings[] = __('Fallback link: collection ":collection" not found.', ['collection' => $collectionHandle]);
+            // A site setup issue (generator_fallback_link), not something an editor can act on.
+            Log::notice('[entry-gen] fallback link collection not found', ['collection' => $collectionHandle]);
             $this->fallbackEntryLinkByLocale[$locale] = null;
 
             return null;
@@ -136,7 +138,7 @@ class EntryGeneratorLinkFallback
             ->first();
 
         if (! $entry) {
-            $warnings[] = __('Fallback link: no entry with slug ":slug" in :collection for site :site.', [
+            Log::notice('[entry-gen] fallback link entry not found', [
                 'slug' => $slug,
                 'collection' => $collectionHandle,
                 'site' => $locale,

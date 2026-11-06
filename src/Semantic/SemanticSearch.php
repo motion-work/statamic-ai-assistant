@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Log;
 use MotionWork\StatamicAiAssistant\Services\AbstractAiService;
 use MotionWork\StatamicAiAssistant\Services\Ai\AiProviders;
 use MotionWork\StatamicAiAssistant\Services\Ai\EmbedsText;
+use MotionWork\StatamicAiAssistant\Support\FreeModels;
 use Statamic\Facades\Site;
 
 /**
@@ -26,6 +27,9 @@ class SemanticSearch
     public const PROVIDER = 'provider';
 
     public const NO_MODEL = 'no_model';
+
+    /** Free mode without training allowed: every free embedding model needs it. */
+    public const FREE_TRAINING = 'free_training';
 
     public const NOT_BUILT = 'not_built';
 
@@ -51,6 +55,10 @@ class SemanticSearch
         }
         if (AiProviders::active() !== AiProviders::OPENROUTER || ! AiProviders::hasCredentials() || ! $this->ai instanceof EmbedsText) {
             return self::PROVIDER;
+        }
+
+        if (FreeModels::enabled() && ! FreeModels::trainingAllowed()) {
+            return self::FREE_TRAINING;
         }
 
         return $this->ai->embeddingModel() === null ? self::NO_MODEL : null;

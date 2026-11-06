@@ -259,7 +259,7 @@
       <template v-for="turn in chatTurns" :key="turn.key">
         <div v-if="turn.role === 'user'" class="eg-chat__msg eg-chat__msg--user">
           <div class="eg-chat__user-wrap">
-            <span class="eg-chat__sender">{{ __('You') }}</span>
+            <span class="sr-only">{{ __('You') }}</span>
             <div class="eg-chat__bubble eg-chat__bubble--user">
               <p v-html="chatHtml(turn.text, turn.mention_titles, turn.attachments)"></p>
               <!-- Legacy single-attachment pill (old saved chats — new turns
@@ -275,27 +275,51 @@
           </div>
         </div>
         <div v-else class="eg-chat__msg eg-chat__msg--agent">
-          <span class="eg-chat__sender">{{ __('AI agent') }}</span>
-          <div v-if="turn.kind === 'error'" class="eg-chat__notice eg-chat__notice--error">
-            <p><strong>{{ __('Something went wrong') }}</strong></p>
-            <p v-html="chatHtml(turn.text)"></p>
+          <span class="sr-only">{{ __('AI agent') }}</span>
+          <!-- How long the agent worked on this reply, and its steps (like "Thought for 13s"). -->
+          <div v-if="turn.work" class="eg-work eg-work--done">
+            <button
+              type="button"
+              class="eg-work__row"
+              :aria-expanded="openWork[turn.key] ? 'true' : 'false'"
+              @click="toggleWork(turn.key)"
+            >
+              <span class="eg-work__label">{{ __('Worked for :time', { time: formatDuration(turn.work.ms) }) }}</span>
+              <svg class="eg-work__caret" viewBox="0 0 20 20" fill="currentColor" width="12" height="12" aria-hidden="true"><path d="M7.3 4.3a1 1 0 011.4 0l5 5a1 1 0 010 1.4l-5 5a1 1 0 01-1.4-1.4L11.6 10 7.3 5.7a1 1 0 010-1.4z" /></svg>
+            </button>
+            <ol v-if="openWork[turn.key]" class="eg-work__steps">
+              <li v-for="(step, i) in turn.work.steps" :key="i" class="eg-work__step">
+                <span class="eg-work__check" aria-hidden="true">✓</span>
+                <span>{{ step }}</span>
+              </li>
+              <li v-if="!turn.work.steps.length" class="eg-work__step eg-work__step--muted">{{ __('No steps recorded.') }}</li>
+            </ol>
+          </div>
+
+          <div v-if="turn.kind === 'error'" class="eg-chat__notice eg-chat__notice--soft" role="status">
+            <span class="eg-chat__notice-icon" aria-hidden="true">!</span>
+            <div class="eg-chat__notice-body">
+              <p>{{ errorHint(turn.text).message }}</p>
+              <div v-if="turn.key === latestTurnKey && !turnInFlight && errorHint(turn.text).action" class="eg-chat__notice-actions">
+                <button type="button" class="eg-chat__notice-btn" @click="onErrorAction(errorHint(turn.text).action)">
+                  {{ errorHint(turn.text).action === 'new-chat' ? __('New chat') : __('Try again') }}
+                </button>
+              </div>
+            </div>
           </div>
           <div v-else-if="turn.kind === 'plan'" class="eg-chat__plan">
-            <p v-html="chatHtml(turn.text)"></p>
+            <div class="eg-md" v-html="agentHtml(turn.text)"></div>
             <div
               v-if="turn.key === latestTurnKey && !store.generating && !store.planning"
               class="eg-chat__plan-actions"
             >
-              <Button variant="primary" :text="__('Approve plan')" @click="approvePlan" />
+              <Button variant="primary" :text="planApproveLabel(turn)" @click="approvePlan(turn)" />
             </div>
             <p v-if="turn.key === latestTurnKey" class="eg-chat__plan-hint">
-              {{ __('Approve to proceed, or reply below to adjust the plan or answer the question.') }}
+              {{ planAsksQuestion(turn) ? __('Or reply below to change something or answer differently.') : __('Or reply below to change something.') }}
             </p>
           </div>
-          <div v-else-if="turn.kind === 'answer'" class="eg-chat__answer">
-            <p v-html="chatHtml(turn.text)"></p>
-          </div>
-          <p v-else v-html="chatHtml(turn.text)"></p>
+          <div v-else class="eg-md eg-chat__reply" v-html="agentHtml(turn.text)"></div>
 
           <div v-if="turn.sources.length" class="eg-chat__sources">
             <span class="eg-chat__sources-label">{{ __('Sources') }}</span>
@@ -319,50 +343,38 @@
               @save="(mode) => handleCardSave(entry.id, mode)"
               @retry="handleCardRetry(entry.id)"
               @discard="handleCardDiscard(entry.id)"
+              @view="viewEntry"
             />
+          </div>
+
+          <div v-if="turn.kind !== 'error' && turn.text && !(turnInFlight && turn.key === latestTurnKey)" class="eg-chat__reply-actions">
+            <button
+              type="button"
+              class="eg-icon-btn"
+              :title="copiedKey === turn.key ? __('Copied') : __('Copy')"
+              :aria-label="__('Copy')"
+              @click="copyReply(turn)"
+            >
+              <svg v-if="copiedKey !== turn.key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+              <svg v-else viewBox="0 0 20 20" fill="currentColor" width="14" height="14" aria-hidden="true"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-8 8a1 1 0 01-1.4 0l-4-4a1 1 0 011.4-1.4L8 12.6l7.3-7.3a1 1 0 011.4 0z" clip-rule="evenodd" /></svg>
+              <span v-if="copiedKey === turn.key" class="eg-icon-btn__label">{{ __('Copied') }}</span>
+            </button>
+            <button
+              v-if="turn.key === latestTurnKey && !turnInFlight && lastUserText"
+              type="button"
+              class="eg-icon-btn"
+              :title="__('Try again')"
+              :aria-label="__('Try again')"
+              @click="retryLastMessage"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M3 12a9 9 0 0115.5-6.3L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 01-15.5 6.3L3 16" /><path d="M3 21v-5h5" /></svg>
+            </button>
           </div>
         </div>
       </template>
 
-      <!-- Live turn in progress: planning indicator, not-yet-summarised cards,
-           and the current-turn error (if any). -->
-      <div v-if="renderedStep === 3 && store.planning" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
-        <div class="eg-chat__stream-panel" aria-live="polite" aria-busy="true">
-          <div class="eg-chat__stream-panel__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="planProgressPercent" :aria-label="__('Planning')">
-            <div class="eg-chat__stream-panel__fill" :style="{ width: planProgressPercent + '%' }" />
-          </div>
-          <p class="eg-chat__stream-panel__title">{{ planningHeadline }}</p>
-          <p v-if="!store.hasServerActivity" class="eg-chat__stream-panel__hint">{{ __('Figuring out how many entries to create and where each one fits.') }}</p>
-
-          <!-- Non-entry operations already completed this turn (structural
-               changes etc.) — a stable checklist, unlike the scrolling feed. -->
-          <ul v-if="store.operations && store.operations.length" class="eg-chat__ops" :aria-label="__('Changes applied')">
-            <li v-for="op in store.operations" :key="op.id" class="eg-chat__ops-line">
-              <span class="eg-chat__ops-check" aria-hidden="true">✓</span>
-              <span>{{ op.label }}</span>
-            </li>
-          </ul>
-
-          <div
-            v-if="planningActivityLog.length"
-            ref="activityScrollPlanning"
-            class="eg-chat__activity"
-          >
-            <transition-group name="eg-activity" tag="ul" class="eg-chat__activity-list">
-              <li
-                v-for="row in planningActivityLog"
-                :key="row.id"
-                class="eg-chat__activity-line"
-                v-html="chatHtml(row.text)"
-              ></li>
-            </transition-group>
-          </div>
-        </div>
-      </div>
-
       <div v-if="renderedStep === 3 && liveCards.length" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
+        <span class="sr-only">{{ __('AI agent') }}</span>
         <div class="eg-chat__cards">
           <EntryGeneratorEntryCard
             v-for="(entry, idx) in liveCards"
@@ -373,22 +385,77 @@
             @save="(mode) => handleCardSave(entry.id, mode)"
             @retry="handleCardRetry(entry.id)"
             @discard="handleCardDiscard(entry.id)"
+            @view="viewEntry"
           />
+        </div>
+      </div>
+
+      <!-- Live turn: one line with what the agent is doing now, a timer, and its steps. -->
+      <div v-if="renderedStep === 3 && turnInFlight" class="eg-chat__msg eg-chat__msg--agent eg-chat__msg--working">
+        <span class="sr-only">{{ __('AI agent') }}</span>
+        <div class="eg-work eg-work--live" aria-live="polite">
+          <button
+            type="button"
+            class="eg-work__row"
+            :aria-expanded="liveWorkOpen ? 'true' : 'false'"
+            @click="liveWorkOpen = !liveWorkOpen"
+          >
+            <span class="eg-work__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="eg-work__label">{{ currentStepText }}</span>
+            <span v-if="elapsedLabel" class="eg-work__time" aria-hidden="true">{{ elapsedLabel }}</span>
+            <svg class="eg-work__caret" viewBox="0 0 20 20" fill="currentColor" width="12" height="12" aria-hidden="true"><path d="M7.3 4.3a1 1 0 011.4 0l5 5a1 1 0 010 1.4l-5 5a1 1 0 01-1.4-1.4L11.6 10 7.3 5.7a1 1 0 010-1.4z" /></svg>
+          </button>
+          <ol v-if="liveWorkOpen" class="eg-work__steps">
+            <li
+              v-for="(step, i) in liveSteps"
+              :key="i"
+              class="eg-work__step"
+              :class="{ 'eg-work__step--current': i === liveSteps.length - 1 && store.planning }"
+            >
+              <span v-if="i === liveSteps.length - 1 && store.planning" class="eg-work__spinner" aria-hidden="true"></span>
+              <span v-else class="eg-work__check" aria-hidden="true">✓</span>
+              <span>{{ step }}</span>
+            </li>
+            <li v-if="!liveSteps.length" class="eg-work__step eg-work__step--current">
+              <span class="eg-work__spinner" aria-hidden="true"></span>
+              <span>{{ currentStepText }}</span>
+            </li>
+          </ol>
+
+          <!-- Non-entry operations already completed this turn (structural changes etc.). -->
+          <ul v-if="store.operations && store.operations.length" class="eg-chat__ops" :aria-label="__('Changes applied')">
+            <li v-for="op in store.operations" :key="op.id" class="eg-chat__ops-line">
+              <span class="eg-chat__ops-check" aria-hidden="true">✓</span>
+              <span>{{ op.label }}</span>
+            </li>
+          </ul>
+
+          <p v-if="queueLooksStuck" class="eg-chat__stream-panel__queue" role="status">
+            {{ __('The request is still waiting to start. Usually no queue worker is running on the server: please tell your administrator (php artisan queue:work). It starts as soon as a worker runs, and you can close this window in the meantime.') }}
+          </p>
+          <p v-if="store.connectionLost" class="eg-work__hint" role="status">{{ __('Connection lost – I keep trying…') }}</p>
         </div>
       </div>
 
       <!-- Current-turn error not yet folded into the transcript. -->
       <div v-if="renderedStep === 3 && showLiveGenerationError" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
-        <div class="eg-chat__notice eg-chat__notice--error">
-          <p><strong>{{ __('Something went wrong') }}</strong></p>
-          <p v-html="chatHtml(store.generationError)"></p>
+        <span class="sr-only">{{ __('AI agent') }}</span>
+        <div class="eg-chat__notice eg-chat__notice--soft" role="status">
+          <span class="eg-chat__notice-icon" aria-hidden="true">!</span>
+          <div class="eg-chat__notice-body">
+            <p>{{ errorHint(store.generationError).message }}</p>
+            <div v-if="errorHint(store.generationError).action && !turnInFlight" class="eg-chat__notice-actions">
+              <button type="button" class="eg-chat__notice-btn" @click="onErrorAction(errorHint(store.generationError).action)">
+                {{ errorHint(store.generationError).action === 'new-chat' ? __('New chat') : __('Try again') }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- Stop confirmation (inline, above the composer) -->
       <div v-if="renderedStep === 3 && stopConfirmOpen" class="eg-chat__msg eg-chat__msg--agent">
-        <span class="eg-chat__sender">{{ __('AI agent') }}</span>
+        <span class="sr-only">{{ __('AI agent') }}</span>
         <div class="eg-chat__notice eg-chat__notice--warn eg-stop-confirm">
           <p>
             <strong>{{ __('Stop generation?') }}</strong>
@@ -415,6 +482,16 @@
     <div class="eg-chat__bar">
       <!-- Prompt input (step 2) -->
       <div v-if="renderedStep === 2 || renderedStep === 3" class="eg-chat__composer-wrap">
+        <button
+          v-if="showJumpToLatest"
+          type="button"
+          class="eg-chat__jump"
+          :title="__('Jump to latest')"
+          :aria-label="__('Jump to latest')"
+          @click="jumpToLatest"
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v9.6l3.3-3.3a1 1 0 111.4 1.4l-5 5a1 1 0 01-1.4 0l-5-5a1 1 0 111.4-1.4L9 13.6V4a1 1 0 011-1z" clip-rule="evenodd" /></svg>
+        </button>
         <!-- @-mention entry picker -->
         <div v-if="mention.open" class="eg-chat__mention" role="listbox">
           <div class="eg-chat__mention-head">
@@ -470,7 +547,8 @@
             @send="handleComposerSend"
             @mention-query="onMentionQuery"
             @chip-click="onComposerChipClick"
-            @blur="onComposerBlur"
+            @focus="composerFocused = true"
+            @blur="onComposerBlur(); composerFocused = false"
           />
           <button
             type="button"
@@ -516,10 +594,22 @@
             <span class="eg-chat__composer-web-label">{{ __('Web search') }}</span>
           </button>
           <button
+            v-if="turnInFlight"
+            type="button"
+            class="eg-chat__composer-send eg-chat__composer-send--stop"
+            :title="__('Stop')"
+            :aria-label="__('Stop')"
+            @click="requestStop"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="2.5" /></svg>
+          </button>
+          <button
+            v-else
             type="button"
             class="eg-chat__composer-send"
-            :disabled="!canGenerate || store.generating"
+            :disabled="!canGenerate"
             :title="__('Send')"
+            :aria-label="__('Send')"
             @click="handleComposerSend"
           >
             <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95l14.095-5.638a.75.75 0 000-1.392L3.105 2.289z" /></svg>
@@ -527,26 +617,15 @@
         </div>
       </div>
 
+      <p v-if="(renderedStep === 2 || composerFocused) && !turnInFlight" class="eg-chat__composer-hint">{{ __('Enter to send · Shift+Enter for a new line') }}</p>
+
       <!-- Action buttons -->
       <div class="eg-chat__actions">
         <template v-if="renderedStep === 2 && !canGenerate">
           <span class="eg-chat__actions-hint">{{ __('Type at least 3 characters…') }}</span>
         </template>
-        <template v-else-if="store.generating">
-          <span class="eg-chat__actions-status">
-            <span class="eg-chat__actions-pulse" />
-            {{ generatingStatusText }}
-          </span>
-          <Button
-            variant="default"
-            :text="__('Stop')"
-            :disabled="stopConfirmOpen"
-            @click="requestStop"
-          />
-        </template>
-        <template v-else-if="renderedStep === 3">
+        <template v-else-if="renderedStep === 3 && !turnInFlight">
           <span v-if="readyOrSavedSummary" class="eg-chat__actions-summary">{{ readyOrSavedSummary }}</span>
-          <Button variant="default" :text="__('New chat')" @click="resetForNewRequest" />
           <Button
             v-if="canSaveAll"
             variant="default"
@@ -770,6 +849,7 @@
             @save="(mode) => handleCardSave(entry.id, mode)"
             @retry="handleCardRetry(entry.id)"
             @discard="handleCardDiscard(entry.id)"
+            @view="viewEntry"
           />
         </div>
 
@@ -824,7 +904,6 @@ import {
   reset as storeReset,
   stopGeneration,
   stopChatTurn,
-  pushActivityLine,
   registerMention,
   addPendingFile,
   removePendingFile,
@@ -834,8 +913,11 @@ import {
   setI18n,
   setToaster,
   setWebSearch,
+  currentTurnSteps,
 } from '../store/entryGeneratorStore.js';
-import { formatChatMessageHtml } from '../formatChatUrls.js';
+import { formatChatMessageHtml, formatAgentReplyHtml } from '../formatChatUrls.js';
+import { friendlyChatError, CHAT_ERROR_ACTION } from '../utils/chatErrors.js';
+import { visitCp } from '../utils/cpNavigation.js';
 import { formatFileSize } from '../composer/promptTokens.js';
 
 /** Entry id from a Statamic CP publish URL, or null on listings and create screens. */
@@ -877,6 +959,8 @@ function watchCpLocation(fn) {
 
 export default {
   name: 'EntryGeneratorPage',
+
+  emits: ['minimize'],
   components: { Button, AiModalLoadingOverlay, EntryGeneratorEntryCard, AgentAssetSelectorStack, EntryGeneratorChatHistory, AgentComposerInput, PromptTemplateForm },
 
   props: {
@@ -927,15 +1011,13 @@ export default {
       chatStickToBottom: true,
       _chatStreamScrollSilent: false,
 
-      // Rotating “under the hood” hints while the planner runs (drawer only).
-      planningHintTimer: null,
-      planningHintIdx: 0,
-      planningHintKeys: [
-        'Shaping the page in our mind…',
-        'Writing your text and sections…',
-        'Polishing titles and details…',
-        'Almost ready to show you…',
-      ],
+      // Working line: clock for the elapsed timer, and which step lists are open.
+      nowMs: Date.now(),
+      workClock: null,
+      liveWorkOpen: false,
+      openWork: {},
+      copiedKey: null,
+      composerFocused: false,
 
       // @-mention entry picker (composer typeahead).
       mention: {
@@ -1106,6 +1188,8 @@ export default {
         role: t.role,
         text: t.text,
         kind: t.kind,
+        approveLabel: typeof t.approve_label === 'string' ? t.approve_label.trim() : '',
+        work: t.work && Number.isFinite(t.work.ms) ? { ms: t.work.ms, steps: Array.isArray(t.work.steps) ? t.work.steps : [] } : null,
         sources: t.role === 'assistant' ? this.sourceChips(t.citations) : [],
         cards: t.role === 'assistant' && Array.isArray(t.entry_ids)
           ? this.store.entries.filter((e) => t.entry_ids.includes(e.id))
@@ -1130,35 +1214,68 @@ export default {
       return this.store.entries.filter((e) => !claimed.has(e.id));
     },
 
+    /** A turn is running (planning, drafting or waiting for a worker). */
+    turnInFlight() {
+      return this.store.generating || this.store.planning;
+    },
+
+    /** The running turn's real steps (planner activity since the message was sent). */
+    liveSteps() {
+      return currentTurnSteps();
+    },
+
+    /** What the agent is doing right now, in one short line. */
+    currentStepText() {
+      if (this.waitingForQueue) return this.__('Waiting for the request to start…');
+      if (this.store.planning) {
+        const steps = this.liveSteps;
+        return steps.length ? steps[steps.length - 1] : this.__('Thinking…');
+      }
+      return this.draftingStepText;
+    },
+
+    draftingStepText() {
+      const entries = this.store.entries;
+      const drafting = entries.find((e) => e.status === STATUS.DRAFTING || e.status === STATUS.QUEUED);
+      if (!drafting) return this.__('Finishing up…');
+      const label = drafting.label || drafting.collectionTitle || '';
+      if (entries.length < 2) return this.__('Writing “:label”', { label });
+      const done = entries.filter((e) => [STATUS.READY, STATUS.SAVED, STATUS.FAILED].includes(e.status)).length;
+      return this.__('Writing “:label” · draft :n of :total', { label, n: Math.min(done + 1, entries.length), total: entries.length });
+    },
+
+    /** "13s", "1m 05s" since the editor sent the message; empty when unknown. */
+    elapsedLabel() {
+      if (!this.store.turnStartedAt) return '';
+      return this.formatDuration(this.nowMs - this.store.turnStartedAt);
+    },
+
+    showJumpToLatest() {
+      return this.renderedStep === 3 && !this.chatStickToBottom;
+    },
+
+    /** The editor's newest message (what "Try again" sends again). */
+    lastUserText() {
+      const turns = this.store.transcript || [];
+      for (let i = turns.length - 1; i >= 0; i -= 1) {
+        if (turns[i].role === 'user' && (turns[i].text || '').trim()) return turns[i].text;
+      }
+      return '';
+    },
+
     planProgressPercent() {
       const t = this.planTicker;
       return Math.min(85, 15 + t * 6);
     },
 
-    /** Planning-phase lines only (per-entry stream lives on each entry card). */
-    planningActivityLog() {
-      return this.store.activityLog.filter((row) => row.entryId == null);
+    /** The planning job is queued but no worker has started it yet. */
+    waitingForQueue() {
+      return this.store.planning && this.store.planningWaitSeconds !== null;
     },
 
-    /** Live panel headline: the agent's newest real step, else the static title. */
-    planningHeadline() {
-      if (this.store.hasServerActivity) {
-        const rows = this.planningActivityLog;
-        if (rows.length) return rows[rows.length - 1].text;
-      }
-      return this.__('Working out a plan…');
-    },
-
-    generatingStatusText() {
-      if (this.store.planning) return this.__('Working out a plan…');
-      const drafting = this.store.entries.filter((e) => e.status === STATUS.DRAFTING).length;
-      const queued = this.store.entries.filter((e) => e.status === STATUS.QUEUED).length;
-      if (drafting > 0 || queued > 0) {
-        const total = this.store.entries.length;
-        const ready = this.store.entries.filter((e) => [STATUS.READY, STATUS.SAVED].includes(e.status)).length;
-        return this.__('Drafting :done of :total…', { done: ready + drafting, total });
-      }
-      return this.__('Generating…');
+    /** Waiting long enough that a missing queue worker is the likely cause. */
+    queueLooksStuck() {
+      return this.waitingForQueue && this.store.planningWaitSeconds >= 15;
     },
 
     canSaveAll() {
@@ -1214,20 +1331,31 @@ export default {
     'store.planning'(now) {
       if (now) {
         this.startPlanTicker();
-        this.startPlanningHints();
       } else {
         this.stopPlanTicker();
-        this.stopPlanningHints();
       }
+    },
+    turnInFlight: {
+      immediate: true,
+      handler(now) {
+        if (now) {
+          this.liveWorkOpen = false;
+          this.startWorkClock();
+        } else {
+          this.stopWorkClock();
+        }
+      },
     },
     'store.activityLog': {
       handler() {
-        this.$nextTick(() => {
-          this.scrollActivityPanels();
-          this.scrollChatToBottom();
-        });
+        this.$nextTick(() => this.scrollChatToBottom());
       },
       deep: true,
+    },
+    // A failure notice appears below the last message: bring it fully into
+    // view instead of leaving it half under the composer.
+    showLiveGenerationError(now) {
+      if (now) this.$nextTick(() => this.scrollChatToBottom(true));
     },
     active: {
       immediate: true,
@@ -1280,7 +1408,6 @@ export default {
     this.initializePage();
     if (this.store.planning) {
       this.startPlanTicker();
-      this.startPlanningHints();
     }
     window.addEventListener('keydown', this.onAssetPreviewKeydown);
     if (this.drawer) {
@@ -1290,7 +1417,7 @@ export default {
 
   beforeUnmount() {
     this.stopPlanTicker();
-    this.stopPlanningHints();
+    this.stopWorkClock();
     this._offCpLocation?.();
     this._offCpLocation = null;
     clearTimeout(this.mention._debounce);
@@ -1372,6 +1499,10 @@ export default {
           lines.push(`${this.__('Sources')}:`, ...sources.map((src) => `- ${src.title}: ${src.url}`));
         }
         lines.push('');
+      }
+      // The raw error stays out of the chat bubble, but developers need it.
+      if (this.store.generationError) {
+        lines.push('Error (raw):', String(this.store.generationError), '');
       }
 
       const text = lines.join('\n');
@@ -1660,31 +1791,96 @@ export default {
       });
     },
 
-    scrollActivityPanels() {
-      const el = this.$refs.activityScrollPlanning;
-      if (el) el.scrollTop = el.scrollHeight;
+    startWorkClock() {
+      this.stopWorkClock();
+      this.nowMs = Date.now();
+      this.workClock = setInterval(() => { this.nowMs = Date.now(); }, 1000);
     },
 
-    startPlanningHints() {
-      this.stopPlanningHints();
-      if (!this.drawer) return;
-      this.planningHintIdx = 0;
-      this.planningHintTimer = setInterval(() => {
-        if (!this.store.planning) return;
-        // Canned filler only until the agent reports REAL steps — once server
-        // activity flows, the feed and headline show what actually happens.
-        if (this.store.hasServerActivity) return;
-        const key = this.planningHintKeys[this.planningHintIdx % this.planningHintKeys.length];
-        this.planningHintIdx += 1;
-        pushActivityLine(this.__(key), null);
-      }, 1300);
-    },
-
-    stopPlanningHints() {
-      if (this.planningHintTimer) {
-        clearInterval(this.planningHintTimer);
-        this.planningHintTimer = null;
+    stopWorkClock() {
+      if (this.workClock) {
+        clearInterval(this.workClock);
+        this.workClock = null;
       }
+    },
+
+    /** 9s · 1m 05s · 1h 02m */
+    formatDuration(ms) {
+      const total = Math.max(0, Math.floor((ms || 0) / 1000));
+      if (total < 60) return `${total}s`;
+      const m = Math.floor(total / 60);
+      if (m < 60) return `${m}m ${String(total % 60).padStart(2, '0')}s`;
+      return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+    },
+
+    toggleWork(key) {
+      this.openWork = { ...this.openWork, [key]: !this.openWork[key] };
+    },
+
+    /** Agent replies: Markdown (lists, headings, code) plus the usual chips. */
+    agentHtml(text) {
+      return formatAgentReplyHtml(text, this.store.mentionedTitles, []);
+    },
+
+    /** A raw failure as a short plain hint plus the action that helps. */
+    errorHint(raw) {
+      const hint = friendlyChatError(raw, { offline: typeof navigator !== 'undefined' && navigator.onLine === false });
+      return { message: hint.text || this.__(hint.key), action: hint.action };
+    },
+
+    onErrorAction(action) {
+      if (action === CHAT_ERROR_ACTION.NEW_CHAT) {
+        this.resetForNewRequest();
+        return;
+      }
+      this.retryLastMessage();
+    },
+
+    /** Send the editor's newest message again (after an error, or for a fresh answer). */
+    retryLastMessage() {
+      const text = this.lastUserText;
+      if (!text || this.turnInFlight) return;
+      // An unanswered trailing message would otherwise show twice.
+      const turns = this.store.transcript;
+      if (turns.length && turns[turns.length - 1].role === 'user' && turns[turns.length - 1].text === text) {
+        turns.pop();
+      }
+      this.store.generationError = null;
+      this.store.pendingPrompt = text;
+      this.handleComposerSend();
+    },
+
+    /** Open an entry in the CP behind the agent and minimise the agent to show it. */
+    viewEntry(url) {
+      visitCp(url);
+      this.$emit('minimize');
+    },
+
+    async copyReply(turn) {
+      await this.writeClipboard(turn.text || '');
+      this.copiedKey = turn.key;
+      clearTimeout(this._copiedTimer);
+      this._copiedTimer = setTimeout(() => { this.copiedKey = null; }, 1500);
+    },
+
+    async writeClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    },
+
+    jumpToLatest() {
+      this.scrollChatToBottom(true);
     },
 
     async loadCollections() {
@@ -1737,6 +1933,10 @@ export default {
      */
     async seedOpenEntry({ force = false } = {}) {
       if (!this.drawer || !this.active) return;
+      // Only a new conversation starts from the open entry. Mid-conversation
+      // the editor talks to the agent; re-inserting the entry after every
+      // message (or after the agent opened a draft) gets in the way.
+      if ((this.store.transcript || []).length > 0) return;
       const id = entryIdFromCpPath(window.location.pathname);
       if (!id) return;
 
@@ -1974,11 +2174,28 @@ export default {
       this.mention.activeIndex = 0;
     },
 
-    approvePlan() {
+    /** Whether a plan turn ends with a question for the editor. */
+    planAsksQuestion(turn) {
+      return String(turn.text || '').includes(this.__('Question:'));
+    },
+
+    /**
+     * The go-ahead button says what happens: the agent's own label for this
+     * plan (e.g. "3 Einträge erstellen", "Ja, diese FAQ zuordnen"), else a
+     * short fallback that fits whether the plan asks a question.
+     */
+    planApproveLabel(turn) {
+      if (turn.approveLabel) return turn.approveLabel;
+      return this.planAsksQuestion(turn) ? this.__('Yes, go ahead') : this.__('Go ahead');
+    },
+
+    approvePlan(turn = null) {
       // A restored chat may have an expired session — continueGeneration
       // falls back to the resume endpoint, so only a live turn blocks this.
       if (this.store.generating || this.store.planning || this.store.transcript.length === 0) return;
-      continueGeneration(this.__('Approved — proceed with the proposed plan.'));
+      // The agent's label is phrased as the editor's yes-answer, so it doubles
+      // as the reply; without one, send the explicit approval.
+      continueGeneration(turn?.approveLabel || this.__('Approved — proceed with the proposed plan.'));
       this.chatStickToBottom = true;
     },
 

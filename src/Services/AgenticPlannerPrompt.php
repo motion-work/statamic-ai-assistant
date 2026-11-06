@@ -7,6 +7,7 @@ use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\ImageGeneration;
 use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
 use MotionWork\StatamicAiAssistant\Tools\Advanced\AdvancedToolset;
+use MotionWork\StatamicAiAssistant\Tools\MoveEntryTool;
 use Statamic\Facades\Site;
 
 /**
@@ -109,6 +110,7 @@ final class AgenticPlannerPrompt
             ."- `create_entry_job`: queue ONE new entry for asynchronous creation. Never use this to translate or localize an existing entry.\n"
             ."- `update_entry_job`: queue an UPDATE to an existing entry (you must know its `entry_id`). This edits that same entry. It does not create a localization.\n"
             .$this->localizeToolLine()
+            .$this->moveToolLine()
             ."- `find_entries`: search existing entries by title/slug when the catalog shortlist below is not enough.\n"
             ."- `search_entry_content`: find an entry by a phrase/name/value that appears INSIDE its body content (not its title). Use this when the user quotes text from within a page rather than its title.\n"
             ."- `answer_question`: reply to a read-only question without creating or updating anything.\n"
@@ -153,6 +155,15 @@ final class AgenticPlannerPrompt
             .$this->germanNoEszettPlannerRule($locale)
             ."9. When you have done everything the newest user message asked for (or hit the cap), end your turn with a short plain-text summary (1-3 sentences, no JSON, no tool calls) naming CONCRETELY what you did: which entries, which fields/languages, which assets or structures. Example: `Updated the alt text of martina-seiler.jpg in DE, FR, EN and IT based on the image content.` Never reply with just `Done` or a bare action count.\n"
             .'10. If the request is impossible, end your turn with a short plain-text explanation starting with `Cannot proceed:`. But NEVER give up on an update target without first checking the shortlist AND calling find_entries — a bare title is not a reason to stop.';
+    }
+
+    private function moveToolLine(): string
+    {
+        if (! MoveEntryTool::isUseful()) {
+            return '';
+        }
+
+        return "- `move_entry`: move an existing entry within its collection's page tree — under another parent (a group or section page), to the top level, or after a sibling. Collections marked `structured` in the catalog keep their entries in such a tree (with `max_depth` levels); shortlist entries there show their current `parent_id`. Moving, nesting, grouping, re-parenting or reordering an entry is NOT a field change: always use move_entry for it, never update_entry_job. It applies immediately; no entry job is needed.\n";
     }
 
     private function canLocalize(): bool

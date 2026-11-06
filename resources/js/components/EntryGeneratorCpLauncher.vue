@@ -19,6 +19,19 @@
       <span v-else-if="activity.ready > 0" class="eg-cp-launcher__bubble-badge" aria-hidden="true">{{ activity.ready }}</span>
     </button>
 
+    <!-- After minimising: a small way back to the chat, next to the bubble. -->
+    <button
+      v-if="showBackPill"
+      type="button"
+      class="eg-cp-launcher__pill"
+      @click="openDrawer"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
+        <path d="M15 18l-6-6 6-6" />
+      </svg>
+      {{ __('Back to the AI agent') }}
+    </button>
+
     <Teleport to="body">
       <!--
         Full-screen workspace: covers the whole Control Panel so the agent is
@@ -39,7 +52,7 @@
           tabindex="-1"
           :aria-label="`${__('AI agent')} (${__('Beta')})`"
         >
-          <EntryGeneratorPage :drawer="true" :active="open">
+          <EntryGeneratorPage :drawer="true" :active="open" @minimize="minimizeDrawer">
             <template #topbar-start>
               <span class="eg-cp-screen__brand">
                 <svg class="eg-cp-screen__mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -52,6 +65,17 @@
               <span class="eg-cp-screen__divider" aria-hidden="true" />
             </template>
             <template #topbar-end>
+              <button
+                type="button"
+                class="eg-cp-screen__minimize"
+                :title="__('Minimise: see the Control Panel, the chat stays as it is')"
+                @click="minimizeDrawer"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" aria-hidden="true">
+                  <path d="M5 12h14" />
+                </svg>
+                <span class="eg-cp-screen__minimize-label">{{ __('Minimise') }}</span>
+              </button>
               <button
                 type="button"
                 class="eg-cp-screen__close"
@@ -73,7 +97,7 @@
 
 <script>
 import EntryGeneratorPage from './EntryGeneratorPage.vue';
-import { setI18n, setToaster, getActivity } from '../store/entryGeneratorStore.js';
+import { setI18n, setToaster, getActivity, resumeActiveRun, state as agentState } from '../store/entryGeneratorStore.js';
 
 export default {
   name: 'EntryGeneratorCpLauncher',
@@ -82,6 +106,7 @@ export default {
   data() {
     return {
       open: false,
+      minimized: false,
       hasOpenedOnce: false,
       scrollLockPrev: null,
       escHandler: null,
@@ -91,6 +116,11 @@ export default {
   computed: {
     activity() {
       return getActivity();
+    },
+
+    /** The pill shows after minimising, while there is a chat to go back to. */
+    showBackPill() {
+      return !this.open && this.minimized && agentState.transcript.length > 0;
     },
 
     bubbleTitle() {
@@ -132,6 +162,9 @@ export default {
       success: (m) => Statamic.$toast?.success?.(m),
       error: (m) => Statamic.$toast?.error?.(m),
     });
+    // A request still running when the previous page unloaded: reattach, so
+    // the bubble shows it as busy and the agent shows its progress/result.
+    resumeActiveRun();
   },
 
   beforeUnmount() {
@@ -144,7 +177,13 @@ export default {
   methods: {
     openDrawer() {
       this.hasOpenedOnce = true;
+      this.minimized = false;
       this.open = true;
+    },
+    /** Close the full-screen agent but keep a way back (the pill) to the chat. */
+    minimizeDrawer() {
+      this.open = false;
+      this.minimized = true;
     },
     closeDrawer() {
       this.open = false;

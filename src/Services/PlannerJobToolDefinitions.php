@@ -76,7 +76,7 @@ final class PlannerJobToolDefinitions
             'type' => 'function',
             'function' => [
                 'name' => 'update_entry_job',
-                'description' => 'Queue an UPDATE to one existing entry. Use when the user wants to change, rewrite, fix, or extend an entry that already exists. You must provide the entry_id (from the catalog shortlist or from find_entries). The collection and blueprint are inferred from the entry. Counts toward the same '.$cap.'-call cap as create_entry_job.',
+                'description' => 'Queue an UPDATE to one existing entry. Use when the user wants to change, rewrite, fix, or extend an entry that already exists. Only for its FIELD values: moving an entry to another parent or position in a page tree is move_entry, never this. You must provide the entry_id (from the catalog shortlist or from find_entries). The collection and blueprint are inferred from the entry. Counts toward the same '.$cap.'-call cap as create_entry_job.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -188,6 +188,10 @@ final class PlannerJobToolDefinitions
                         'question' => [
                             'type' => 'string',
                             'description' => 'ONE question for the user when required information is missing. Omit when nothing is missing.',
+                        ],
+                        'approve_label' => [
+                            'type' => 'string',
+                            'description' => 'Label for the button the user clicks to go ahead, in their language, 2 to 5 words, saying what will happen (e.g. "3 Einträge erstellen", "Zuordnung übernehmen"). When you ask a question, phrase it as the yes-answer that also approves the plan (e.g. "Ja, diese FAQ zuordnen"). Clicking it sends this label as the user\'s reply.',
                         ],
                     ],
                     'required' => ['steps'],

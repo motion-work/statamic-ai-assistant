@@ -82,7 +82,7 @@ class EntryGeneratorAssetResolver
         $candidates = $this->getCandidateAssets($field);
 
         if ($candidates->isEmpty()) {
-            $warnings[] = __('No usable assets found in the container for :field.', ['field' => $field->display()]);
+            $warnings[] = __('No suitable image was found for “:field”, so it stays empty.', ['field' => $field->display()]);
 
             return [];
         }

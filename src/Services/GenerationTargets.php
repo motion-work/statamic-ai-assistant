@@ -3,6 +3,7 @@
 namespace MotionWork\StatamicAiAssistant\Services;
 
 use Illuminate\Support\Str;
+use MotionWork\StatamicAiAssistant\Support\EntryTreePlacement;
 use MotionWork\StatamicAiAssistant\Support\JsonObjectExtractor;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
@@ -54,30 +55,60 @@ final class GenerationTargets
                     'blueprints' => $blueprints->values()->all(),
                 ];
 
+                if ($collection->hasStructure()) {
+                    // Entries live in a page tree: moving or nesting them is
+                    // move_entry, not an update (see AgenticPlannerPrompt).
+                    $row['structured'] = [
+                        'max_depth' => $collection->structure()->maxDepth() ?: null,
+                        'root' => (bool) $collection->structure()->expectsRoot(),
+                    ];
+                }
+
                 if ($entriesPerCollection > 0) {
                     $row['count'] = (int) Entry::query()
                         ->where('collection', $collection->handle())
                         ->where('site', $siteHandle)
                         ->count();
-
-                    $row['entries'] = Entry::query()
-                        ->where('collection', $collection->handle())
-                        ->where('site', $siteHandle)
-                        ->orderBy('updated_at', 'desc')
-                        ->limit($entriesPerCollection)
-                        ->get()
-                        ->map(fn ($e) => [
-                            'id' => (string) $e->id(),
-                            'title' => (string) ($e->value('title') ?? ''),
-                            'slug' => (string) ($e->slug() ?? ''),
-                        ])
-                        ->values()
-                        ->all();
+                    $row['entries'] = $this->entryShortlist($collection, $siteHandle, $entriesPerCollection);
                 }
 
                 return $row;
             })
             ->filter(fn ($row) => $row['blueprints'] !== [])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Recently updated entries of a collection; in a tree, each with its
+     * parent (null at the top level) so the planner sees the current nesting.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function entryShortlist($collection, string $siteHandle, int $limit): array
+    {
+        $parents = $collection->hasStructure()
+            ? EntryTreePlacement::parentMap($collection->structure()->in($siteHandle)->tree())
+            : null;
+
+        return Entry::query()
+            ->where('collection', $collection->handle())
+            ->where('site', $siteHandle)
+            ->orderBy('updated_at', 'desc')
+            ->limit($limit)
+            ->get()
+            ->map(function ($e) use ($parents) {
+                $row = [
+                    'id' => (string) $e->id(),
+                    'title' => (string) ($e->value('title') ?? ''),
+                    'slug' => (string) ($e->slug() ?? ''),
+                ];
+                if ($parents !== null) {
+                    $row['parent_id'] = $parents[(string) $e->id()] ?? null;
+                }
+
+                return $row;
+            })
             ->values()
             ->all();
     }

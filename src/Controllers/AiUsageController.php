@@ -16,6 +16,10 @@ use Statamic\Http\Controllers\CP\CpController;
  */
 class AiUsageController extends CpController
 {
+    public const DEFAULT_PER_PAGE = 25;
+
+    public const PER_PAGE_OPTIONS = [10, 25, 50, 100];
+
     public function data(Request $request, UsageLog $log, UsageReport $report, OpenRouterKeyBudget $budget): JsonResponse
     {
         $current = now()->format('Y-m');
@@ -25,6 +29,9 @@ class AiUsageController extends CpController
         }
 
         $summary = $report->forMonth($month);
+        $calls = $this->page($summary['recent'] ?? [], $request);
+        unset($summary['recent']);
+        $summary['recent'] = $calls['rows'];
 
         return response()->json([
             'month' => $month,
@@ -33,9 +40,33 @@ class AiUsageController extends CpController
             'tracking' => (bool) config('statamic-ai-assistant.usage_tracking', true),
             'retention_months' => (int) config('statamic-ai-assistant.usage_retention_months', 12),
             'summary' => $summary,
+            'pagination' => $calls['pagination'],
             'users' => $this->userLabels($summary),
             'budget' => $this->budget($budget),
         ]);
+    }
+
+    /**
+     * One page of the call list, newest first.
+     *
+     * @param  list<array<string, mixed>>  $calls
+     * @return array{rows: list<array<string, mixed>>, pagination: array<string, int>}
+     */
+    private function page(array $calls, Request $request): array
+    {
+        $perPage = (int) $request->query('per_page', self::DEFAULT_PER_PAGE);
+        if (! in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
+            $perPage = self::DEFAULT_PER_PAGE;
+        }
+
+        $total = count($calls);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min(max(1, (int) $request->query('page', 1)), $lastPage);
+
+        return [
+            'rows' => array_slice($calls, ($page - 1) * $perPage, $perPage),
+            'pagination' => ['page' => $page, 'per_page' => $perPage, 'total' => $total, 'last_page' => $lastPage],
+        ];
     }
 
     /**

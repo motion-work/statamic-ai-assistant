@@ -8,9 +8,11 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use MotionWork\StatamicAiAssistant\Services\AutoDraftSaver;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 use MotionWork\StatamicAiAssistant\Services\TranslationService;
+use MotionWork\StatamicAiAssistant\Support\CpLocale;
 use MotionWork\StatamicAiAssistant\Support\WebSearch;
 use MotionWork\StatamicAiAssistant\Usage\UsageAttribution;
 use Statamic\Facades\Entry;
@@ -50,11 +52,11 @@ class GeneratePlannedEntryJob implements ShouldQueue
         EntryGeneratorService $generator,
         ?TranslationService $translations = null,
     ): void {
-        UsageAttribution::run(
+        CpLocale::run($batch->cpLocale($this->sessionId), fn () => UsageAttribution::run(
             $this->userId ?? UsageAttribution::sessionOwner($this->sessionId),
             ['agent_session_id' => $this->sessionId, 'plan_entry_id' => $this->entryId],
             fn () => $this->work($batch, $generator, $translations),
-        );
+        ));
     }
 
     private function work(
@@ -120,14 +122,47 @@ class GeneratePlannedEntryJob implements ShouldQueue
                 $prefetched['preferred']->remainingEntries(),
             );
 
-            $batch->markEntrySuccess($this->sessionId, $this->entryId, [
-                'data' => $result['data'],
-                'displayData' => $result['displayData'],
-                'warnings' => $result['warnings'],
-            ]);
+            $this->finishEntry($batch, $row, $result, $locale);
         } catch (\Throwable $e) {
             $this->recordFailure($batch, $e, $statamicEntryId !== null);
         }
+    }
+
+    /**
+     * Record the generated entry: a NEW entry is saved as a draft right away
+     * (AutoDraftSaver) when allowed; otherwise, or when saving fails, it stays
+     * a preview card with a short hint, as before.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  array<string, mixed>  $result
+     */
+    private function finishEntry(EntryGenerationBatchService $batch, array $row, array $result, string $site): void
+    {
+        $warnings = $result['warnings'];
+        $site = is_string($row['target_site'] ?? null) && $row['target_site'] !== '' ? $row['target_site'] : $site;
+
+        if (AutoDraftSaver::appliesTo($row) && is_array($result['data']) && $result['data'] !== []) {
+            $saved = app(AutoDraftSaver::class)->save($row, $result['data'], $this->userId ?? UsageAttribution::sessionOwner($this->sessionId), $site);
+
+            if (! isset($saved['hint'])) {
+                $batch->markEntrySaved($this->sessionId, $this->entryId, $saved + [
+                    'warnings' => $warnings,
+                    'auto_saved' => true,
+                    'data' => $result['data'],
+                    'displayData' => $result['displayData'],
+                ]);
+
+                return;
+            }
+
+            $warnings[] = $saved['hint'];
+        }
+
+        $batch->markEntrySuccess($this->sessionId, $this->entryId, [
+            'data' => $result['data'],
+            'displayData' => $result['displayData'],
+            'warnings' => $warnings,
+        ]);
     }
 
     /**

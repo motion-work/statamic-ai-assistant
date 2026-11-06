@@ -8,6 +8,7 @@ use MotionWork\StatamicAiAssistant\Tools\ChatTool;
 use MotionWork\StatamicAiAssistant\Tools\ChatToolRunner;
 use MotionWork\StatamicAiAssistant\Tools\ListAssetsTool;
 use MotionWork\StatamicAiAssistant\Tools\ListTaxonomiesTool;
+use MotionWork\StatamicAiAssistant\Tools\MoveEntryTool;
 use MotionWork\StatamicAiAssistant\Tools\ReadDocumentTool;
 use MotionWork\StatamicAiAssistant\Tools\ReadEntryStructureTool;
 use MotionWork\StatamicAiAssistant\Tools\ReadEntryTool;
@@ -17,6 +18,7 @@ use MotionWork\StatamicAiAssistant\Tools\ToolContext;
 use MotionWork\StatamicAiAssistant\Tools\UpdateAssetTool;
 use MotionWork\StatamicAiAssistant\Tools\UrlFetchTool;
 use MotionWork\StatamicAiAssistant\Tools\UseAssetsTool;
+use MotionWork\StatamicAiAssistant\Usage\UsageAttribution;
 use Statamic\Facades\Entry;
 
 /**
@@ -53,7 +55,7 @@ final class PlannerToolbox
         );
 
         return new ChatToolRunner(
-            $this->agenticReadTools($messages, $run->advancedTools),
+            [...$this->agenticReadTools($messages, $run->advancedTools), ...$this->treeTools($run)],
             $toolContext,
             fn (string $name, array $result) => $this->recordAgenticToolResult($run, $selectedAssets, $name, $result),
         );
@@ -101,6 +103,24 @@ final class PlannerToolbox
         }
 
         return $toolset;
+    }
+
+    /**
+     * move_entry, offered only when some collection keeps its entries in a
+     * tree. It acts for the CP user who started the session.
+     *
+     * @return array<int, ChatTool>
+     */
+    private function treeTools(AgenticPlanRun $run): array
+    {
+        if (! MoveEntryTool::isUseful()) {
+            return [];
+        }
+
+        return [new MoveEntryTool(
+            new EntryMover,
+            fn () => UsageAttribution::sessionOwner($run->sessionId) ?? UsageAttribution::currentUserId(),
+        )];
     }
 
     /**
@@ -154,6 +174,7 @@ final class PlannerToolbox
         return match (true) {
             $name === 'update_asset' => $this->describeAssetUpdate($result),
             $name === 'create_terms' => $this->describeNewTerms($result),
+            $name === 'move_entry' => ['entry', is_string($result['label'] ?? null) ? $result['label'] : null],
             in_array($name, AdvancedToolset::writeToolNames(), true) => [explode('_', $name)[1] ?? 'structure', $this->describeStructuralChange($name, $result)],
             default => null,
         };

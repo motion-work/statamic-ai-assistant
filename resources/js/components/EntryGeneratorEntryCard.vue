@@ -69,8 +69,11 @@
     </div>
 
     <!-- Error message -->
-    <div v-if="entry.status === 'failed'" class="eg-entry-card__error">
-      <p v-html="chatHtml(entry.error || __('Generation failed.'))"></p>
+    <div v-if="entry.status === 'failed'" class="eg-entry-card__error" role="status">
+      <p>{{ friendly(entry.error) }}</p>
+    </div>
+    <div v-if="entry.status === 'ready' && entry.saveError" class="eg-entry-card__error" role="status">
+      <p>{{ __('Saving did not work.') }} {{ friendly(entry.saveError) }}</p>
     </div>
 
     <!-- Saved confirmation -->
@@ -81,7 +84,14 @@
         </svg>
       </span>
       <span class="eg-entry-card__saved-text">{{ savedText }}</span>
+      <!-- One action: show the draft (the agent minimises, the CP opens it). -->
+      <span v-if="entry.autoSaved && entry.savedEntry.edit_url" class="eg-entry-card__saved-actions">
+        <button type="button" class="eg-entry-card__view-btn" @click="$emit('view', entry.savedEntry.edit_url)">
+          {{ __('Open draft') }}
+        </button>
+      </span>
       <a
+        v-else
         :href="entry.savedEntry.edit_url"
         :target="otherPendingEntries ? '_blank' : null"
         :rel="otherPendingEntries ? 'noopener' : null"
@@ -91,10 +101,10 @@
     </div>
 
     <!-- Warnings (collapsed unless preview is expanded or there are no other actions) -->
-    <div v-if="entry.warnings && entry.warnings.length && (isExpanded || entry.status === 'ready' || entry.status === 'saved')" class="eg-entry-card__warnings">
+    <div v-if="notes.length && (isExpanded || entry.status === 'ready' || entry.status === 'saved')" class="eg-entry-card__warnings">
       <p class="eg-entry-card__warnings-title">{{ __('Notes') }}</p>
       <ul>
-        <li v-for="(w, i) in entry.warnings" :key="i" v-html="chatHtml(w)"></li>
+        <li v-for="note in notes" :key="note" v-html="chatHtml(note)"></li>
       </ul>
     </div>
 
@@ -191,6 +201,7 @@
 import EntryGeneratorContentPreview from './EntryGeneratorContentPreview.vue';
 import { state as entryGenState, STATUS, hasOtherPendingEntries } from '../store/entryGeneratorStore.js';
 import { formatChatTextWithBoldUrls } from '../formatChatUrls.js';
+import { friendlyChatError } from '../utils/chatErrors.js';
 
 export default {
   name: 'EntryGeneratorEntryCard',
@@ -202,7 +213,7 @@ export default {
     autoExpand: { type: Boolean, default: false },
   },
 
-  emits: ['save', 'retry', 'discard'],
+  emits: ['save', 'retry', 'discard', 'view'],
 
   data() {
     return {
@@ -211,6 +222,14 @@ export default {
   },
 
   computed: {
+    /** The card's notes, each once (the same note can come from several fields). */
+    notes() {
+      const seen = new Set();
+      return (this.entry.warnings || [])
+        .map((w) => String(w || '').trim())
+        .filter((w) => w !== '' && !seen.has(w) && seen.add(w));
+    },
+
     isExpanded() {
       if (this.manualExpanded !== null) return this.manualExpanded;
       return this.autoExpand && ['ready', 'saved'].includes(this.entry.status);
@@ -246,6 +265,7 @@ export default {
 
     savedText() {
       if (this.isLocalize) return this.__('Localized.');
+      if (this.entry.autoSaved) return this.__('Saved as draft.');
       return this.isUpdate ? this.__('Update applied.') : this.__('Saved as draft.');
     },
 
@@ -274,7 +294,10 @@ export default {
         case 'drafting': return this.isLocalize ? this.__('Translating…') : (this.isUpdate ? this.__('Updating…') : this.__('Drafting…'));
         case 'ready': return this.__('Ready to review');
         case 'saving': return this.__('Saving…');
-        case 'saved': return this.isLocalize ? this.__('Localized') : (this.isUpdate ? this.__('Updated') : this.__('Saved'));
+        case 'saved':
+          if (this.isLocalize) return this.__('Localized');
+          if (this.entry.autoSaved) return this.__('Saved as a draft');
+          return this.isUpdate ? this.__('Updated') : this.__('Saved');
         case 'failed': return this.__('Failed');
         default: return '';
       }
@@ -318,6 +341,12 @@ export default {
   },
 
   methods: {
+    /** A raw failure as one short, plain hint (see utils/chatErrors.js). */
+    friendly(raw) {
+      const hint = friendlyChatError(raw || '');
+      return hint.text || this.__(hint.key);
+    },
+
     chatHtml(text) {
       return formatChatTextWithBoldUrls(text);
     },

@@ -5,6 +5,7 @@ namespace MotionWork\StatamicAiAssistant\Tests\Services;
 use Illuminate\Support\Facades\Cache;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\PreferredAssetPaths;
+use MotionWork\StatamicAiAssistant\Support\CpLocale;
 use MotionWork\StatamicAiAssistant\Tests\TestCase;
 
 class EntryGenerationBatchServiceTest extends TestCase
@@ -36,6 +37,38 @@ class EntryGenerationBatchServiceTest extends TestCase
         $this->assertSame('Create one entry per article on https://example.com/news', $snap['prompt']);
         $this->assertSame([], $snap['entries']);
         $this->assertSame([], $snap['warnings']);
+    }
+
+    public function test_progress_reports_how_long_planning_waits_for_a_worker(): void
+    {
+        $sid = $this->batch->initPlanningSession('default', null, 'Create a FAQ entry');
+        $this->assertNull($this->batch->snapshotForProgress($sid)['waiting_seconds'], 'nothing queued yet');
+
+        $this->travelTo(now());
+        $this->batch->markPlanningQueued($sid);
+        $this->travel(20)->seconds();
+        $this->assertSame(20, $this->batch->snapshotForProgress($sid)['waiting_seconds']);
+
+        $this->batch->markPlanningStarted($sid);
+        $this->assertNull($this->batch->snapshotForProgress($sid)['waiting_seconds'], 'a worker picked it up');
+
+        $this->batch->markPlanningQueued($sid); // a follow-up message waits again
+        $this->assertSame(0, $this->batch->snapshotForProgress($sid)['waiting_seconds']);
+    }
+
+    public function test_queued_jobs_run_in_the_cp_language_the_message_was_sent_in(): void
+    {
+        $sid = $this->batch->initPlanningSession('default', null, 'Erstelle einen FAQ-Eintrag');
+        $this->assertNull($this->batch->cpLocale($sid));
+
+        app()->setLocale('de');
+        $this->batch->markPlanningQueued($sid);
+        app()->setLocale('en'); // the queue worker's default
+
+        $this->assertSame('de', $this->batch->cpLocale($sid));
+        $summary = CpLocale::run($this->batch->cpLocale($sid), fn () => __('Done — :summary.', ['summary' => 'x']));
+        $this->assertSame('Fertig — x.', $summary);
+        $this->assertSame('en', app()->getLocale(), 'the worker locale is restored');
     }
 
     public function test_restore_session_from_transcript_seeds_a_resumable_session(): void

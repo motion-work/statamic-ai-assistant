@@ -52,6 +52,7 @@ const REASONS = {
   disabled: 'Switched off in the configuration (STATAMIC_AI_ASSISTANT_SEMANTIC_SEARCH).',
   provider: 'Needs the OpenRouter provider with an API key (OPENROUTER_API_KEY).',
   no_model: 'No embedding model is configured.',
+  free_training: 'Free models are on: every free embedding model needs training to be allowed (Who has access). Keyword search is used meanwhile.',
   not_built: 'Not built yet',
   no_entries: 'No entries on this site',
   outdated: 'Built with another model: rebuild the index',

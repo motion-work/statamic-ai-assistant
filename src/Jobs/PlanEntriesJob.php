@@ -13,6 +13,7 @@ use MotionWork\StatamicAiAssistant\Services\EntryGenerationBatchService;
 use MotionWork\StatamicAiAssistant\Services\EntryGenerationPlanner;
 use MotionWork\StatamicAiAssistant\Services\EntryGeneratorService;
 use MotionWork\StatamicAiAssistant\Services\PromptAssetMentionResolver;
+use MotionWork\StatamicAiAssistant\Support\CpLocale;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 use MotionWork\StatamicAiAssistant\Usage\UsageAttribution;
 
@@ -64,16 +65,18 @@ class PlanEntriesJob implements ShouldQueue
             return;
         }
 
+        $batch->markPlanningStarted($this->sessionId);
+
         // The generation jobs the planner dispatches run inside the queue,
         // where nobody is signed in: they look the owner up by session.
         UsageAttribution::rememberSessionOwner($this->sessionId, $this->userId);
         $userId = $this->userId ?? UsageAttribution::sessionOwner($this->sessionId);
 
-        UsageAttribution::run(
+        CpLocale::run($batch->cpLocale($this->sessionId), fn () => UsageAttribution::run(
             $userId,
             ['agent_session_id' => $this->sessionId],
             fn () => $this->plan($session, $batch, $planner, $generator, $decorator),
-        );
+        ));
     }
 
     /** @param  array<string, mixed>  $session */

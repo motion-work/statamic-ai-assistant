@@ -18,7 +18,7 @@
       <div v-if="months.length" class="translation-page__hero-actions">
         <label class="aiu-month">
           <span class="sr-only">{{ __('Month') }}</span>
-          <select v-model="month" class="aiu-month__select" :disabled="loading" @change="load">
+          <select v-model="month" class="aiu-month__select" :disabled="loading" @change="changeMonth">
             <option v-for="m in months" :key="m" :value="m">{{ monthLabel(m) }}</option>
           </select>
         </label>
@@ -136,7 +136,7 @@
               <div class="aiu-card__head">
                 <h2 class="aiu-card__title">{{ group.title }}</h2>
               </div>
-              <table class="aiu-table">
+              <table class="aiu-table aiu-table--breakdown">
                 <thead>
                   <tr>
                     <th scope="col">{{ group.column }}</th>
@@ -146,8 +146,9 @@
                 </thead>
                 <tbody>
                   <tr v-for="row in group.rows" :key="row.key">
-                    <th scope="row">
-                      <span class="aiu-table__name" :title="row.label">{{ row.label }}</span>
+                    <th scope="row" class="aiu-name" tabindex="0" :aria-label="row.label">
+                      <span class="aiu-table__name">{{ row.label }}</span>
+                      <span class="aiu-name__tip" role="tooltip">{{ row.label }}</span>
                       <span class="aiu-meter" aria-hidden="true">
                         <span class="aiu-meter__fill" :style="{ width: row.share + '%' }" />
                       </span>
@@ -164,7 +165,7 @@
           <section class="aiu-card aiu-card--table">
             <div class="aiu-card__head">
               <h2 class="aiu-card__title">{{ __('Recent calls') }}</h2>
-              <p class="aiu-card__desc">{{ __('The last :n calls this month.', { n: recent.length }) }}</p>
+              <p class="aiu-card__desc">{{ __(':n calls this month, newest first.', { n: number(pagination.total) }) }}</p>
             </div>
             <div class="aiu-table-wrap">
               <table class="aiu-table aiu-table--recent">
@@ -195,6 +196,20 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div class="aiu-pager">
+              <label class="aiu-pager__size">
+                <span>{{ __('Entries per page') }}</span>
+                <select v-model.number="perPage" class="aiu-month__select aiu-pager__select" :disabled="loading" @change="changePerPage">
+                  <option v-for="n in perPageOptions" :key="n" :value="n">{{ n }}</option>
+                </select>
+              </label>
+              <span class="aiu-pager__range">{{ rangeText }}</span>
+              <div class="aiu-pager__nav">
+                <button type="button" class="aiu-pager__btn" :disabled="loading || pagination.page <= 1" @click="goTo(pagination.page - 1)"><span aria-hidden="true">‹</span> {{ __('Previous') }}</button>
+                <span class="aiu-pager__page">{{ __('Page :page of :last', { page: pagination.page, last: pagination.last_page }) }}</span>
+                <button type="button" class="aiu-pager__btn" :disabled="loading || pagination.page >= pagination.last_page" @click="goTo(pagination.page + 1)">{{ __('Next') }} <span aria-hidden="true">›</span></button>
+              </div>
             </div>
           </section>
 
@@ -238,6 +253,10 @@ export default {
       provider: null,
       tracking: true,
       retentionMonths: 12,
+      page: 1,
+      perPage: 25,
+      perPageOptions: [10, 25, 50, 100],
+      pagination: { page: 1, per_page: 25, total: 0, last_page: 1 },
     };
   },
 
@@ -248,6 +267,14 @@ export default {
 
     recent() {
       return this.report?.recent || [];
+    },
+
+    rangeText() {
+      const { page, per_page: size, total } = this.pagination;
+      if (!total) return '';
+      const from = (page - 1) * size + 1;
+      const to = Math.min(total, page * size);
+      return this.__(':start–:end of :total', { start: this.number(from), end: this.number(to), total: this.number(total) });
     },
 
     costHint() {
@@ -328,7 +355,7 @@ export default {
       this.loadError = null;
       try {
         const { data } = await axios.get('/cp/ai-usage/data', {
-          params: this.month ? { month: this.month } : {},
+          params: { ...(this.month ? { month: this.month } : {}), page: this.page, per_page: this.perPage },
           headers: { 'X-Requested-With': 'XMLHttpRequest' },
         });
         this.month = data.month;
@@ -339,11 +366,29 @@ export default {
         this.provider = data.provider;
         this.tracking = data.tracking;
         this.retentionMonths = data.retention_months;
+        this.pagination = data.pagination;
+        this.page = data.pagination.page;
+        this.perPage = data.pagination.per_page;
       } catch (e) {
         this.loadError = e?.response?.data?.message || this.__('The usage data could not be loaded.');
       } finally {
         this.loading = false;
       }
+    },
+
+    changeMonth() {
+      this.page = 1;
+      this.load();
+    },
+
+    changePerPage() {
+      this.page = 1;
+      this.load();
+    },
+
+    goTo(page) {
+      this.page = page;
+      this.load();
     },
 
     /** Rows of a breakdown with their share of the month (cost, else calls). */

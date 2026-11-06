@@ -122,7 +122,7 @@ final class AgentSessionController
             self::emitNdjson(['type' => 'planning']);
 
             $sessionId = $startSession();
-            PlanEntriesJob::dispatch($sessionId);
+            $this->queuePlanning($sessionId);
 
             self::emitNdjson(['type' => 'batch', 'session_id' => $sessionId, 'async' => true]);
             self::emitNdjson(['type' => 'done', 'success' => true]);
@@ -211,7 +211,7 @@ final class AgentSessionController
             return response()->json(['error' => __('This chat has expired. Start a new request.')], 404);
         }
 
-        PlanEntriesJob::dispatch($sessionId);
+        $this->queuePlanning($sessionId);
 
         return response()->json(['ok' => true, 'session_id' => $sessionId]);
     }
@@ -252,7 +252,7 @@ final class AgentSessionController
         $sessionId = $this->entryBatch->restoreSessionFromTranscript($locale, $data['transcript'], $advancedTools);
         $this->entryBatch->reopenForFollowUp($sessionId, (string) $data['prompt'], $maxPlanEntries, $advancedTools, $attachmentContent, $this->webSearchRequested($request));
 
-        PlanEntriesJob::dispatch($sessionId);
+        $this->queuePlanning($sessionId);
 
         return response()->json(['ok' => true, 'session_id' => $sessionId]);
     }
@@ -274,5 +274,12 @@ final class AgentSessionController
         $this->entryBatch->cancelSession($sessionId);
 
         return response()->json(['ok' => true]);
+    }
+
+    /** Queue the planner for the session's newest message and note when it was queued. */
+    private function queuePlanning(string $sessionId): void
+    {
+        $this->entryBatch->markPlanningQueued($sessionId);
+        PlanEntriesJob::dispatch($sessionId);
     }
 }

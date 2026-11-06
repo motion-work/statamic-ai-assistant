@@ -95,6 +95,59 @@
           </div>
         </section>
 
+        <!-- Site-wide: OpenRouter's free models only, picked by capability per task. -->
+        <section v-if="aiEnabled" class="ax-card">
+          <div class="ax-card__head">
+            <h2 class="ax-card__title">{{ __('Free models') }}</h2>
+            <p class="ax-card__desc">{{ __('Use only OpenRouter’s free models for every AI task. The addon picks the most capable free model for each task by itself. Free models are slower, less reliable and may answer less well, and image generation is off.') }}</p>
+          </div>
+
+          <p v-if="freeModels.unavailable" class="ax-note">{{ freeModels.unavailable }}</p>
+          <p v-else-if="freeModels.locked" class="ax-note">{{ __('Set by STATAMIC_AI_ASSISTANT_OPENROUTER_FREE_MODELS in the site configuration.') }}</p>
+
+          <div class="ax-modes" role="radiogroup" :aria-label="__('Free models')">
+            <label class="ax-mode" :class="{ 'ax-mode--on': !access.free_models, 'ax-mode--disabled': freeModelsLocked }">
+              <input type="radio" class="ax-box" name="ax-free-mode" :checked="!access.free_models" :disabled="freeModelsLocked" @change="access.free_models = false" />
+              <span class="ax-mode__text">
+                <span class="ax-mode__title">{{ __('Paid models') }}</span>
+                <span class="ax-mode__desc">{{ __('The models configured for each task, billed to the OpenRouter key.') }}</span>
+              </span>
+            </label>
+            <label class="ax-mode" :class="{ 'ax-mode--on': access.free_models, 'ax-mode--disabled': freeModelsLocked }">
+              <input type="radio" class="ax-box" name="ax-free-mode" :checked="access.free_models" :disabled="freeModelsLocked" @change="access.free_models = true" />
+              <span class="ax-mode__text">
+                <span class="ax-mode__title">{{ __('Use only free models') }}</span>
+                <span class="ax-mode__desc">{{ __('Costs nothing, up to the daily limit of free requests.') }}</span>
+              </span>
+            </label>
+          </div>
+
+          <label v-if="access.free_models" class="ax-check" :class="{ 'ax-mode--disabled': freeModelsLocked || freeModels.trainingLocked }">
+            <input type="checkbox" class="ax-box" v-model="access.free_models_training" :disabled="freeModelsLocked || freeModels.trainingLocked" />
+            <span class="ax-mode__text">
+              <span class="ax-mode__title">{{ __('Also allow models that use prompts for training') }}</span>
+              <span class="ax-mode__desc">
+                {{ __('Makes more free models usable, including the ones semantic search needs. Your OpenRouter account must allow free model training too:') }}
+                <a href="https://openrouter.ai/settings/privacy" target="_blank" rel="noopener">openrouter.ai/settings/privacy</a>
+              </span>
+            </span>
+          </label>
+
+          <div v-if="access.free_models && !freeModels.unavailable" class="ax-free">
+            <p v-if="freeModels.daily" class="ax-free__daily">
+              {{ __('Free requests today: :used of :limit', { used: freeModels.daily.used, limit: freeModels.daily.limit }) }}
+              <span v-if="freeModels.daily.limit <= 50"> · {{ __('Accounts that bought at least $10 of credits get 1000 per day.') }}</span>
+            </p>
+            <dl v-if="Object.keys(freeModels.picks || {}).length" class="ax-free__picks">
+              <template v-for="row in freePickRows" :key="row.task">
+                <dt>{{ row.label }}</dt>
+                <dd>{{ row.model || __('None available') }}</dd>
+              </template>
+            </dl>
+            <p v-if="dirtyFreeModels" class="ax-free__hint">{{ __('Save to see the models for this setting.') }}</p>
+          </div>
+        </section>
+
         <!-- One table: who may do what. Roles set the defaults, users the exceptions. -->
         <section v-if="columns.length" class="ax-card ax-card--table">
           <div class="ax-card__head">
@@ -255,6 +308,7 @@ export default {
       userFilter: '',
       aiEnabled: true,
       imageGeneration: { on: false, locked: false, unavailable: null },
+      freeModels: { on: false, training: false, locked: false, trainingLocked: false, unavailable: null, picks: {}, daily: null },
       access: this.emptyAccess(),
       original: '{}',
     };
@@ -301,6 +355,27 @@ export default {
       return this.imageGeneration.locked || !!this.imageGeneration.unavailable;
     },
 
+    freeModelsLocked() {
+      return this.freeModels.locked || !!this.freeModels.unavailable;
+    },
+
+    /** The switches differ from what the shown picks were computed for. */
+    dirtyFreeModels() {
+      return this.access.free_models !== this.freeModels.on || this.access.free_models_training !== this.freeModels.training;
+    },
+
+    freePickRows() {
+      const labels = {
+        agent: this.__('AI agent'),
+        light: this.__('Quick helper tasks'),
+        field: this.__('AI field buttons'),
+        translate: this.__('AI translations'),
+        vision: this.__('Image analysis'),
+        embedding: this.__('Semantic search'),
+      };
+      return Object.keys(labels).map((task) => ({ task, label: labels[task], model: this.freeModels.picks?.[task] || null }));
+    },
+
     dirty() {
       return JSON.stringify(this.access) !== this.original;
     },
@@ -319,6 +394,8 @@ export default {
         advanced_tools: { roles: [], users: [] },
         claude_restricted: false,
         image_generation: false,
+        free_models: false,
+        free_models_training: false,
         claude_none: { roles: [], users: [] },
         claude_read: { roles: [], users: [] },
         claude_edit: { roles: [], users: [] },
@@ -346,6 +423,8 @@ export default {
         advanced_tools: feat('advanced_tools'),
         claude_restricted: raw?.claude_restricted === true,
         image_generation: raw?.image_generation === true,
+        free_models: raw?.free_models === true,
+        free_models_training: raw?.free_models_training === true,
         claude_none: feat('claude_none'),
         claude_read: feat('claude_read'),
         claude_edit: feat('claude_edit'),
@@ -363,8 +442,14 @@ export default {
         this.ceiling = data.ceiling || 100;
         this.aiEnabled = data.aiEnabled !== false;
         this.imageGeneration = { on: false, locked: false, unavailable: null, ...(data.imageGeneration || {}) };
-        // The switch as it applies (config override included), not only as stored.
-        this.access = this.normalize({ ...(data.access || {}), image_generation: this.imageGeneration.on === true });
+        this.freeModels = { on: false, training: false, locked: false, trainingLocked: false, unavailable: null, picks: {}, daily: null, ...(data.freeModels || {}) };
+        // The switches as they apply (config overrides included), not only as stored.
+        this.access = this.normalize({
+          ...(data.access || {}),
+          image_generation: this.imageGeneration.on === true,
+          free_models: this.freeModels.on === true,
+          free_models_training: this.freeModels.training === true,
+        });
         this.original = JSON.stringify(this.access);
       } catch (e) {
         this.loadError =
@@ -481,6 +566,8 @@ export default {
         this.access = this.normalize(data.access || {});
         this.original = JSON.stringify(this.access);
         if (window.Statamic) Statamic.$toast.success(this.__('Access saved.'));
+        // Free mode changes the models, the image generation card and the picks.
+        await this.load();
       } catch (e) {
         const msg = (e && e.response && e.response.data && e.response.data.error) || this.__('Could not save access.');
         if (window.Statamic) Statamic.$toast.error(msg);
@@ -668,6 +755,47 @@ export default {
 .ax-mode__desc {
   font-size: 0.8rem;
   color: var(--tp-text-muted, #6b7280);
+}
+
+/* Free models: training opt-in, today's requests, the model per task */
+.ax-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  cursor: pointer;
+}
+
+.ax-check input {
+  margin-top: 0.2rem;
+}
+
+.ax-free {
+  margin-top: 0.9rem;
+  font-size: 0.8rem;
+}
+
+.ax-free__daily,
+.ax-free__hint {
+  margin: 0 0 0.6rem;
+  color: var(--tp-text-muted, #6b7280);
+}
+
+.ax-free__picks {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1rem;
+  margin: 0;
+}
+
+.ax-free__picks dt {
+  color: var(--tp-text-muted, #6b7280);
+}
+
+.ax-free__picks dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
 }
 
 /* Toolbar above the table */

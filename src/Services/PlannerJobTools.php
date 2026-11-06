@@ -104,7 +104,8 @@ final class PlannerJobTools
         }
 
         $question = isset($decoded['question']) && is_string($decoded['question']) ? trim($decoded['question']) : '';
-        $run->plan = ['steps' => array_slice($steps, 0, 12), 'question' => $question];
+        $label = isset($decoded['approve_label']) && is_string($decoded['approve_label']) ? trim($decoded['approve_label']) : '';
+        $run->plan = ['steps' => array_slice($steps, 0, 12), 'question' => $question, 'approve_label' => mb_substr($label, 0, 60)];
 
         return ['ok' => true];
     }
