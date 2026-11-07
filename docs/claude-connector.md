@@ -13,6 +13,10 @@ The site exposes `{APP_URL}/mcp` for the Claude app. Claude writes the text; the
 - `ClaudeTranslationBridge::setActor()` (stored on `ConnectorContext`) also calls `auth()->setUser()`, so Statamic policies, `updated_by`, git commit authors and Statamic's own actions (`DuplicateEntry`) see the signed-in account. `bin/mcp` (stdio) has no actor: it reads and translates, and every write that needs an account is refused.
 - Tool results are compact JSON; only the model reads them.
 
+## Service accounts
+
+With `mcp_service_tokens` on, `McpController` also accepts a bearer token from `ServiceTokens` (minted by `statamic-ai-assistant:service-token`, stored as a SHA-256 hash) and passes its user to `setActor($user, serviceAccount: true)`. The token acts as that user under every rule below. `TranslationMcpServer::SERVICE_TOOLS` (`write_site_instructions`, `set_style_rules`, `install_package`, in `SiteSetupTools` / `PackageTools`) are listed and callable only for such an actor and **deliberately skip preview/confirm**: a control plane has no person to show a preview to, the tools replace whole site-wide documents (idempotent, versioned YAML, committed as the service user), and keeping them away from OAuth actors leaves the Claude app's contract intact. `list_blocks` is read-only and offered to everyone. The HTTP contract for the control plane is in `docs/service-accounts.md`.
+
 ## Permissions
 
 Two layers. First, a super admin may give each role or user a Claude level on the **AI & Claude access** page (`Support/ClaudeAccess`): read ⊂ edit ⊂ publish. A role has one level (it sits in one `claude_<level>.roles` list); a user gets the highest level of their roles unless they are in a `claude_<level>.users` list, which wins even when lower (`claude_none` is a user-only “no access”). `TranslationMcpServer::TOOL_LEVELS` names the level each tool needs (unlisted tools need read; previews of a write need the write's level). `tools/list` hides what the account may not use and `tools/call` refuses it, so a grant revoked mid-session takes effect on the next call; sign-in needs read, and the upload link checks edit again on upload. The levels only apply while `claude_restricted` is on in `access.yaml`; it is off by default so an update locks nobody out. Super admins and the stdio server are never restricted. When adding a write tool, add it to `TOOL_LEVELS`.
@@ -29,11 +33,14 @@ Second, every tool follows Statamic's own policies for the actor, rechecked at s
 | list assets, review_images | `view` on the asset container (`view {container} assets`) |
 | preview/save asset alt text | `store` or `edit` on the asset (`upload {container} assets` is enough in most roles) |
 | image upload | `store` on the asset container (`upload {container} assets`), when the link is made and again on upload |
-| glossary, style rules | `GlossaryAccess` (`edit translation glossary` permission; super admins always) |
+| glossary, style rules (also `set_style_rules`) | `GlossaryAccess` (`edit translation glossary` permission; super admins always) |
+| `list_blocks` | none (blueprint structure and block hints only) |
+| `write_site_instructions` | the `agent_settings` grant (`AgentAccess`), as for the AI instructions page |
+| `install_package` | `configure collections` and `configure fields` |
 
 ## Writes: preview, then confirm
 
-Each write is two calls. The preview returns a `confirmation_token` (cached 30 minutes, bound to the actor's user id, carrying a fingerprint of the entry); the save needs that token plus `confirmed: true` and refuses with `entry_changed` if the fingerprint moved. Keep this shape for any new write tool.
+Each write is two calls. The preview returns a `confirmation_token` (cached 30 minutes, bound to the actor's user id, carrying a fingerprint of the entry); the save needs that token plus `confirmed: true` and refuses with `entry_changed` if the fingerprint moved. Keep this shape for any new write tool; only the service-only tools above are exempt.
 
 Edits, publishing and composing use a normal `save()` plus `updateLastModified($actor)`, so host listeners (sitemaps, git automation) run as for a Control Panel save. Translations save quietly and queue the commit through `ContentCommitter`.
 

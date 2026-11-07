@@ -71,6 +71,17 @@ A super admin can also limit what each person may do through Claude, separately 
 
 Translating follows the role the same way. Claude only lists and reads entries the account may view, and only saves a localization the account may edit, which includes access to the target site. The glossary and style rules can be read by everyone, and the **Glossary & style rules** page is shown even without a DeepL key or an AI token, since Claude follows them. Changing them, in Claude and on the Control Panel page, needs the role permission “Edit translation glossary and style rules” (Users → Roles, group “AI Assistant”); super admins always may.
 
+### Service accounts (control planes)
+
+A control plane that sets up and fills sites without a person in the chat (such as mateo) can call the same `/mcp` endpoint with a long-lived bearer token instead of the OAuth sign-in. It is off unless you set `STATAMIC_AI_ASSISTANT_MCP_SERVICE_TOKENS=true`; then mint a token for a Control Panel user:
+
+```bash
+php artisan statamic-ai-assistant:service-token mateo@instance.local --name=mateo   # prints the token once
+php artisan statamic-ai-assistant:service-token mateo@instance.local --name=mateo --revoke
+```
+
+The token acts as that user: same role, same Claude level, same Control Panel policies. Only its SHA-256 is stored (`STATAMIC_AI_ASSISTANT_MCP_SERVICE_TOKENS_PATH`, default `storage/app/statamic-ai-assistant/service-tokens.yaml`); minting the same name again rotates it. A service account additionally gets `write_site_instructions`, `set_style_rules` and `install_package`, which save without a preview; `list_blocks` (the block catalog with its hints) is available to everyone. While service tokens are on, the **AI instructions** page is shown even without an AI provider key, so the site instructions a control plane wrote are visible. `STATAMIC_AI_ASSISTANT_MATEO_CONTROL_PLANE_URL` is optional and not read yet. The request and response shapes are in `docs/service-accounts.md`.
+
 A developer can also run the same tools locally, without a public URL, from the Statamic site:
 
 ```bash
