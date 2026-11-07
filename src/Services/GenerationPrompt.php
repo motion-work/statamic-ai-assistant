@@ -248,7 +248,7 @@ final class GenerationPrompt
         }
 
         return "\n\nSITE INSTRUCTIONS (set by this site's editors — always follow them):\n"
-            .Str::limit($instructions, 4000);
+            .Str::limit($instructions, SetHintsService::SITE_INSTRUCTIONS_PROMPT_CHARS);
     }
 
     /**

@@ -47,7 +47,7 @@ Route::prefix('ai-block-hints')->name('statamic-ai-assistant.block-hints.')
     ->middleware('can:'.AgentAccess::gateAbility('agent_settings'))
     ->group(function () {
         Route::get('/', function () {
-            abort_unless(CpFeatures::aiEnabled(), 404);
+            abort_unless(CpFeatures::aiInstructionsEnabled(), 404);
 
             return view('statamic-ai-assistant::set-hints-settings');
         })->name('page');

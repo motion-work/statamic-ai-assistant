@@ -6,12 +6,14 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Controller;
 use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
+use MotionWork\StatamicAiAssistant\Mcp\ServiceTokens;
 use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 
 class McpController extends Controller
 {
     public function __construct(
         private McpOAuth $oauth,
+        private ServiceTokens $serviceTokens,
         private TranslationMcpServer $server,
     ) {}
 
@@ -25,7 +27,10 @@ class McpController extends Controller
             return response('', 405, ['Allow' => 'POST, DELETE']);
         }
 
-        $actor = $this->oauth->actor($request);
+        // A service token (only while mcp_service_tokens is on) acts as its
+        // user exactly like an OAuth sign-in, plus the service-only tools.
+        $serviceActor = $this->serviceTokens->actor($request);
+        $actor = $serviceActor ?? $this->oauth->actor($request);
         if ($actor === null) {
             return response(json_encode([
                 'error' => 'unauthorized',
@@ -37,7 +42,7 @@ class McpController extends Controller
             ]);
         }
 
-        $this->server->bridge()->setActor($actor);
+        $this->server->bridge()->setActor($actor, $serviceActor !== null);
 
         $payload = $request->json()->all();
         if (! is_array($payload) || ($payload['jsonrpc'] ?? null) !== '2.0') {

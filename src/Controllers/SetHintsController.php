@@ -57,7 +57,7 @@ class SetHintsController
             'field_hints.*.ai_description' => 'nullable|string|max:4000',
             'field_hints.*.when_to_use' => 'nullable|array',
             'field_hints.*.when_to_use.*' => 'nullable|string|max:500',
-            'site_instructions' => 'sometimes|nullable|string|max:8000',
+            'site_instructions' => 'sometimes|nullable|string|max:'.SetHintsService::SITE_INSTRUCTIONS_MAX_CHARS,
         ]);
 
         try {

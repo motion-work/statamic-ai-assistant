@@ -2,6 +2,7 @@
 
 namespace MotionWork\StatamicAiAssistant\Support;
 
+use MotionWork\StatamicAiAssistant\Mcp\ServiceTokens;
 use MotionWork\StatamicAiAssistant\Services\Ai\AiProviders;
 
 /**
@@ -18,6 +19,17 @@ class CpFeatures
     public static function aiEnabled(): bool
     {
         return AiProviders::hasCredentials();
+    }
+
+    /**
+     * The AI instructions page (site instructions, block and field hints):
+     * with an AI provider, or when service accounts are on, since a control
+     * plane writes the site instructions through the connector and editors
+     * should see them there even on a site without its own AI key.
+     */
+    public static function aiInstructionsEnabled(): bool
+    {
+        return self::aiEnabled() || ServiceTokens::enabled();
     }
 
     public static function deeplEnabled(): bool

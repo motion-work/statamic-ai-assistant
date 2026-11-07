@@ -4,9 +4,11 @@ namespace MotionWork\StatamicAiAssistant\Mcp;
 
 use MotionWork\StatamicAiAssistant\Semantic\SemanticSearch;
 use MotionWork\StatamicAiAssistant\Services\EntryTranslator;
+use MotionWork\StatamicAiAssistant\Services\SetHintsService;
 use MotionWork\StatamicAiAssistant\Services\TranslationGlossaryService;
 use MotionWork\StatamicAiAssistant\Services\TranslationStyleRulesService;
 use MotionWork\StatamicAiAssistant\Support\EntryLabel;
+use MotionWork\StatamicAiAssistant\Support\PackageInstallers;
 use MotionWork\StatamicAiAssistant\Support\SiteLanguageResolver;
 use Statamic\Contracts\Auth\User as UserContract;
 use Statamic\Facades\Entry as EntryFacade;
@@ -45,6 +47,10 @@ class ClaudeTranslationBridge
 
     public readonly GlossaryTools $glossary;
 
+    public readonly SiteSetupTools $setup;
+
+    public readonly PackageTools $packages;
+
     public function __construct(
         EntryTranslator $translator,
         SiteLanguageResolver $sites,
@@ -52,6 +58,8 @@ class ClaudeTranslationBridge
         TranslationStyleRulesService $styleRules,
         ContentCommitter $commits,
         ImageUploads $images,
+        SetHintsService $hints,
+        PackageInstallers $installers,
     ) {
         $this->context = new ConnectorContext;
         $this->localization = new LocalizationTools($this->context, $translator, $sites, $glossary, $styleRules, $commits);
@@ -67,20 +75,27 @@ class ClaudeTranslationBridge
         $this->compose = new ComposeTools($this->context);
         $this->composeSave = new ComposeSaver($this->context);
         $this->glossary = new GlossaryTools($this->context, $glossary, $styleRules, $commits);
+        $this->setup = new SiteSetupTools($this->context, $hints, $glossary, $styleRules, $commits);
+        $this->packages = new PackageTools($this->context, $installers, $commits);
     }
 
     /**
      * Also the request's logged-in user, so policies, updated_by, git commits
      * and Statamic's own actions see the account as in the Control Panel.
      */
-    public function setActor(?UserContract $user): void
+    public function setActor(?UserContract $user, bool $serviceAccount = false): void
     {
-        $this->context->setActor($user);
+        $this->context->setActor($user, $serviceAccount);
     }
 
     public function actor(): ?UserContract
     {
         return $this->context->actor();
+    }
+
+    public function isServiceAccount(): bool
+    {
+        return $this->context->isServiceAccount();
     }
 
     /**

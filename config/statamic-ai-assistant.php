@@ -118,6 +118,35 @@ return [
     'mcp_cache_store' => env('STATAMIC_AI_ASSISTANT_MCP_CACHE_STORE') ?: null,
 
     /*
+    | mcp_service_tokens: accept long-lived service-account bearer tokens at
+    | /mcp beside the OAuth sign-in, for a control plane (such as mateo) that
+    | calls the connector without a person. Off by default: every token is
+    | refused and /mcp works exactly as before. A token belongs to one Control
+    | Panel user and acts as that user (same role, same Claude level, same
+    | policies); it additionally sees the service-only tools
+    | (write_site_instructions, set_style_rules, install_package), which save
+    | without a preview. Mint one with
+    |   php artisan statamic-ai-assistant:service-token {email} --name=mateo
+    | See docs/service-accounts.md.
+    |
+    | mcp_service_tokens_path: where the token hashes are kept (never the
+    | tokens). Default storage/app/…, outside content/ so git automation does
+    | not commit them; a host whose storage/ does not survive deploys points
+    | it at a persistent path.
+    */
+
+    'mcp_service_tokens' => (bool) env('STATAMIC_AI_ASSISTANT_MCP_SERVICE_TOKENS', false),
+
+    'mcp_service_tokens_path' => env('STATAMIC_AI_ASSISTANT_MCP_SERVICE_TOKENS_PATH') ?: null,
+
+    /*
+    | mateo_control_plane_url: the mateo control plane that provisioned this
+    | site, so the site can report back later. Optional and not read yet.
+    */
+
+    'mateo_control_plane_url' => env('STATAMIC_AI_ASSISTANT_MATEO_CONTROL_PLANE_URL') ?: null,
+
+    /*
     |--------------------------------------------------------------------------
     | INFOMANIAK product id
     |--------------------------------------------------------------------------

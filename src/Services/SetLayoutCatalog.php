@@ -38,7 +38,7 @@ final class SetLayoutCatalog
             $entry = [
                 'type_handle' => (string) $setHandle,
                 'title' => $title,
-                'content_mix' => $this->describeSetContentMixForCatalog($setFields),
+                'content_mix' => $this->contentMix($setFields),
             ];
 
             $hint = $this->setHints->forSet((string) $setHandle);
@@ -62,7 +62,7 @@ final class SetLayoutCatalog
     /**
      * Short phrase describing dominant field kinds in a set (guides layout variety).
      */
-    private function describeSetContentMixForCatalog(Fields $setFields): string
+    public function contentMix(Fields $setFields): string
     {
         $tags = [];
 
@@ -86,7 +86,7 @@ final class SetLayoutCatalog
             } elseif (in_array($t, FieldTypes::RECURSIVE_TYPES, true)) {
                 $tags['nested'] = 'nested layout';
             } elseif ($t === 'group') {
-                $inner = $this->describeSetContentMixForCatalog($f->fieldtype()->fields());
+                $inner = $this->contentMix($f->fieldtype()->fields());
                 if ($inner !== '') {
                     $tags['group_'.$f->handle()] = $inner;
                 }

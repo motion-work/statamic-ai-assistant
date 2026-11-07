@@ -24,9 +24,12 @@ final class ConnectorContext
 
     private ?UserContract $actor = null;
 
-    public function setActor(?UserContract $user): void
+    private bool $serviceAccount = false;
+
+    public function setActor(?UserContract $user, bool $serviceAccount = false): void
     {
         $this->actor = $user;
+        $this->serviceAccount = $user !== null && $serviceAccount;
         if ($user !== null) {
             auth()->setUser($user);
         }
@@ -35,6 +38,15 @@ final class ConnectorContext
     public function actor(): ?UserContract
     {
         return $this->actor;
+    }
+
+    /**
+     * Whether the actor came in with a service token (a control plane, no
+     * person in the chat), not through the Claude app's OAuth sign-in.
+     */
+    public function isServiceAccount(): bool
+    {
+        return $this->serviceAccount;
     }
 
     /**

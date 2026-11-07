@@ -43,6 +43,12 @@ use Statamic\Fields\Fields;
  */
 class SetHintsService
 {
+    /** Longest site instructions the AI instructions page and the connector accept. */
+    public const SITE_INSTRUCTIONS_MAX_CHARS = 8000;
+
+    /** How much of them a prompt carries, so they cannot crowd out the field schema. */
+    public const SITE_INSTRUCTIONS_PROMPT_CHARS = 4000;
+
     public function storagePath(): string
     {
         return (new SetHintsFile)->storagePath();

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use MotionWork\StatamicAiAssistant\Actions\TranslateEntry;
 use MotionWork\StatamicAiAssistant\Console\EmbeddingsCommand;
+use MotionWork\StatamicAiAssistant\Console\ServiceTokenCommand;
 use MotionWork\StatamicAiAssistant\Controllers\PromptController;
 use MotionWork\StatamicAiAssistant\Events\AiCompletionFinished;
 use MotionWork\StatamicAiAssistant\Fieldtypes\AiText;
@@ -16,6 +17,7 @@ use MotionWork\StatamicAiAssistant\Mcp\ClaudeTranslationBridge;
 use MotionWork\StatamicAiAssistant\Mcp\ContentCommitter;
 use MotionWork\StatamicAiAssistant\Mcp\ImageUploads;
 use MotionWork\StatamicAiAssistant\Mcp\McpOAuth;
+use MotionWork\StatamicAiAssistant\Mcp\ServiceTokens;
 use MotionWork\StatamicAiAssistant\Mcp\TranslationMcpServer;
 use MotionWork\StatamicAiAssistant\Semantic\EmbeddingIndexer;
 use MotionWork\StatamicAiAssistant\Semantic\SemanticSearch;
@@ -49,6 +51,7 @@ use MotionWork\StatamicAiAssistant\Support\AgentAccess;
 use MotionWork\StatamicAiAssistant\Support\CpFeatures;
 use MotionWork\StatamicAiAssistant\Support\EntryCreationPolicy;
 use MotionWork\StatamicAiAssistant\Support\GlossaryAccess;
+use MotionWork\StatamicAiAssistant\Support\PackageInstallers;
 use MotionWork\StatamicAiAssistant\Support\PlanEntryDecorator;
 use MotionWork\StatamicAiAssistant\Support\WebSearch;
 use MotionWork\StatamicAiAssistant\Usage\RecordAiUsage;
@@ -93,6 +96,7 @@ class ServiceProvider extends AddonServiceProvider
 
     protected $commands = [
         EmbeddingsCommand::class,
+        ServiceTokenCommand::class,
     ];
 
     protected $viewNamespace = 'statamic-ai-assistant';
@@ -136,6 +140,9 @@ class ServiceProvider extends AddonServiceProvider
         McpOAuth::class,
         ImageUploads::class,
         ContentCommitter::class,
+        ServiceTokens::class,
+        // Content package installers (install_package); packages register into it.
+        PackageInstallers::class,
     ];
 
     public function register(): void
@@ -272,7 +279,7 @@ class ServiceProvider extends AddonServiceProvider
         if (config('statamic-ai-assistant.entry_generator', true)
             && config('statamic-ai-assistant.agent_settings_nav', true)) {
             Nav::extend(function ($nav) use ($section) {
-                if (! CpFeatures::aiEnabled()) {
+                if (! CpFeatures::aiInstructionsEnabled()) {
                     return;
                 }
 

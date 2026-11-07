@@ -39,7 +39,7 @@ final class AgenticPlannerPrompt
         $siteInstructions = (new SetHintsService)->siteInstructions();
         if ($siteInstructions !== '') {
             $system .= "\n\nSITE INSTRUCTIONS (set by this site's editors — always follow them):\n"
-                .Str::limit($siteInstructions, 4000);
+                .Str::limit($siteInstructions, SetHintsService::SITE_INSTRUCTIONS_PROMPT_CHARS);
         }
 
         if ($attachment) {

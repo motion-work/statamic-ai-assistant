@@ -30,8 +30,19 @@ class TranslationMcpServer
         'save_asset_alts' => 'edit',
         'save_glossary' => 'edit',
         'save_style_rules' => 'edit',
+        'write_site_instructions' => 'edit',
+        'set_style_rules' => 'edit',
+        'install_package' => 'edit',
         'set_published' => 'publish',
     ];
+
+    /**
+     * Tools only a service account (bearer service token, see ServiceTokens)
+     * is offered. They write site-wide settings without a preview, which is
+     * right for a control plane provisioning a site and wrong for a chat,
+     * where every write is shown to a person first.
+     */
+    private const SERVICE_TOOLS = ['write_site_instructions', 'set_style_rules', 'install_package'];
 
     public function __construct(private ClaudeTranslationBridge $bridge) {}
 
@@ -75,7 +86,7 @@ class TranslationMcpServer
                 'ping' => new \stdClass,
                 'tools/list' => ['tools' => array_values(array_filter(
                     $this->tools(),
-                    fn ($tool) => ClaudeAccess::allows($this->bridge->actor(), self::TOOL_LEVELS[$tool['name']] ?? 'read'),
+                    fn ($tool) => $this->offers($tool['name']) && ClaudeAccess::allows($this->bridge->actor(), self::TOOL_LEVELS[$tool['name']] ?? 'read'),
                 ))],
                 'tools/call' => $this->callTool($params),
                 default => null,
@@ -160,9 +171,11 @@ class TranslationMcpServer
         $name = (string) ($params['name'] ?? '');
         $level = self::TOOL_LEVELS[$name] ?? 'read';
 
-        $result = ClaudeAccess::allows($this->bridge->actor(), $level)
-            ? $this->runTool($name, new McpArguments(is_array($params['arguments'] ?? null) ? $params['arguments'] : []))
-            : ['error' => 'forbidden', 'message' => ClaudeAccess::denial($level).' Nothing was changed.'];
+        $result = match (true) {
+            ! $this->offers($name) => ['error' => 'service_account_only', 'message' => $name.' is only available to a service account (service token). Nothing was changed.'],
+            ! ClaudeAccess::allows($this->bridge->actor(), $level) => ['error' => 'forbidden', 'message' => ClaudeAccess::denial($level).' Nothing was changed.'],
+            default => $this->runTool($name, new McpArguments(is_array($params['arguments'] ?? null) ? $params['arguments'] : [])),
+        };
 
         if (isset($result['_content_blocks']) && is_array($result['_content_blocks'])) {
             return [
@@ -179,6 +192,11 @@ class TranslationMcpServer
             ]],
             'isError' => isset($result['error']),
         ];
+    }
+
+    private function offers(string $tool): bool
+    {
+        return ! in_array($tool, self::SERVICE_TOOLS, true) || $this->bridge->isServiceAccount();
     }
 
     /**
@@ -210,6 +228,10 @@ class TranslationMcpServer
         'save_glossary' => ['glossary', 'saveGlossary', ['list:entries', 'flag:confirmed']],
         'read_style_rules' => ['glossary', 'readStyleRules', []],
         'save_style_rules' => ['glossary', 'saveStyleRules', ['list:rules', 'flag:confirmed']],
+        'list_blocks' => ['setup', 'listBlocks', ['optional:collection', 'optional:blueprint']],
+        'write_site_instructions' => ['setup', 'writeSiteInstructions', ['string:markdown']],
+        'set_style_rules' => ['setup', 'setStyleRules', ['list:rules']],
+        'install_package' => ['packages', 'installPackage', ['string:key']],
     ];
 
     /**
@@ -449,6 +471,39 @@ class TranslationMcpServer
                     ],
                 ],
                 'required' => ['rules'],
+            ]),
+            $this->tool('list_blocks', 'List the content blocks (replicator/components sets) entries are built from: handle, title, the editor-written description and when-to-use rules, the kind of content each holds, and the collections, blueprints and fields that use it. Read-only. Use get_content_model to compose an entry.', [
+                'type' => 'object',
+                'properties' => [
+                    'collection' => ['type' => 'string', 'description' => 'Optional collection handle: only blocks its blueprints use.'],
+                    'blueprint' => ['type' => 'string', 'description' => 'Optional blueprint handle (with or without collection).'],
+                ],
+            ]),
+            $this->tool('write_site_instructions', 'Replace the site instructions (Markdown, at most 8000 characters) that the AI agent and get_content_model\'s brief follow, shown on the AI instructions page. An empty string removes them. Saves immediately (service accounts only).', [
+                'type' => 'object',
+                'properties' => [
+                    'markdown' => ['type' => 'string'],
+                ],
+                'required' => ['markdown'],
+            ]),
+            $this->tool('set_style_rules', 'Replace the style rules (tone, banned words) the AI agent, translations and get_content_model\'s brief follow. A list of strings applies to every site language; an object maps a language code (de, en, …) to its list, and languages left out lose their rules. Saves immediately (service accounts only). Does not push to DeepL.', [
+                'type' => 'object',
+                'properties' => [
+                    'rules' => [
+                        'oneOf' => [
+                            ['type' => 'array', 'items' => ['type' => 'string']],
+                            ['type' => 'object', 'additionalProperties' => ['type' => 'array', 'items' => ['type' => 'string']]],
+                        ],
+                    ],
+                ],
+                'required' => ['rules'],
+            ]),
+            $this->tool('install_package', 'Run the installer of a content package already required with Composer (its blueprints, collections, forms). Needs the configure collections and configure fields permissions. Service accounts only.', [
+                'type' => 'object',
+                'properties' => [
+                    'key' => ['type' => 'string', 'description' => 'Package key, such as showroom-retail.'],
+                ],
+                'required' => ['key'],
             ]),
         ];
     }
