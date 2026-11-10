@@ -44,6 +44,15 @@ class TranslationMcpServer
      */
     private const SERVICE_TOOLS = ['write_site_instructions', 'set_style_rules', 'install_package'];
 
+    /**
+     * Tools that need edit access but change nothing on the site, and write
+     * tools that only add. Both feed the hints in tools/list: ChatGPT asks
+     * the user to confirm every call to a tool not marked read-only.
+     */
+    private const NON_WRITING_TOOLS = ['preview_localization', 'preview_entry_edit', 'preview_compose_entry', 'preview_asset_alts', 'check_image_upload'];
+
+    private const ADDITIVE_TOOLS = ['duplicate_entry', 'prepare_image_upload'];
+
     public function __construct(private ClaudeTranslationBridge $bridge) {}
 
     public function bridge(): ClaudeTranslationBridge
@@ -518,7 +527,22 @@ class TranslationMcpServer
             'name' => $name,
             'description' => $description,
             'inputSchema' => $schema,
+            'annotations' => $this->annotations($name),
         ];
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function annotations(string $name): array
+    {
+        $readOnly = ! isset(self::TOOL_LEVELS[$name]) || in_array($name, self::NON_WRITING_TOOLS, true);
+        $hints = ['readOnlyHint' => $readOnly, 'openWorldHint' => false];
+        if (! $readOnly) {
+            $hints['destructiveHint'] = ! in_array($name, self::ADDITIVE_TOOLS, true);
+        }
+
+        return $hints;
     }
 
     /**

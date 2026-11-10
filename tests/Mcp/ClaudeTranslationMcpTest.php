@@ -57,6 +57,24 @@ class ClaudeTranslationMcpTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_tools_tell_the_client_which_ones_change_the_site(): void
+    {
+        $listed = $this->app->make(TranslationMcpServer::class)->dispatch([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/list',
+            'params' => [],
+        ]);
+        $hints = array_column($listed['result']['tools'], 'annotations', 'name');
+
+        $this->assertTrue($hints['read_entry']['readOnlyHint']);
+        $this->assertTrue($hints['preview_entry_edit']['readOnlyHint']);
+        $this->assertFalse($hints['save_entry_edit']['readOnlyHint']);
+        $this->assertTrue($hints['save_entry_edit']['destructiveHint']);
+        $this->assertFalse($hints['duplicate_entry']['destructiveHint']);
+        $this->assertArrayNotHasKey('destructiveHint', $hints['find_entries']);
+    }
+
     public function test_claude_saves_its_own_translation_as_a_localization_of_the_source(): void
     {
         $origin = Entry::make()
