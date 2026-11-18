@@ -15,6 +15,7 @@ return [
     |   unchanged.
     | - openrouter: one API for every model; the addon picks the model per
     |   task (see "OpenRouter" below).
+    | - mateo: mateo's AI gateway (sites built by mateo; see mateo_gateway_url).
     | - infomaniak: Swiss-hosted. Use it when a client needs prompts and
     |   content to stay in Switzerland.
     |
@@ -176,6 +177,15 @@ return [
     */
 
     'openrouter_api_key' => env('OPENROUTER_API_KEY'),
+
+    /*
+    | mateo's AI gateway (provider_name=mateo): sites built by mateo ask Claude
+    | through mateo, which meters every call per site and user. Set by mateo's
+    | site build; the token is the site's own.
+    */
+    'mateo_gateway_url' => env('MATEO_AI_GATEWAY_URL'),
+    'mateo_gateway_token' => env('MATEO_AI_GATEWAY_TOKEN'),
+    'mateo_http_timeout' => max(30, (int) env('MATEO_AI_GATEWAY_TIMEOUT', 300)),
     'infomaniak_api_token' => env('INFOMANIAK_API_TOKEN'),
 
     /*
