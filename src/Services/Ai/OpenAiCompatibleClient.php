@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Http;
  * Responses come back with `throw: false`, so the caller maps error statuses
  * to editor-readable messages. A connection failure still throws.
  */
-final class OpenAiCompatibleClient
+final class OpenAiCompatibleClient implements ChatCompletionsTransport
 {
     /**
      * @param  array<string, string>  $headers  Extra request headers (attribution etc.)

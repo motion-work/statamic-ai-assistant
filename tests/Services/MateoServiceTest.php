@@ -57,7 +57,7 @@ class MateoServiceTest extends TestCase
     public function test_a_call_names_its_task_and_its_user(): void
     {
         $this->answer();
-        $user = tap(User::make()->email('lea@bula.ch'))->save();
+        $user = tap(User::make()->email('editor@example.com'))->save();
         $this->actingAs($user);
         $service = new MateoService;
 
@@ -66,7 +66,7 @@ class MateoServiceTest extends TestCase
         $request = end($this->requests);
         $this->assertSame('https://mateoo.ch/api/sites/ai/v1/chat/completions', $request->url());
         $this->assertSame(['Bearer site-token'], $request->header('Authorization'));
-        $this->assertSame(['lea@bula.ch'], $request->header('X-Mateo-User'));
+        $this->assertSame(['editor@example.com'], $request->header('X-Mateo-User'));
         $this->assertSame('mateo-field', $request->data()['model']);
     }
 

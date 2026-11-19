@@ -16,12 +16,16 @@ return [
     | - openrouter: one API for every model; the addon picks the model per
     |   task (see "OpenRouter" below).
     | - mateo: mateo's AI gateway (sites built by mateo; see mateo_gateway_url).
+    | - claude-cli: local development only. Every text task runs through the
+    |   Claude Code CLI (`claude -p`) on the subscription it is signed in with,
+    |   so no API credits are spent (see "Claude CLI" below). Refused in
+    |   production; never picked by auto.
     | - infomaniak: Swiss-hosted. Use it when a client needs prompts and
     |   content to stay in Switzerland.
     |
     | Set the provider in your .env file using:
     | STATAMIC_AI_ASSISTANT_PROVIDER_NAME=auto
-    | or openrouter / infomaniak.
+    | or openrouter / infomaniak / mateo / claude-cli.
     |
     | Data residency with OpenRouter: requests go to https://openrouter.ai and
     | the chosen model's provider, wherever it runs. In-region routing (EU) is
@@ -186,6 +190,27 @@ return [
     'mateo_gateway_url' => env('MATEO_AI_GATEWAY_URL'),
     'mateo_gateway_token' => env('MATEO_AI_GATEWAY_TOKEN'),
     'mateo_http_timeout' => max(30, (int) env('MATEO_AI_GATEWAY_TIMEOUT', 300)),
+
+    /*
+    | Claude CLI (provider_name=claude-cli), for local development: the
+    | addon runs `claude -p` as the web server's user, so that user must be
+    | signed in to Claude Code (`claude` once in a terminal). The call gets no
+    | Claude Code tools, settings or MCP servers, and ANTHROPIC_API_KEY is
+    | removed from its environment, so it always runs on the subscription.
+    | Usage is logged with cost 0. Tool calls and JSON answers travel as
+    | instructions; a streamed answer arrives in one piece. Image generation,
+    | web search and semantic search stay OpenRouter-only.
+    |
+    | claude_cli_path: the binary; empty looks on PATH, ~/.local/bin,
+    | /opt/homebrew/bin and /usr/local/bin. claude_cli_model is used for the
+    | agent task, claude_cli_model_fast for every other task (aliases such as
+    | sonnet / haiku / opus, or a full model id).
+    */
+    'claude_cli_path' => env('STATAMIC_AI_ASSISTANT_CLAUDE_CLI_PATH', ''),
+    'claude_cli_model' => env('STATAMIC_AI_ASSISTANT_CLAUDE_CLI_MODEL', 'sonnet'),
+    'claude_cli_model_fast' => env('STATAMIC_AI_ASSISTANT_CLAUDE_CLI_MODEL_FAST', 'haiku'),
+    'claude_cli_effort' => env('STATAMIC_AI_ASSISTANT_CLAUDE_CLI_EFFORT', 'medium'),
+    'claude_cli_timeout' => max(30, (int) env('STATAMIC_AI_ASSISTANT_CLAUDE_CLI_TIMEOUT', 300)),
     'infomaniak_api_token' => env('INFOMANIAK_API_TOKEN'),
 
     /*

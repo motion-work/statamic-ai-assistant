@@ -26,7 +26,7 @@ abstract class OpenAiCompatibleService extends AbstractAiService
     /** Human name used in editor-facing messages ("OpenRouter"). */
     abstract protected function providerLabel(): string;
 
-    abstract protected function client(): OpenAiCompatibleClient;
+    abstract protected function client(): ChatCompletionsTransport;
 
     /**
      * Model fields for a call of $task: `model`, and provider-specific ones

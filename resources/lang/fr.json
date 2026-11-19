@@ -1039,5 +1039,6 @@
   "The AI budget for this month is used up.": "Le budget IA de ce mois est épuisé.",
   "mateo does not know this website. Check MATEO_AI_GATEWAY_TOKEN.": "mateo ne connaît pas ce site. Vérifiez MATEO_AI_GATEWAY_TOKEN.",
   "mateo request failed (:status): :hint": "La requête à mateo a échoué (:status) : :hint",
+  "Claude CLI request failed (:status): :hint": "La requête à la CLI Claude a échoué (:status) : :hint",
   "The AI returned no text.": "L’IA n’a renvoyé aucun texte."
 }

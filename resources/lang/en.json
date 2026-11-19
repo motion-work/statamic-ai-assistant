@@ -330,6 +330,7 @@
   "Entry generation failed. Please try again.": "Entry generation failed. Please try again.",
   "Field regeneration failed. Please try again.": "Field regeneration failed. Please try again.",
   "Infomaniak request failed (:status): :hint": "Infomaniak request failed (:status): :hint",
+  "Claude CLI request failed (:status): :hint": "Claude CLI request failed (:status): :hint",
   "The AI returned no text. Check your Infomaniak product ID, model name, and prompt size.": "The AI returned no text. Check your Infomaniak product ID, model name, and prompt size.",
   "Streaming is not supported for this AI provider.": "Streaming is not supported for this AI provider.",
   "Entry creation failed. Please try again.": "Entry creation failed. Please try again.",

@@ -93,6 +93,18 @@ The local server has no signed-in account and no role checks, so it can translat
 ## How to Use
 The provider is picked automatically (`STATAMIC_AI_ASSISTANT_PROVIDER_NAME=auto`, the default): **OpenRouter** once `OPENROUTER_API_KEY` is set, otherwise **Infomaniak**, the Swiss solution🇨🇭. Set `STATAMIC_AI_ASSISTANT_PROVIDER_NAME` to `openrouter` or `infomaniak` to choose one explicitly. Without the active provider's key, the AI features are hidden in the Control Panel.
 
+### Local development on the Claude CLI
+
+`STATAMIC_AI_ASSISTANT_PROVIDER_NAME=claude-cli` runs every text task through the [Claude Code](https://claude.com/claude-code) CLI (`claude -p`) on the subscription it is signed in with, so working on a site locally spends no API credits. **Off by default, never picked by `auto`, and refused when `APP_ENV=production`.**
+
+- The web server's user must be signed in to Claude Code (run `claude` once in a terminal). `ANTHROPIC_API_KEY` is removed from the CLI's environment, so calls always run on that sign-in. The CLI gets no Claude Code tools, settings, hooks or MCP servers.
+- Models: `STATAMIC_AI_ASSISTANT_CLAUDE_CLI_MODEL` for the agent (default `sonnet`, effort `STATAMIC_AI_ASSISTANT_CLAUDE_CLI_EFFORT`, default `medium`), `STATAMIC_AI_ASSISTANT_CLAUDE_CLI_MODEL_FAST` for every other task (default `haiku`, effort low). `STATAMIC_AI_ASSISTANT_CLAUDE_CLI_PATH` points at the binary when it is not on `PATH`, `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`; `STATAMIC_AI_ASSISTANT_CLAUDE_CLI_TIMEOUT` (default 300 s) limits one call.
+- What works: Ai Text and Bard buttons, translations without DeepL, alt text and image analysis, the AI agent with its tools, and the Claude connector (it does not call a model itself). The agent's tool calls and structured answers travel as JSON instructions, since the CLI cannot hand the addon's tools back as native tool calls. A streamed answer arrives in one piece. Each call takes a few seconds longer than over an API.
+- Not available: image generation, web search and semantic search (OpenRouter only).
+- The AI usage page logs every call with its tokens, provider `claude-cli` and cost 0.
+
+Sites built by mateo use `STATAMIC_AI_ASSISTANT_PROVIDER_NAME=mateo` and hold no AI key; there, mateo's gateway decides whether a call runs on the API or, on a developer's machine, on the Claude CLI. Nothing changes in the addon.
+
 ### OpenRouter
 
 [OpenRouter](https://openrouter.ai) is one API in front of every major model. The addon decides which model each task gets, falls back to the next model when one is down, and reports what every call cost.
