@@ -33,6 +33,11 @@ class ClaudeCliService extends OpenAiCompatibleService
         return new ClaudeCliClient;
     }
 
+    protected function requestNamesModels(): bool
+    {
+        return false;
+    }
+
     public function supportsVision(): bool
     {
         return true;

@@ -74,6 +74,15 @@ abstract class OpenAiCompatibleService extends AbstractAiService
         return null;
     }
 
+    /**
+     * Whether the request's `model` names a model, so a different answering model
+     * means a fallback answered. Not so where it names a task or an alias.
+     */
+    protected function requestNamesModels(): bool
+    {
+        return true;
+    }
+
     /** Hook run before AiCompletionFinished is dispatched (provider logging). */
     protected function completionFinished(AiCompletionFinished $event): void {}
 
@@ -325,6 +334,7 @@ abstract class OpenAiCompatibleService extends AbstractAiService
             streamed: $streamed,
             durationMs: (int) ((hrtime(true) - $started) / 1_000_000),
             context: $this->completionContext(),
+            namesModels: $this->requestNamesModels(),
         );
 
         $this->completionFinished($event);

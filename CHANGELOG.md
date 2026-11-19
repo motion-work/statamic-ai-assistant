@@ -10,6 +10,10 @@ All notable changes to **motion-work/statamic-ai-assistant** are documented here
 
 - **Groq provider (breaking):** `GroqService`, the `groq_api_key`, `groq_model` and `groq_http_timeout` config keys, and the `lucianotonet/groq-laravel` dependency are gone. A site still set to `STATAMIC_AI_ASSISTANT_PROVIDER_NAME=groq` falls back to `auto`: OpenRouter when `OPENROUTER_API_KEY` is set, otherwise Infomaniak; with neither key, the AI features are hidden. Groq's models are available through OpenRouter.
 
+### Fixed
+
+- **mateo provider:** the AI agent's queued calls now name their Control Panel user to mateo's gateway too (`X-Mateo-User`, taken from the user the job runs for), so the gateway meters them per user. Calls on the `mateo` and `claude-cli` providers are no longer logged as fallbacks on the AI usage page, since their requested "model" is a task name or alias.
+
 ### Added
 
 - **Claude CLI provider for local development:** `STATAMIC_AI_ASSISTANT_PROVIDER_NAME=claude-cli` runs every text task through the Claude Code CLI (`claude -p`) on the subscription it is signed in with, so local work spends no API credits. Off by default, never picked by `auto`, refused in production. The agent's tools and structured answers travel as JSON; a streamed answer arrives in one piece; usage is logged at cost 0. Image generation, web search and semantic search stay OpenRouter-only. New config `claude_cli_path`, `claude_cli_model`, `claude_cli_model_fast`, `claude_cli_effort`, `claude_cli_timeout` (`STATAMIC_AI_ASSISTANT_CLAUDE_CLI_*`). Sites on the `mateo` provider need nothing: mateo's gateway switches to the CLI on its side.

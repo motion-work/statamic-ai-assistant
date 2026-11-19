@@ -30,14 +30,32 @@ class MateoService extends OpenAiCompatibleService
 
     protected function client(): OpenAiCompatibleClient
     {
-        $user = User::current();
+        $user = $this->editorEmail();
 
         return new OpenAiCompatibleClient(
             rtrim((string) config('statamic-ai-assistant.mateo_gateway_url'), '/').'/chat/completions',
             (string) config('statamic-ai-assistant.mateo_gateway_token'),
             (int) config('statamic-ai-assistant.mateo_http_timeout', 300),
-            $user === null ? [] : ['X-Mateo-User' => (string) $user->email()],
+            $user === null ? [] : ['X-Mateo-User' => $user],
         );
+    }
+
+    /**
+     * The CP user's e-mail: the signed-in one, else (in a queued agent or
+     * translation job, where nobody is signed in) the user the job runs for.
+     */
+    private function editorEmail(): ?string
+    {
+        $userId = $this->completionContext()['user_id'] ?? null;
+        $user = User::current() ?? (is_string($userId) && $userId !== '' ? User::find($userId) : null);
+        $email = $user?->email();
+
+        return is_string($email) && $email !== '' ? $email : null;
+    }
+
+    protected function requestNamesModels(): bool
+    {
+        return false;
     }
 
     public function supportsVision(): bool

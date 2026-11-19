@@ -3,7 +3,9 @@
 namespace MotionWork\StatamicAiAssistant\Tests\Services;
 
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use MotionWork\StatamicAiAssistant\Events\AiCompletionFinished;
 use MotionWork\StatamicAiAssistant\Services\Ai\AiProviders;
 use MotionWork\StatamicAiAssistant\Services\Ai\AiTask;
 use MotionWork\StatamicAiAssistant\Services\MateoService;
@@ -68,6 +70,27 @@ class MateoServiceTest extends TestCase
         $this->assertSame(['Bearer site-token'], $request->header('Authorization'));
         $this->assertSame(['editor@example.com'], $request->header('X-Mateo-User'));
         $this->assertSame('mateo-field', $request->data()['model']);
+    }
+
+    public function test_a_queued_job_names_the_user_it_runs_for(): void
+    {
+        $this->answer();
+        $user = tap(User::make()->email('editor@example.com'))->save();
+        $service = new MateoService;
+
+        $service->withCompletionContext(['user_id' => $user->id()], fn () => $service->generateFromMessages([['role' => 'user', 'content' => 'Plane.']]));
+
+        $this->assertSame(['editor@example.com'], end($this->requests)->header('X-Mateo-User'));
+    }
+
+    public function test_the_gateway_model_is_not_logged_as_a_fallback(): void
+    {
+        $this->answer();
+        Event::fake([AiCompletionFinished::class]);
+
+        (new MateoService)->generateFromMessages([['role' => 'user', 'content' => 'Hallo']]);
+
+        Event::assertDispatched(AiCompletionFinished::class, fn (AiCompletionFinished $event): bool => $event->requestedModels === ['mateo-agent'] && ! $event->usedFallback());
     }
 
     public function test_a_used_up_budget_says_so(): void

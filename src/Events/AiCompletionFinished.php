@@ -25,6 +25,7 @@ final class AiCompletionFinished
      * @param  list<string>  $requestedModels  Models asked for, in fallback order.
      * @param  array<string, mixed>  $usage
      * @param  array<string, mixed>  $context
+     * @param  bool  $namesModels  False when the requested "model" is a task name or alias (mateo, claude-cli), not a model to compare the answering one with.
      */
     public function __construct(
         public readonly string $provider,
@@ -36,6 +37,7 @@ final class AiCompletionFinished
         public readonly bool $streamed,
         public readonly int $durationMs,
         public readonly array $context = [],
+        public readonly bool $namesModels = true,
     ) {}
 
     /** What the call cost in OpenRouter credits, when the provider reports it. */
@@ -53,7 +55,7 @@ final class AiCompletionFinished
      */
     public function usedFallback(): bool
     {
-        if ($this->model === null || $this->requestedModels === []) {
+        if (! $this->namesModels || $this->model === null || $this->requestedModels === []) {
             return false;
         }
 

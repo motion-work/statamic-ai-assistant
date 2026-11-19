@@ -160,6 +160,7 @@ class ClaudeCliServiceTest extends TestCase
         Event::assertDispatched(AiCompletionFinished::class, fn (AiCompletionFinished $event): bool => $event->provider === 'claude-cli'
             && $event->cost() === 0.0
             && $event->model === 'claude-haiku-5-5'
+            && ! $event->usedFallback()
             && ($event->usage['completion_tokens'] ?? null) === 5);
     }
 
