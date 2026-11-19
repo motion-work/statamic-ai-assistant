@@ -136,27 +136,39 @@ final class ClaudeCliRunner
         return null;
     }
 
-    /** @return array<string, string|false> */
+    /**
+     * PHP-FPM and `php artisan serve` may hand their workers no HOME and no USER: without
+     * HOME the CLI finds no config, without USER no sign-in in the macOS Keychain.
+     *
+     * @return array<string, string|false>
+     */
     private static function environment(): array
     {
+        $owner = function_exists('posix_getpwuid') && function_exists('posix_geteuid') ? (array) posix_getpwuid(posix_geteuid()) : [];
+
         return array_filter([
             'ANTHROPIC_API_KEY' => false,
             'CLAUDECODE' => false,
             'CLAUDE_CODE_ENTRYPOINT' => false,
-            // PHP-FPM may run without HOME; the CLI finds its sign-in there.
-            'HOME' => getenv('HOME') === false ? self::home() : null,
-        ], fn ($value) => $value !== null && $value !== '');
+            'HOME' => self::filled(getenv('HOME')) ? null : (string) ($owner['dir'] ?? ''),
+            'USER' => self::filled(getenv('USER')) ? null : (string) ($owner['name'] ?? ''),
+        ], fn ($value) => $value === false || (is_string($value) && $value !== ''));
     }
 
     private static function home(): string
     {
         $home = getenv('HOME');
 
-        if (is_string($home) && $home !== '') {
-            return $home;
+        if (self::filled($home)) {
+            return (string) $home;
         }
 
         return function_exists('posix_getpwuid') ? (string) (posix_getpwuid(posix_geteuid())['dir'] ?? '') : '';
+    }
+
+    private static function filled(mixed $value): bool
+    {
+        return is_string($value) && $value !== '';
     }
 
     /** @return array<string, mixed>|null the last `result` event of the CLI's stream */
